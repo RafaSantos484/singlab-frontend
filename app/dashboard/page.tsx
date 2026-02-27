@@ -1,9 +1,11 @@
 'use client';
 
+import { useState } from 'react';
+
+import { SongPlayer } from '@/components/features/SongPlayer';
 import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
 import { useGlobalState } from '@/lib/store';
 import { signOut } from '@/lib/firebase';
-import { useState } from 'react';
 
 export default function DashboardPage(): React.ReactElement | null {
   const isLoading = useAuthGuard('private');
@@ -109,12 +111,15 @@ export default function DashboardPage(): React.ReactElement | null {
               {songs.map((song) => (
                 <li
                   key={song.id}
-                  className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900 px-5 py-4"
+                  className="rounded-xl border border-zinc-800 bg-zinc-900 px-5 py-4"
                 >
-                  <div>
-                    <p className="font-medium">{song.title}</p>
-                    <p className="text-sm text-zinc-400">{song.author}</p>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">{song.title}</p>
+                      <p className="text-sm text-zinc-400">{song.author}</p>
+                    </div>
                   </div>
+                  <SongPlayer song={song} />
                 </li>
               ))}
             </ul>
