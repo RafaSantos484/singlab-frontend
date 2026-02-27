@@ -23,8 +23,8 @@ export default function RootPage(): React.ReactElement {
   }, [authStatus, router]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-950">
-      <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-600 border-t-white" />
+    <div className="flex min-h-screen items-center justify-center bg-brand-950">
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-500/40 border-t-brand-200" />
     </div>
   );
 }

@@ -1,8 +1,41 @@
 @import "tailwindcss";
 
+/* ==========================================================================
+   SingLab Design Tokens
+   Purple/blue futuristic audio analysis theme
+   ========================================================================== */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #050112;
+  --foreground: #ededed;
+
+  /* ── Brand palette (purple spectrum) ─────────────────────────────────── */
+  --color-brand-950: #050112;
+  --color-brand-900: #0a0520;
+  --color-brand-800: #0d0726;
+  --color-brand-700: #130a35;
+  --color-brand-600: #1a0f4a;
+  --color-brand-500: #2d1a6e;
+  --color-brand-400: #4c2aad;
+  --color-brand-300: #7c3aed;
+  --color-brand-200: #a855f7;
+  --color-brand-100: #c084fc;
+  --color-brand-50: #e9d5ff;
+
+  /* ── Accent palette (electric indigo/blue) ───────────────────────────── */
+  --color-accent-700: #312e81;
+  --color-accent-600: #3730a3;
+  --color-accent-500: #4f46e5;
+  --color-accent-400: #6366f1;
+  --color-accent-300: #818cf8;
+  --color-accent-200: #a5b4fc;
+  --color-accent-100: #c7d2fe;
+
+  /* ── Semantic ─────────────────────────────────────────────────────────── */
+  --color-surface: var(--color-brand-900);
+  --color-surface-raised: var(--color-brand-800);
+  --color-border: var(--color-brand-500);
+  --color-border-subtle: var(--color-brand-600);
 }
 
 @theme inline {
@@ -10,13 +43,28 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* Brand — available as bg-brand-*, text-brand-*, border-brand-*, etc. */
+  --color-brand-950: var(--color-brand-950);
+  --color-brand-900: var(--color-brand-900);
+  --color-brand-800: var(--color-brand-800);
+  --color-brand-700: var(--color-brand-700);
+  --color-brand-600: var(--color-brand-600);
+  --color-brand-500: var(--color-brand-500);
+  --color-brand-400: var(--color-brand-400);
+  --color-brand-300: var(--color-brand-300);
+  --color-brand-200: var(--color-brand-200);
+  --color-brand-100: var(--color-brand-100);
+  --color-brand-50:  var(--color-brand-50);
+
+  /* Accent — available as bg-accent-*, text-accent-*, border-accent-*, etc. */
+  --color-accent-700: var(--color-accent-700);
+  --color-accent-600: var(--color-accent-600);
+  --color-accent-500: var(--color-accent-500);
+  --color-accent-400: var(--color-accent-400);
+  --color-accent-300: var(--color-accent-300);
+  --color-accent-200: var(--color-accent-200);
+  --color-accent-100: var(--color-accent-100);
 }
 
 body {

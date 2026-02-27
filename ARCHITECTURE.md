@@ -135,8 +135,19 @@ call the REST API directly.
 
 ## Styling
 
-Tailwind CSS with the Next.js PostCSS integration. Design tokens (colors,
-spacing) are configured in `tailwind.config.ts`.
+Tailwind CSS v4 with the Next.js PostCSS integration. Tailwind v4 has no
+`tailwind.config.ts` — all configuration, including the `@theme` block and
+custom design tokens, lives in [`app/globals.css`](app/globals.css).
+
+### Design Token Palette
+
+Two token families are registered and available as Tailwind utility classes
+(`bg-brand-*`, `text-accent-*`, `border-brand-*`, etc.):
+
+| Family | Range | Purpose |
+|---|---|---|
+| `brand` | 950 → 50 | Purple spectrum — page backgrounds, card surfaces, borders, muted text |
+| `accent` | 700 → 100 | Electric indigo/blue — CTAs, focus rings, interactive highlights |
 
 ## Testing Strategy
 

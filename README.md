@@ -91,7 +91,6 @@ npm run type-check      # TypeScript check (no emit)
 ├── jest.config.ts
 ├── jest.setup.ts
 ├── next.config.ts
-├── tailwind.config.ts
 └── tsconfig.json
 ```
 
