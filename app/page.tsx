@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { Box, CircularProgress } from '@mui/material';
 import { useGlobalState } from '@/lib/store';
 
 /**
@@ -23,8 +24,16 @@ export default function RootPage(): React.ReactElement {
   }, [authStatus, router]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-brand-950">
-      <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-500/40 border-t-brand-200" />
-    </div>
+    <Box
+      sx={{
+        display: 'flex',
+        minHeight: '100vh',
+        alignItems: 'center',
+        justifyContent: 'center',
+        bgcolor: 'background.default',
+      }}
+    >
+      <CircularProgress size={32} />
+    </Box>
   );
 }
