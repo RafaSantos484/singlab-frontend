@@ -1,0 +1,109 @@
+import type {
+  AuthUser,
+  FirestoreUserData,
+  GlobalState,
+  Song,
+} from './types';
+
+// ---------------------------------------------------------------------------
+// Action definitions
+// ---------------------------------------------------------------------------
+
+export type GlobalStateAction =
+  /** Firebase Auth SDK is initialising (very first load) */
+  | { type: 'AUTH_LOADING' }
+  /** Firebase confirmed a signed-in user */
+  | { type: 'AUTH_AUTHENTICATED'; payload: AuthUser }
+  /** Firebase confirmed no signed-in user (or sign-out completed) */
+  | { type: 'AUTH_UNAUTHENTICATED' }
+  /** Firestore listener for /users/{uid} started */
+  | { type: 'USER_PROFILE_DATA_LOADING' }
+  /** Firestore /users/{uid} snapshot received — null when doc does not exist */
+  | { type: 'USER_PROFILE_DATA_READY'; payload: FirestoreUserData | null }
+  /** Firestore /users/{uid} listener encountered an error */
+  | { type: 'USER_PROFILE_DATA_ERROR' }
+  /** Firestore listener for /users/{uid}/songs started */
+  | { type: 'SONGS_LOADING' }
+  /** Firestore /users/{uid}/songs snapshot received */
+  | { type: 'SONGS_READY'; payload: Song[] }
+  /** Firestore /users/{uid}/songs listener encountered an error */
+  | { type: 'SONGS_ERROR' };
+
+// ---------------------------------------------------------------------------
+// Initial state
+// ---------------------------------------------------------------------------
+
+/**
+ * Starting state used both on first render and whenever the user signs out.
+ * Auth is set to `'loading'` so consumers can show a loading indicator
+ * until Firebase Auth emits its first event.
+ */
+export const initialState: GlobalState = {
+  authStatus: 'loading',
+  userProfile: null,
+  userProfileStatus: 'idle',
+  songs: [],
+  songsStatus: 'idle',
+};
+
+// ---------------------------------------------------------------------------
+// Reducer
+// ---------------------------------------------------------------------------
+
+/**
+ * Pure reducer for the application global state.
+ *
+ * **Reset behaviour**: both `AUTH_LOADING` and `AUTH_UNAUTHENTICATED` reset
+ * the entire state back to `initialState`. This ensures no stale profile or
+ * song data leaks across user sessions.
+ */
+export function globalStateReducer(
+  state: GlobalState,
+  action: GlobalStateAction,
+): GlobalState {
+  switch (action.type) {
+    case 'AUTH_LOADING':
+      return { ...initialState, authStatus: 'loading' };
+
+    case 'AUTH_AUTHENTICATED':
+      return {
+        ...state,
+        authStatus: 'authenticated',
+        userProfile: { auth: action.payload, data: null },
+      };
+
+    case 'AUTH_UNAUTHENTICATED':
+      return {
+        ...initialState,
+        authStatus: 'unauthenticated',
+      };
+
+    case 'USER_PROFILE_DATA_LOADING':
+      return { ...state, userProfileStatus: 'loading' };
+
+    case 'USER_PROFILE_DATA_READY':
+      return {
+        ...state,
+        userProfileStatus: 'ready',
+        // Preserve the auth slice, only update the Firestore data slice
+        userProfile: state.userProfile
+          ? { ...state.userProfile, data: action.payload }
+          : null,
+      };
+
+    case 'USER_PROFILE_DATA_ERROR':
+      return { ...state, userProfileStatus: 'error' };
+
+    case 'SONGS_LOADING':
+      return { ...state, songsStatus: 'loading' };
+
+    case 'SONGS_READY':
+      return { ...state, songsStatus: 'ready', songs: action.payload };
+
+    case 'SONGS_ERROR':
+      return { ...state, songsStatus: 'error' };
+
+    default:
+      return state;
+  }
+}

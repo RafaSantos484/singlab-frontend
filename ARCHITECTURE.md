@@ -11,10 +11,10 @@
 │  │                                                             │ │
 │  │  Pages & Layouts         Components         Lib (utils)     │ │
 │  │  ─────────────────       ──────────────      ──────────     │ │
-│  │  app/layout.tsx          ui/Button           api/songs      │ │
-│  │  app/page.tsx            ui/AudioPlayer      firebase/auth  │ │
-│  │  app/(routes)/           features/Submit     hooks/useJob   │ │
-│  │                          features/Library                    │ │
+│  │  app/layout.tsx          features/SongPlayer api/songs      │ │
+│  │  app/page.tsx            ui/…                firebase/auth  │ │
+│  │  app/login/              …                   hooks/useAuth  │ │
+│  │  app/dashboard/                              hooks/useSong  │ │
 │  └──────────────┬──────────────────────────────────────────────┘ │
 └─────────────────│─────────────────────────────────────────────────┘
                   │  HTTP (REST)
@@ -24,8 +24,8 @@
 │                                                                   │
 │  POST /songs/upload     ← Submit audio file                      │
 │  GET  /songs            ← List user songs                        │
-│  GET  /songs/:id        ← Get song details + tracks              │
-│  GET  /songs/:id/status ← Poll job status                        │
+│  GET  /songs/:id        ← Get song details                        │
+│  GET  /songs/:id/raw/url ← Get (and refresh) signed audio URL    │
 └──────────────────────────────────┬────────────────────────────────┘
                                    │
                     ┌──────────────┼──────────────┐
@@ -49,18 +49,18 @@ conventions with server and client components as appropriate.
 | Route | Purpose |
 |---|---|
 | `/` | Landing / home |
-| `/library` | User's song library |
-| `/upload` | Submit a new song (file or link) |
-| `/songs/[id]` | Song detail + karaoke player |
+| `/login` | Firebase authentication page |
+| `/dashboard` | User's song library with inline audio player |
 
 ### 2. Components
 
 Components are split into two groups:
 
-- **`components/ui/`** — Primitive, stateless components (Button, Input,
-  AudioPlayer, Badge, etc.)
+- **`components/ui/`** — Primitive, stateless components (Button, Input, etc.)
 - **`components/features/`** — Feature-specific composite components that
-  contain business logic (SongCard, UploadForm, JobStatusBanner, etc.)
+  contain business logic.
+  - `SongPlayer` — inline `<audio>` player; delegates signed URL management to
+    `useSongRawUrl`.
 
 ### 3. Lib
 
@@ -70,8 +70,9 @@ Shared utilities used across the app:
 |---|---|
 | `lib/api/` | Typed HTTP client wrapping `singlab-api` endpoints |
 | `lib/firebase/` | Firebase app initialization (singleton) and auth helpers |
-| `lib/hooks/` | Custom React hooks (useJobStatus, useAudioPlayer, etc.) |
-| `lib/types/` | Shared TypeScript types and interfaces |
+| `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`) |
+| `lib/store/` | Global state — `GlobalStateProvider` (React Context + useReducer) |
+| `lib/env.ts` | Typed, validated environment variable access |
 
 ## Authentication Flow
 
@@ -120,9 +121,17 @@ The app uses React built-ins (useState, useContext, useReducer) to keep the
 bundle small. No external state management library is added until complexity
 requires it.
 
-Global state candidates:
-- Auth state: React Context (wrapping Firebase auth)
-- Song library: React Query / SWR (data fetching + caching, planned)
+Global state is managed by `GlobalStateProvider` (`lib/store/`) using React
+`useReducer` + Context. It subscribes to two Firestore real-time listeners
+while a user is authenticated:
+
+- `/users/{uid}` — user profile data
+- `/users/{uid}/songs` — user's song library (always up-to-date via
+  `onSnapshot`)
+
+Server-side interactions that are not covered by real-time listeners (e.g.
+refreshing a signed URL) are handled by dedicated hooks (`useSongRawUrl`) that
+call the REST API directly.
 
 ## Styling
 
