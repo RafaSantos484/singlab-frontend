@@ -19,6 +19,7 @@
 import { getCurrentUserIdToken } from '@/lib/firebase/auth';
 import { ApiClient } from './client';
 import { SongsApi } from './songs';
+import { UsersApi } from './users';
 
 // ---------------------------------------------------------------------------
 // Shared client instance
@@ -32,6 +33,9 @@ const apiClient = new ApiClient(getCurrentUserIdToken);
 
 export const songsApi = new SongsApi(apiClient);
 
+/** Public API instance — user creation does not require authentication. */
+export const usersApi = new UsersApi();
+
 // ---------------------------------------------------------------------------
 // Re-exports for consumers
 // ---------------------------------------------------------------------------
@@ -42,6 +46,8 @@ export type { TokenProvider } from './client';
 export { SongsApi } from './songs';
 export type { UploadSongInput, SongList } from './songs';
 
+export { UsersApi } from './users';
+
 export { ApiError } from './types';
 export type {
   Song,
@@ -49,6 +55,8 @@ export type {
   UploadSongResult,
   RawSongInfo,
   RawSongUrlInfo,
+  CreateUserInput,
+  CreateUserResult,
   ApiSuccessResponse,
   ApiListSuccessResponse,
   ApiMessageSuccessResponse,
