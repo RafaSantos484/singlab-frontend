@@ -34,6 +34,5 @@ export type {
   LoadStatus,
   AuthUser,
   UserProfile,
-  FirestoreUserData,
   Song,
 } from './types';

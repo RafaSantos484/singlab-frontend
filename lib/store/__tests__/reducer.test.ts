@@ -3,7 +3,7 @@ import {
   initialState,
   type GlobalStateAction,
 } from '../reducer';
-import type { AuthUser, FirestoreUserData, Song } from '../types';
+import type { AuthUser, Song } from '../types';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -15,10 +15,6 @@ const mockUser: AuthUser = {
   displayName: 'Test User',
   photoURL: null,
   emailVerified: true,
-};
-
-const mockProfileData: FirestoreUserData = {
-  createdAt: '2024-01-01T00:00:00.000Z',
 };
 
 const mockSongs: Song[] = [
@@ -46,7 +42,6 @@ describe('globalStateReducer', () => {
   it('returns initialState values', () => {
     expect(initialState.authStatus).toBe('loading');
     expect(initialState.userProfile).toBeNull();
-    expect(initialState.userProfileStatus).toBe('idle');
     expect(initialState.songs).toEqual([]);
     expect(initialState.songsStatus).toBe('idle');
   });
@@ -57,7 +52,7 @@ describe('globalStateReducer', () => {
     const stateWithData = {
       ...initialState,
       authStatus: 'authenticated' as const,
-      userProfile: { auth: mockUser, data: mockProfileData },
+      userProfile: mockUser,
       songs: mockSongs,
       songsStatus: 'ready' as const,
     };
@@ -77,7 +72,7 @@ describe('globalStateReducer', () => {
     const next = globalStateReducer(initialState, action);
 
     expect(next.authStatus).toBe('authenticated');
-    expect(next.userProfile).toEqual({ auth: mockUser, data: null });
+    expect(next.userProfile).toEqual(mockUser);
   });
 
   // --- AUTH_UNAUTHENTICATED -------------------------------------------------
@@ -86,7 +81,7 @@ describe('globalStateReducer', () => {
     const stateWithData = {
       ...initialState,
       authStatus: 'authenticated' as const,
-      userProfile: { auth: mockUser, data: mockProfileData },
+      userProfile: mockUser,
       songs: mockSongs,
     };
 
@@ -95,55 +90,6 @@ describe('globalStateReducer', () => {
     });
 
     expect(next).toEqual({ ...initialState, authStatus: 'unauthenticated' });
-  });
-
-  // --- USER_PROFILE_DATA_LOADING --------------------------------------------
-
-  it('handles USER_PROFILE_DATA_LOADING: sets userProfileStatus to loading', () => {
-    const next = globalStateReducer(initialState, {
-      type: 'USER_PROFILE_DATA_LOADING',
-    });
-    expect(next.userProfileStatus).toBe('loading');
-  });
-
-  // --- USER_PROFILE_DATA_READY ----------------------------------------------
-
-  it('handles USER_PROFILE_DATA_READY: updates userProfile data when profile exists', () => {
-    const withAuth = {
-      ...initialState,
-      authStatus: 'authenticated' as const,
-      userProfile: { auth: mockUser, data: null },
-    };
-
-    const action: GlobalStateAction = {
-      type: 'USER_PROFILE_DATA_READY',
-      payload: mockProfileData,
-    };
-    const next = globalStateReducer(withAuth, action);
-
-    expect(next.userProfileStatus).toBe('ready');
-    expect(next.userProfile?.data).toEqual(mockProfileData);
-    expect(next.userProfile?.auth).toEqual(mockUser);
-  });
-
-  it('handles USER_PROFILE_DATA_READY: keeps userProfile null when no auth', () => {
-    const action: GlobalStateAction = {
-      type: 'USER_PROFILE_DATA_READY',
-      payload: null,
-    };
-    const next = globalStateReducer(initialState, action);
-
-    expect(next.userProfileStatus).toBe('ready');
-    expect(next.userProfile).toBeNull();
-  });
-
-  // --- USER_PROFILE_DATA_ERROR ----------------------------------------------
-
-  it('handles USER_PROFILE_DATA_ERROR: sets userProfileStatus to error', () => {
-    const next = globalStateReducer(initialState, {
-      type: 'USER_PROFILE_DATA_ERROR',
-    });
-    expect(next.userProfileStatus).toBe('error');
   });
 
   // --- SONGS_LOADING --------------------------------------------------------
