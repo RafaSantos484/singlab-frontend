@@ -1,0 +1,67 @@
+name: Branch Validation
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  statuses: write
+  pull-requests: read
+
+jobs:
+  check-source-branch-default:
+    if: github.base_ref == 'main' || github.base_ref == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate PR source branch for production branch
+        run: |
+          set -euo pipefail
+          HEAD="${{ github.head_ref }}"
+          BASE="${{ github.base_ref }}"
+
+          if [[ "$HEAD" != "develop" && ! "$HEAD" =~ ^hotfix/ ]]; then
+            echo "::error::Only PRs from 'develop' or 'hotfix/*' branches can be merged into $BASE"
+            echo "Your branch: $HEAD"
+            echo "Allowed branches:"
+            echo "  - develop"
+            echo "  - hotfix/*"
+            exit 1
+          fi
+
+          echo "::notice::✓ Branch '$HEAD' is allowed to merge into $BASE"
+
+  check-source-branch-develop:
+    if: github.base_ref == 'develop'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate PR source branch for develop
+        run: |
+          set -euo pipefail
+          HEAD="${{ github.head_ref }}"
+
+          # Allow back-merges from production branches
+          if [[ "$HEAD" == "main" || "$HEAD" == "master" ]]; then
+            echo "::notice::✓ Back-merge: '$HEAD' -> 'develop' allowed"
+            exit 0
+          fi
+
+          if [[ ! "$HEAD" =~ ^(feat|feature|fix|chore|refactor|style|ci|test|docs|hotfix)/ ]]; then
+            echo "::error::Invalid branch type for 'develop'"
+            echo "Your branch: $HEAD"
+            echo "Allowed branch types:"
+            echo "  - main / master (back-merge)"
+            echo "  - feat/* / feature/*"
+            echo "  - fix/*"
+            echo "  - chore/*"
+            echo "  - refactor/*"
+            echo "  - style/*"
+            echo "  - ci/*"
+            echo "  - test/*"
+            echo "  - docs/*"
+            echo "  - hotfix/*"
+            exit 1
+          fi
+
+          echo "::notice::✓ Branch '$HEAD' follows naming conventions"

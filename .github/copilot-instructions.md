@@ -1,0 +1,178 @@
+---
+applyTo: "**"
+---
+# GitHub Copilot Instructions
+
+## 🔥 Critical Rules (MUST ALWAYS FOLLOW)
+
+1. **TypeScript strict mode** — Always enabled, never use `any`
+2. **Functional components only** — No class components
+3. **English only** — All code, comments, docs, commits must be in English
+4. **No commit scopes** — Use `feat:`, `fix:`, `chore:` only (no parentheses)
+5. **Explicit commit control** — Only commit when explicitly instructed in current message
+6. **Return types** — Always specify return types on exported functions and hooks
+7. **Environment variables** — Use `NEXT_PUBLIC_` prefix for client-side vars; never access `process.env` directly — use a typed `env.ts` helper
+8. **Atomic commits** — Prefer multiple small commits over single large commits
+9. **Documentation sync** — Update related docs when modifying code
+
+## Project Context
+
+**SingLab Frontend**: Next.js + React + TypeScript frontend for a karaoke and
+singing practice app. The corresponding backend is `singlab-api` (NestJS +
+Firebase Functions).
+
+**Stack**: Next.js 16, React 19, TypeScript 5, Tailwind CSS 4, Jest + React
+Testing Library, Firebase Auth (client SDK), ESLint + Prettier
+
+**Key Concepts**:
+- Users upload audio (file or URL) → backend processes it asynchronously
+- Frontend polls job status until AI processing completes
+- Three tracks become available: original, vocal-only, instrumental
+- Karaoke player lets users practice singing over the instrumental
+
+**Key Paths**:
+- Pages/layouts: `app/` (Next.js App Router)
+- Reusable components: `components/`
+- Shared utils, API client, hooks: `lib/`
+- Tests: co-located `__tests__/` folders or `*.spec.tsx` siblings
+
+**Related Repo**: `singlab-api` — NestJS backend; authentication uses Firebase
+ID tokens passed as `Authorization: Bearer <token>` headers.
+
+## Code Style Rules
+
+### TypeScript
+- Strict mode always enabled
+- Explicit types, never `any`
+- Use interfaces for props and public APIs
+- Use enums for fixed value sets
+- Leverage generics for type-safe reusable utilities
+
+### React / Next.js Patterns
+- Functional components with typed props interface
+- Prefer Server Components; add `'use client'` only when needed
+  (event handlers, hooks, browser APIs)
+- Co-locate component tests in `__tests__/` subfolder
+- Extract reusable logic into custom hooks (`lib/hooks/`)
+- Keep components small and single-responsibility
+
+### Naming Conventions
+- Components: `PascalCase.tsx`
+- Hooks: `use*.ts` (e.g., `useJobStatus.ts`)
+- Utilities: `camelCase.ts`
+- Tests: `ComponentName.spec.tsx` or `__tests__/ComponentName.test.tsx`
+- Route segments: `kebab-case/` (Next.js convention)
+
+### Formatting (Prettier + ESLint)
+- Line width: 80 chars
+- Indentation: 2 spaces
+- Single quotes
+- Semicolons required
+- Trailing commas: ES5 style
+
+### Documentation
+- JSDoc for exported functions, hooks, and complex utilities
+- Document props interfaces with comments
+- Keep comments concise and in English
+
+### Language Policy
+- **All code, comments, docs, and commits MUST be in English**
+- Exception: Only if explicitly requested in current message
+
+## Development Guidelines
+
+### Environment Configuration
+- Client-side env vars must be prefixed with `NEXT_PUBLIC_`
+- Create a typed `lib/env.ts` module that validates and exports env vars
+- Development: `.env.local` (not committed)
+- Production: set vars via Vercel dashboard or CI secrets
+- Never hard-code credentials or secrets
+
+### Firebase Authentication
+- Initialize Firebase client once in `lib/firebase/app.ts` (singleton)
+- Auth context provides `currentUser` and `idToken` across the app
+- Pass `idToken` as `Authorization: Bearer <token>` to `singlab-api`
+
+### API Client
+- Centralize all API calls in `lib/api/`
+- Use typed response interfaces matching `singlab-api` DTOs
+- Handle loading, error, and success states explicitly
+
+### State Management
+- Prefer React built-ins (useState, useContext, useReducer)
+- Use a data-fetching library (React Query / SWR) for server state
+
+## Testing Patterns
+
+### Unit Tests (`.spec.tsx` / `.test.tsx`)
+- Test single component or function in isolation
+- Mock external dependencies (API calls, Firebase, router)
+- Use Jest + React Testing Library
+
+### Test Structure Template
+```tsx
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MyComponent } from '../MyComponent';
+
+describe('MyComponent', () => {
+  it('renders correctly', () => {
+    render(<MyComponent label="Test" />);
+    expect(screen.getByText('Test')).toBeInTheDocument();
+  });
+
+  it('calls onClick when button is clicked', async () => {
+    const user = userEvent.setup();
+    const handleClick = jest.fn();
+    render(<MyComponent label="Test" onClick={handleClick} />);
+    await user.click(screen.getByRole('button'));
+    expect(handleClick).toHaveBeenCalledTimes(1);
+  });
+});
+```
+
+### Running Tests
+- `npm test` — Run all tests
+- `npm run test:watch` — Watch mode
+- `npm run test:coverage` — Coverage report
+
+## Git Workflow & Commits
+
+### ⚠️ Critical: When to Commit
+
+**Only commit if the current chat message explicitly instructs you to do so.**
+Previous messages asking to commit do NOT apply to the current message.
+
+### Analyzing Changes Before Committing
+
+Always review changes before committing:
+
+```bash
+git status
+git diff
+git diff --staged
+```
+
+### Commit Strategy
+
+Prefer smaller, atomic commits. Each commit = one logical unit of work.
+
+**Example strategy** for a new feature:
+```bash
+git add lib/api/songs.ts
+git commit -m "feat: add typed songs API client"
+
+git add components/features/SongCard.tsx
+git commit -m "feat: add SongCard component"
+
+git add __tests__/SongCard.spec.tsx
+git commit -m "test: add SongCard unit tests"
+
+git add docs/
+git commit -m "docs: document SongCard props"
+```
+
+### Pull Request Guidelines
+- Target `develop` for features, `master`/`main` for hotfixes
+- PR title must follow Conventional Commits format
+- Reference issues when applicable (`Closes #42`)

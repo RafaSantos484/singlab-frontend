@@ -1,36 +1,123 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SingLab Frontend
 
-## Getting Started
+SingLab is a web application focused on karaoke and singing practice. This
+repository contains the frontend, built with Next.js, React, and TypeScript.
 
-First, run the development server:
+The app allows users to submit audio (uploaded files or approved links), track
+the AI processing pipeline (vocal separation + lyrics transcription), and play
+back the original, vocal-only, and instrumental tracks for karaoke practice.
+
+## Features
+
+- Next.js 16 with App Router and TypeScript
+- Firebase Authentication for user sign-in
+- Song submission (file upload or approved link)
+- Async job tracking for AI processing pipeline
+- Karaoke playback with vocal / instrumental stem toggle
+- Lyrics display synchronized with playback (planned)
+- Tailwind CSS for styling
+- Jest + React Testing Library for unit tests
+
+## Related Repositories
+
+| Repository | Description |
+|---|---|
+| [`singlab-api`](https://github.com/your-org/singlab-api) | NestJS + Firebase Functions backend |
+
+## Prerequisites
+
+- Node.js 18+
+- npm
+- Firebase project (same project used by `singlab-api`)
+
+## Quick Start
+
+See [QUICKSTART.md](QUICKSTART.md) for step-by-step setup instructions.
 
 ```bash
+cp .env.local.example .env.local
+# fill in environment variables
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Local app: http://localhost:3000
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Development
 
-## Learn More
+```bash
+npm run dev         # Start development server
+npm run build       # Production build
+npm run start       # Start production server
+```
 
-To learn more about Next.js, take a look at the following resources:
+### Testing
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm test                # Run all tests
+npm run test:watch      # Watch mode
+npm run test:coverage   # Coverage report
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Code Quality
 
-## Deploy on Vercel
+```bash
+npm run lint            # ESLint
+npm run format          # Prettier
+npm run type-check      # TypeScript check (no emit)
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Project Structure
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+.
+├── app/                    # Next.js App Router pages and layouts
+│   ├── layout.tsx
+│   ├── page.tsx
+│   └── (routes)/
+├── components/             # Reusable UI components (planned)
+│   ├── ui/                 # Primitive components
+│   └── features/           # Feature-specific components
+├── lib/                    # Shared utilities, hooks, API clients (planned)
+│   ├── api/                # API client for singlab-api
+│   ├── firebase/           # Firebase client initialization
+│   └── hooks/              # Custom React hooks
+├── public/                 # Static assets
+├── .env.local              # Local environment variables (not committed)
+├── .env.local.example      # Template for local env vars
+├── .env.production.example # Template for production env vars
+├── jest.config.ts
+├── jest.setup.ts
+├── next.config.ts
+├── tailwind.config.ts
+└── tsconfig.json
+```
+
+## Processing Pipeline (Backend)
+
+The frontend drives the following pipeline orchestrated by `singlab-api`:
+
+1. User submits audio (file upload or approved link).
+2. API normalizes audio with FFmpeg.
+3. AI service separates vocals from instrumental.
+4. AI service transcribes lyrics from the vocal stem.
+5. Three tracks are stored: original, vocal-only, instrumental.
+6. Frontend polls job status and unlocks playback on completion.
+
+## Environment Variables
+
+| Variable | Description |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | Base URL of the `singlab-api` backend |
+| `NEXT_PUBLIC_FIREBASE_API_KEY` | Firebase client API key |
+| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | Firebase auth domain |
+| `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | Firebase project ID |
+| `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` | Firebase storage bucket |
+| `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID` | Firebase messaging sender ID |
+| `NEXT_PUBLIC_FIREBASE_APP_ID` | Firebase app ID |
+
+## License
+
+MIT
