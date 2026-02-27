@@ -1,4 +1,9 @@
-import { getAuth, type Auth } from 'firebase/auth';
+import {
+  getAuth,
+  signInWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  type Auth,
+} from 'firebase/auth';
 import { getFirebaseApp } from './app';
 
 /**
@@ -24,4 +29,23 @@ export async function getCurrentUserIdToken(
   }
 
   return currentUser.getIdToken(forceRefresh);
+}
+
+/**
+ * Signs in the user with email and password.
+ *
+ * @throws {FirebaseError} On invalid credentials or other auth errors.
+ */
+export async function signIn(
+  email: string,
+  password: string,
+): Promise<void> {
+  await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
+}
+
+/**
+ * Signs out the currently authenticated user.
+ */
+export async function signOut(): Promise<void> {
+  await firebaseSignOut(getFirebaseAuth());
 }
