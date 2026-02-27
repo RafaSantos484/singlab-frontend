@@ -1,131 +1,265 @@
 'use client';
 
 import { useState } from 'react';
+import {
+  Box,
+  Typography,
+  Card,
+  CardContent,
+  Alert,
+  CircularProgress,
+  Fab,
+  Stack,
+} from '@mui/material';
+import AddIcon from '@mui/icons-material/Add';
 
 import { SongPlayer } from '@/components/features/SongPlayer';
+import { SongCreateDialog } from '@/components/features/SongCreateDialog';
 import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
 import { useGlobalState } from '@/lib/store';
-import { signOut } from '@/lib/firebase';
+import { DashboardLayout } from '@/components/layout';
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
 
 export default function DashboardPage(): React.ReactElement | null {
   const isLoading = useAuthGuard('private');
   const { userProfile, songs, songsStatus } = useGlobalState();
-  const [signingOut, setSigningOut] = useState(false);
-
-  async function handleSignOut(): Promise<void> {
-    setSigningOut(true);
-    try {
-      await signOut();
-    } finally {
-      setSigningOut(false);
-    }
-  }
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-950">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-600 border-t-white" />
-      </div>
+      <Box
+        sx={{
+          display: 'flex',
+          minHeight: '100vh',
+          alignItems: 'center',
+          justifyContent: 'center',
+          bgcolor: 'background.default',
+        }}
+      >
+        <CircularProgress size={32} />
+      </Box>
     );
   }
 
   const user = userProfile;
+  const displayName = user?.displayName ?? user?.email ?? 'User';
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white">
-      {/* Top bar */}
-      <header className="border-b border-zinc-800 px-6 py-4">
-        <div className="mx-auto flex max-w-5xl items-center justify-between">
-          <h1 className="text-lg font-bold tracking-tight">SingLab</h1>
+    <DashboardLayout>
+      {/* Welcome card */}
+      <Card
+        sx={{
+          mb: { xs: 4, sm: 5, lg: 6 },
+          background: 'linear-gradient(135deg, rgba(19, 10, 53, 0.6) 0%, rgba(13, 7, 38, 0.4) 100%)',
+          border: '1px solid rgba(45, 26, 110, 0.4)',
+          backdropFilter: 'blur(8px)',
+        }}
+      >
+        <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
+          <Typography
+            variant="body2"
+            sx={{
+              color: 'text.secondary',
+              mb: 1,
+            }}
+          >
+            Welcome back,
+          </Typography>
+          <Typography
+            variant="h1"
+            sx={{
+              fontSize: { xs: '1.875rem', sm: '2.25rem', lg: '2.5rem' },
+              fontWeight: 700,
+              letterSpacing: '-0.02em',
+              background:
+                'linear-gradient(to right, #ededed, #818cf8)',
+              backgroundClip: 'text',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+            }}
+          >
+            {displayName}
+          </Typography>
+        </CardContent>
+      </Card>
 
-          <div className="flex items-center gap-4">
-            {/* Avatar / email */}
-            <div className="flex items-center gap-2">
-              {user?.photoURL ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={user.photoURL}
-                  alt={user.displayName ?? 'User avatar'}
-                  className="h-8 w-8 rounded-full object-cover"
-                />
-              ) : (
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-700 text-xs font-semibold uppercase text-zinc-300">
-                  {(user?.displayName ?? user?.email ?? 'U')[0]}
-                </div>
-              )}
-              <span className="hidden text-sm text-zinc-400 sm:block">
-                {user?.displayName ?? user?.email}
-              </span>
-            </div>
+      {/* Songs section */}
+      <Box component="section">
+        {/* Section header */}
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            mb: 3,
+          }}
+        >
+          <Typography
+            variant="h5"
+            sx={{
+              fontWeight: 600,
+              color: 'text.primary',
+            }}
+          >
+            Your songs
+          </Typography>
+          <Typography
+            variant="body2"
+            sx={{
+              fontWeight: 500,
+              color: 'text.disabled',
+            }}
+          >
+            {songs.length} track{songs.length !== 1 ? 's' : ''}
+          </Typography>
+        </Box>
 
-            {/* Sign out */}
-            <button
-              onClick={handleSignOut}
-              disabled={signingOut}
-              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 transition hover:border-zinc-500 hover:text-white disabled:opacity-50"
-            >
-              {signingOut ? 'Signing out…' : 'Sign out'}
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Main content */}
-      <main className="mx-auto max-w-5xl px-6 py-10">
-        {/* Welcome card */}
-        <div className="mb-8 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-          <p className="text-sm text-zinc-400">Welcome back,</p>
-          <h2 className="mt-1 text-2xl font-bold">
-            {user?.displayName ?? user?.email ?? 'User'}
-          </h2>
-        </div>
-
-        {/* Songs section */}
-        <section>
-          <h3 className="mb-4 text-lg font-semibold">Your songs</h3>
-
-          {songsStatus === 'loading' && (
-            <div className="flex items-center gap-2 text-sm text-zinc-400">
-              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-300" />
+        {/* Loading state */}
+        {songsStatus === 'loading' && (
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 2,
+              p: 2,
+              borderRadius: 2,
+              border: '1px solid rgba(45, 26, 110, 0.3)',
+              bgcolor: 'rgba(10, 5, 32, 0.2)',
+            }}
+          >
+            <CircularProgress size={16} />
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
               Loading songs…
-            </div>
+            </Typography>
+          </Box>
+        )}
+
+        {/* Error state */}
+        {songsStatus === 'error' && (
+          <Alert severity="error">
+            Failed to load songs. Please refresh the page.
+          </Alert>
+        )}
+
+        {/* Empty state */}
+        {(songsStatus === 'ready' || songsStatus === 'idle') &&
+          songs.length === 0 && (
+            <Box
+              sx={{
+                p: 5,
+                textAlign: 'center',
+                borderRadius: 3,
+                border: '2px dashed rgba(45, 26, 110, 0.3)',
+                bgcolor: 'rgba(10, 5, 32, 0.2)',
+              }}
+            >
+              <Typography variant="body2" sx={{ color: 'text.disabled' }}>
+                No songs yet. Upload your first track to get started.
+              </Typography>
+            </Box>
           )}
 
-          {songsStatus === 'error' && (
-            <p className="text-sm text-red-400">
-              Failed to load songs. Please refresh the page.
-            </p>
-          )}
+        {/* Songs grid */}
+        {songs.length > 0 && (
+          <Stack spacing={{ xs: 2, md: 3 }}>
+            {songs.map((song) => (
+              <Card
+                key={song.id}
+                sx={{
+                  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                  '&:hover': {
+                    borderColor: 'rgba(124, 58, 237, 0.6)',
+                    bgcolor: 'rgba(19, 10, 53, 0.7)',
+                  },
+                }}
+              >
+                <CardContent sx={{ p: { xs: 2.5, sm: 3 } }}>
+                  {/* Song metadata */}
+                  <Box
+                    sx={{
+                      mb: 2,
+                      display: 'flex',
+                      flexDirection: { xs: 'column', sm: 'row' },
+                      alignItems: { xs: 'flex-start', sm: 'center' },
+                      justifyContent: 'space-between',
+                      gap: 1,
+                    }}
+                  >
+                    <Box sx={{ minWidth: 0, flex: 1 }}>
+                      <Typography
+                        variant="body1"
+                        sx={{
+                          fontWeight: 600,
+                          color: 'text.primary',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {song.title}
+                      </Typography>
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          color: 'text.secondary',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {song.author}
+                      </Typography>
+                    </Box>
+                  </Box>
 
-          {(songsStatus === 'ready' || songsStatus === 'idle') &&
-            songs.length === 0 && (
-              <div className="rounded-xl border border-dashed border-zinc-700 p-10 text-center">
-                <p className="text-sm text-zinc-500">
-                  No songs yet. Upload your first track to get started.
-                </p>
-              </div>
-            )}
+                  {/* Song player */}
+                  <Box
+                    sx={{
+                      overflow: 'hidden',
+                      borderRadius: 2,
+                    }}
+                  >
+                    <SongPlayer song={song} />
+                  </Box>
+                </CardContent>
+              </Card>
+            ))}
+          </Stack>
+        )}
+      </Box>
 
-          {songs.length > 0 && (
-            <ul className="flex flex-col gap-3">
-              {songs.map((song) => (
-                <li
-                  key={song.id}
-                  className="rounded-xl border border-zinc-800 bg-zinc-900 px-5 py-4"
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">{song.title}</p>
-                      <p className="text-sm text-zinc-400">{song.author}</p>
-                    </div>
-                  </div>
-                  <SongPlayer song={song} />
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      </main>
-    </div>
+      {/* FAB button to create new song */}
+      <Fab
+        color="primary"
+        aria-label="add song"
+        onClick={() => setIsCreateDialogOpen(true)}
+        sx={{
+          position: 'fixed',
+          bottom: { xs: 24, sm: 32 },
+          right: { xs: 24, sm: 32 },
+          background: 'linear-gradient(135deg, #a78bfa 0%, #c4b5fd 100%)',
+          color: '#1a0e2e',
+          '&:hover': {
+            background: 'linear-gradient(135deg, #b8a3e0 0%, #d4c4ff 100%)',
+            boxShadow: '0 8px 24px rgba(168, 85, 247, 0.4)',
+          },
+          '&:active': {
+            boxShadow: '0 4px 12px rgba(168, 85, 247, 0.3)',
+          },
+          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        }}
+      >
+        <AddIcon sx={{ fontSize: '1.75rem', fontWeight: 600 }} />
+      </Fab>
+
+      {/* Song creation modal */}
+      <SongCreateDialog
+        open={isCreateDialogOpen}
+        onClose={() => setIsCreateDialogOpen(false)}
+      />
+    </DashboardLayout>
   );
 }
