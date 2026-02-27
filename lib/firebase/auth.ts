@@ -1,7 +1,9 @@
 import {
   getAuth,
+  createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
+  updateProfile,
   type Auth,
 } from 'firebase/auth';
 import { getFirebaseApp } from './app';
@@ -41,6 +43,24 @@ export async function signIn(
   password: string,
 ): Promise<void> {
   await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
+}
+
+/**
+ * Registers a new user with email, password, and display name.
+ *
+ * @throws {FirebaseError} On auth errors (e.g. email already in use).
+ */
+export async function signUp(
+  email: string,
+  password: string,
+  name: string,
+): Promise<void> {
+  const { user } = await createUserWithEmailAndPassword(
+    getFirebaseAuth(),
+    email,
+    password,
+  );
+  await updateProfile(user, { displayName: name });
 }
 
 /**
