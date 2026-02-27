@@ -4,6 +4,17 @@ All notable changes to the SingLab Frontend will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `lib/hooks/useSongRawUrl` — custom hook that checks `rawSongInfo.urlInfo.expiresAt`
+  and proactively refreshes the signed URL via `GET /songs/:songId/raw/url` when
+  within 5 minutes of expiry. Caches the refreshed URL locally for immediate
+  playback; subsequent Firestore-pushed updates are picked up automatically.
+- `components/features/SongPlayer` — inline `<audio controls>` player for a
+  single song. Delegates signed URL management to `useSongRawUrl`; shows a
+  spinner while refreshing and an error message on failure.
+- Dashboard: each song card now renders an inline `SongPlayer` for direct
+  playback without leaving the page.
+
 ## [0.1.0] - 2026-02-27
 
 ### Added
