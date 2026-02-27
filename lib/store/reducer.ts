@@ -1,9 +1,4 @@
-import type {
-  AuthUser,
-  FirestoreUserData,
-  GlobalState,
-  Song,
-} from './types';
+import type { AuthUser, GlobalState, Song } from './types';
 
 // ---------------------------------------------------------------------------
 // Action definitions
@@ -16,12 +11,6 @@ export type GlobalStateAction =
   | { type: 'AUTH_AUTHENTICATED'; payload: AuthUser }
   /** Firebase confirmed no signed-in user (or sign-out completed) */
   | { type: 'AUTH_UNAUTHENTICATED' }
-  /** Firestore listener for /users/{uid} started */
-  | { type: 'USER_PROFILE_DATA_LOADING' }
-  /** Firestore /users/{uid} snapshot received — null when doc does not exist */
-  | { type: 'USER_PROFILE_DATA_READY'; payload: FirestoreUserData | null }
-  /** Firestore /users/{uid} listener encountered an error */
-  | { type: 'USER_PROFILE_DATA_ERROR' }
   /** Firestore listener for /users/{uid}/songs started */
   | { type: 'SONGS_LOADING' }
   /** Firestore /users/{uid}/songs snapshot received */
@@ -41,7 +30,6 @@ export type GlobalStateAction =
 export const initialState: GlobalState = {
   authStatus: 'loading',
   userProfile: null,
-  userProfileStatus: 'idle',
   songs: [],
   songsStatus: 'idle',
 };
@@ -69,7 +57,7 @@ export function globalStateReducer(
       return {
         ...state,
         authStatus: 'authenticated',
-        userProfile: { auth: action.payload, data: null },
+        userProfile: action.payload,
       };
 
     case 'AUTH_UNAUTHENTICATED':
@@ -77,22 +65,6 @@ export function globalStateReducer(
         ...initialState,
         authStatus: 'unauthenticated',
       };
-
-    case 'USER_PROFILE_DATA_LOADING':
-      return { ...state, userProfileStatus: 'loading' };
-
-    case 'USER_PROFILE_DATA_READY':
-      return {
-        ...state,
-        userProfileStatus: 'ready',
-        // Preserve the auth slice, only update the Firestore data slice
-        userProfile: state.userProfile
-          ? { ...state.userProfile, data: action.payload }
-          : null,
-      };
-
-    case 'USER_PROFILE_DATA_ERROR':
-      return { ...state, userProfileStatus: 'error' };
 
     case 'SONGS_LOADING':
       return { ...state, songsStatus: 'loading' };

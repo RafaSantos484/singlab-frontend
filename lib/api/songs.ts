@@ -66,8 +66,7 @@ export class SongsApi {
    * Returns the authenticated user's song library.
    */
   async listSongs(): Promise<SongList> {
-    const res =
-      await this.client.get<ApiListSuccessResponse<Song>>('/songs');
+    const res = await this.client.get<ApiListSuccessResponse<Song>>('/songs');
 
     return { songs: res.data, total: res.total };
   }

@@ -53,6 +53,34 @@ export class ApiError extends Error {
 }
 
 // ---------------------------------------------------------------------------
+// User domain types
+// ---------------------------------------------------------------------------
+
+/**
+ * Input payload for creating a new user account (`POST /users`).
+ * Mirrors `CreateUserDto` from singlab-api.
+ */
+export interface CreateUserInput {
+  /** Full display name (3–255 chars). */
+  name: string;
+  /** Email address (max 255 chars). */
+  email: string;
+  /** Password (6–255 printable chars, no spaces). */
+  password: string;
+}
+
+/**
+ * Response payload returned by `POST /users` on success.
+ * Mirrors `CreateUserResult` from singlab-api.
+ */
+export interface CreateUserResult {
+  uid: string;
+  name: string;
+  email: string;
+  createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // Song domain types
 // ---------------------------------------------------------------------------
 

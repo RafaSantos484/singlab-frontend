@@ -1,9 +1,12 @@
 'use client';
 
-import { type User as FirebaseUser, onAuthStateChanged } from 'firebase/auth';
+import {
+  type User as FirebaseUser,
+  onAuthStateChanged,
+  signOut as firebaseSignOut,
+} from 'firebase/auth';
 import {
   collection,
-  doc,
   onSnapshot,
   type DocumentData,
   type QueryDocumentSnapshot,
@@ -26,8 +29,8 @@ import type { AuthUser, Song } from './types';
 function toAuthUser(user: FirebaseUser): AuthUser {
   return {
     uid: user.uid,
-    email: user.email,
-    displayName: user.displayName,
+    email: user.email!,
+    displayName: user.displayName!,
     photoURL: user.photoURL,
     emailVerified: user.emailVerified,
   };
@@ -57,10 +60,9 @@ interface GlobalStateProviderProps {
  *
  * Responsibilities:
  * - Subscribes to **Firebase Auth** state changes to track the signed-in user.
- * - When a user is authenticated, subscribes to two **Firestore real-time
- *   listeners**:
- *   - `/users/{uid}` — user profile data
- *   - `/users/{uid}/songs` — user's song library
+ *   User profile data (name, email) comes directly from Auth, not Firestore.
+ * - When a user is authenticated, subscribes to a **Firestore real-time
+ *   listener** for `/users/{uid}/songs` — the user's song library.
  * - Tears down Firestore listeners automatically on sign-out or unmount.
  *
  * Wrap the root layout (or the highest client boundary) with this component
@@ -78,6 +80,13 @@ export function GlobalStateProvider({ children }: GlobalStateProviderProps) {
 
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
+        if (!user.emailVerified) {
+          // Never surface unverified users as authenticated.
+          // Sign out silently — the UI will stay (or land) on the public pages.
+          void firebaseSignOut(auth);
+          dispatch({ type: 'AUTH_UNAUTHENTICATED' });
+          return;
+        }
         dispatch({ type: 'AUTH_AUTHENTICATED', payload: toAuthUser(user) });
       } else {
         dispatch({ type: 'AUTH_UNAUTHENTICATED' });
@@ -88,34 +97,16 @@ export function GlobalStateProvider({ children }: GlobalStateProviderProps) {
   }, []);
 
   // -------------------------------------------------------------------------
-  // 2. Firestore listeners — activated only while a user is authenticated
+  // 2. Firestore listener for songs — activated only while a user is authenticated
   // -------------------------------------------------------------------------
 
   useEffect(() => {
     // uid is the stable key; derived from the auth state set above.
-    const uid = state.userProfile?.auth.uid;
+    const uid = state.userProfile?.uid;
 
     if (!uid) return;
 
     const db = getFirebaseFirestore();
-
-    // --- User profile: /users/{uid} ---
-    dispatch({ type: 'USER_PROFILE_DATA_LOADING' });
-
-    const unsubProfile = onSnapshot(
-      doc(db, 'users', uid),
-      (snap) => {
-        dispatch({
-          type: 'USER_PROFILE_DATA_READY',
-          payload: snap.exists()
-            ? (snap.data() as import('./types').FirestoreUserData)
-            : null,
-        });
-      },
-      () => {
-        dispatch({ type: 'USER_PROFILE_DATA_ERROR' });
-      },
-    );
 
     // --- Songs: /users/{uid}/songs ---
     dispatch({ type: 'SONGS_LOADING' });
@@ -134,11 +125,10 @@ export function GlobalStateProvider({ children }: GlobalStateProviderProps) {
     );
 
     return () => {
-      unsubProfile();
       unsubSongs();
     };
     // Re-run only when the authenticated UID changes (login / logout).
-  }, [state.userProfile?.auth.uid]);
+  }, [state.userProfile?.uid]);
 
   // -------------------------------------------------------------------------
   // Render

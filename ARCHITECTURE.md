@@ -122,12 +122,11 @@ bundle small. No external state management library is added until complexity
 requires it.
 
 Global state is managed by `GlobalStateProvider` (`lib/store/`) using React
-`useReducer` + Context. It subscribes to two Firestore real-time listeners
-while a user is authenticated:
+`useReducer` + Context. When a user is authenticated:
 
-- `/users/{uid}` — user profile data
-- `/users/{uid}/songs` — user's song library (always up-to-date via
-  `onSnapshot`)
+- **User profile** — data comes directly from Firebase Auth (name, email, UID)
+- **Songs library** — subscribed to `/users/{uid}/songs` Firestore listener
+  for real-time updates via `onSnapshot`
 
 Server-side interactions that are not covered by real-time listeners (e.g.
 refreshing a signed URL) are handled by dedicated hooks (`useSongRawUrl`) that

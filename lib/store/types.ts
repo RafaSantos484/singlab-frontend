@@ -25,10 +25,10 @@ export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
 export interface AuthUser {
   /** Firebase UID — stable, unique identifier for the user. */
   uid: string;
-  /** Primary email address, or `null` if not set. */
-  email: string | null;
-  /** User's display name, or `null` if not set. */
-  displayName: string | null;
+  /** Primary email address (guaranteed to be a valid string by backend). */
+  email: string;
+  /** User's display name (guaranteed to be a valid string by backend). */
+  displayName: string;
   /** URL of the user's profile photo, or `null` if not set. */
   photoURL: string | null;
   /** Whether the user's email address has been verified. */
@@ -36,30 +36,14 @@ export interface AuthUser {
 }
 
 // ---------------------------------------------------------------------------
-// User profile — Firestore /users/{uid}
+// User profile
 // ---------------------------------------------------------------------------
 
 /**
- * Fields persisted in the Firestore document at `/users/{uid}`.
- * All fields are optional because the document may not exist yet for new users.
+ * User profile is simply the authenticated user's information from Firebase Auth.
+ * The backend guarantees that displayName is a valid string.
  */
-export interface FirestoreUserData {
-  /** ISO 8601 datetime when the user document was first created */
-  createdAt?: string;
-}
-
-/**
- * Combined user profile: Firebase Auth identity + Firestore-persisted data.
- */
-export interface UserProfile {
-  /** Identity information from Firebase Auth */
-  auth: AuthUser;
-  /**
-   * Extra data stored in Firestore.
-   * `null` when the document does not exist yet.
-   */
-  data: FirestoreUserData | null;
-}
+export type UserProfile = AuthUser;
 
 // ---------------------------------------------------------------------------
 // Async status
@@ -85,12 +69,10 @@ export interface GlobalState {
 
   // --- User profile ---
   /**
-   * The signed-in user (combined Auth + Firestore data).
+   * The signed-in user (from Firebase Auth).
    * `null` when not authenticated or during initial load.
    */
   userProfile: UserProfile | null;
-  /** Loading status of the Firestore `/users/{uid}` listener. */
-  userProfileStatus: LoadStatus;
 
   // --- Songs ---
   /**
