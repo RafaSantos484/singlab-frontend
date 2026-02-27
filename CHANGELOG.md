@@ -5,6 +5,14 @@ All notable changes to the SingLab Frontend will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Design token palette (`brand-*`, `accent-*`) defined via Tailwind v4 `@theme`
+  block in `app/globals.css`, replacing the former neutral `zinc` colors. Tokens
+  are available as utility classes project-wide.
+- Login page refactored with a purple/blue futuristic theme matching the app
+  brand: ambient glows, glassmorphism card, gradient CTA button, inline SVG
+  logo, waveform and spectrum decorations.
+- Login page: added **"Forgot password?"** and **"Create new account"** mock
+  buttons (UI only; respective flows not yet implemented).
 - `lib/hooks/useSongRawUrl` — custom hook that checks `rawSongInfo.urlInfo.expiresAt`
   and proactively refreshes the signed URL via `GET /songs/:songId/raw/url` when
   within 5 minutes of expiry. Caches the refreshed URL locally for immediate
