@@ -10,7 +10,7 @@ applyTo: "**"
 3. **English only** — All code, comments, docs, commits must be in English
 4. **No commit scopes** — Use `feat:`, `fix:`, `chore:` only (no parentheses)
 5. **Explicit commit control** — Only commit when explicitly instructed in current message
-6. **Return types** — Always specify return types on exported functions and hooks
+6. **Return types** — Always specify return types on all functions and hooks
 7. **Environment variables** — Use `NEXT_PUBLIC_` prefix for client-side vars; never access `process.env` directly — use a typed `env.ts` helper
 8. **Atomic commits** — Prefer multiple small commits over single large commits
 9. **Documentation sync** — Update related docs when modifying code
@@ -231,6 +231,71 @@ describe('MyComponent', () => {
 
 ## Git Workflow & Commits
 
+### Branch Naming Convention
+- `feat/` - New features (e.g., `feat/add-user-auth`)
+- `fix/` - Bug fixes (e.g., `fix/cors-headers`)
+- `chore/` - Dependencies, maintenance (e.g., `chore/update-next`)
+- `refactor/` - Code restructuring (e.g., `refactor/extract-hook`)
+- `style/` - Formatting, no logic changes
+- `test/` - Test additions/modifications
+- `docs/` - Documentation updates
+- `ci/` - CI/CD configuration changes
+- `hotfix/` - Production emergency fixes
+
+### Conventional Commits Pattern
+
+**IMPORTANT RULE**: Do not use optional scopes between the type and ':'. Use only the commit type.
+
+**Base Format**:
+```
+type: description
+
+[optional body]
+
+[optional footer]
+```
+
+**Commit Types**:
+- `feat:` - New feature
+- `fix:` - Bug fix
+- `docs:` - Documentation changes
+- `style:` - Code changes that don't affect logic (formatting, Prettier, ESLint)
+- `refactor:` - Code change that neither adds feature nor fixes bug
+- `perf:` - Performance improvements
+- `test:` - Test additions or modifications
+- `chore:` - Dependency, configuration, build changes, etc
+
+**Correct Examples**:
+```
+feat: add JWT authentication to middleware
+fix: correct CORS headers for local development
+docs: improve Firebase setup instructions
+style: format code with Prettier
+refactor: extract validation logic to hook
+test: add integration tests for POST /api/users
+chore: upgrade Next.js to v16.1.0
+perf: optimize image loading with lazy loading
+```
+
+**Incorrect Examples** (do not use):
+```
+❌ feat(auth): add JWT authentication
+❌ fix(cors): correct CORS headers
+❌ chore(deps): upgrade Next.js
+```
+
+### Pre-commit Checklist
+
+Before committing, ensure:
+1. ✅ `npm run lint` passes without errors
+2. ✅ `npm run format` has been executed
+3. ✅ `npm test` passes (or skip specific tests if documented)
+4. ✅ TypeScript compiles: `tsc --noEmit`
+5. ✅ Reviewed changes with `git diff` or `git diff --staged`
+6. ✅ Commit message follows Conventional Commits (no scopes)
+7. ✅ Changes are atomic (one topic per commit)
+8. ✅ Commit message is clear and descriptive
+
 ### ⚠️ Critical: When to Commit
 
 **Only commit if the current chat message explicitly instructs you to do so.**
@@ -238,17 +303,40 @@ Previous messages asking to commit do NOT apply to the current message.
 
 ### Analyzing Changes Before Committing
 
-Always review changes before committing:
+Always verify and review the changes before committing:
 
 ```bash
+# Check status of all modified files
 git status
+
+# View detailed differences of unstaged files
 git diff
+
+# View differences of staged files (in staging area)
 git diff --staged
+
+# Check changes of a specific file
+git diff src/components/MyComponent.tsx
+
+# View summary of changes before making multiple commits
+git log -1 --name-status
 ```
 
 ### Commit Strategy
 
-Prefer smaller, atomic commits. Each commit = one logical unit of work.
+**Prefer smaller, atomic commits over single large commits.** Each commit should represent a single logical unit of work that can be reviewed and understood independently.
+
+**Benefits of atomic commits:**
+- Easier code review and understanding of changes
+- Simpler git history for debugging and bisecting
+- Better for reverting specific features without affecting others
+- Clearer project history and commit messages
+
+**When to split into multiple commits:**
+- Different features or fixes should be separate commits
+- Component/utility additions separate from page or feature logic
+- Documentation updates separate from code changes
+- Test additions can be separate from implementation if large
 
 **Example strategy** for a new feature:
 ```bash
@@ -264,6 +352,49 @@ git commit -m "test: add SongCard unit tests"
 git add docs/
 git commit -m "docs: document SongCard props"
 ```
+
+This creates a clean, reviewable history instead of one monolithic commit.
+
+### Formatting for PR Descriptions and Commit Comments
+
+When providing a PR description or commit comments, always output the response
+as a Markdown code block.
+
+### Rich PR Formatting Requirement
+
+When asked to generate a PR title/description for the current branch, return a
+well-structured Markdown response (inside a code block) that uses formatting to
+enhance readability and clarity. Enrich the output using:
+- Headings and subheadings (e.g., `#`, `##`, `###`) for sections
+- Emphasis for key terms (bold, italics)
+- Task lists with checkboxes for tests, verification, or follow-ups
+- Short, scannable bullet lists for changes and impacts
+- Optional callouts (blockquotes) for important notes or risks
+
+The goal is a polished, review-friendly PR description that highlights scope,
+tests, and notable changes without being verbose.
+
+### Analyzing Git Context for PR Descriptions
+
+When generating a PR title/description, analyze git context to ensure accuracy:
+
+```bash
+# Get current branch name
+git branch --show-current
+
+# View commits on this branch (not on develop)
+git log develop..HEAD --oneline
+
+# View full commit details for context
+git log develop..HEAD --format="%B"
+
+# Compare changes with develop
+git diff develop... --stat
+```
+
+**Important**: Use the branch name and commit history as context, not just current
+session information. This ensures the PR title/description accurately reflects what
+was actually implemented in the branch.
 
 ### Pull Request Guidelines
 - Target `develop` for features, `master`/`main` for hotfixes
