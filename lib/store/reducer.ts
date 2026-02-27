@@ -1,9 +1,4 @@
-import type {
-  AuthUser,
-  FirestoreUserData,
-  GlobalState,
-  Song,
-} from './types';
+import type { AuthUser, FirestoreUserData, GlobalState, Song } from './types';
 
 // ---------------------------------------------------------------------------
 // Action definitions

@@ -27,7 +27,10 @@ const mockSongs: Song[] = [
     title: 'Song One',
     author: 'Artist A',
     rawSongInfo: {
-      urlInfo: { value: 'https://storage.example.com/song1', expiresAt: '2099-01-01T00:00:00.000Z' },
+      urlInfo: {
+        value: 'https://storage.example.com/song1',
+        expiresAt: '2099-01-01T00:00:00.000Z',
+      },
       uploadedAt: '2024-01-01T00:00:00.000Z',
     },
   },
@@ -87,7 +90,9 @@ describe('globalStateReducer', () => {
       songs: mockSongs,
     };
 
-    const next = globalStateReducer(stateWithData, { type: 'AUTH_UNAUTHENTICATED' });
+    const next = globalStateReducer(stateWithData, {
+      type: 'AUTH_UNAUTHENTICATED',
+    });
 
     expect(next).toEqual({ ...initialState, authStatus: 'unauthenticated' });
   });
@@ -95,7 +100,9 @@ describe('globalStateReducer', () => {
   // --- USER_PROFILE_DATA_LOADING --------------------------------------------
 
   it('handles USER_PROFILE_DATA_LOADING: sets userProfileStatus to loading', () => {
-    const next = globalStateReducer(initialState, { type: 'USER_PROFILE_DATA_LOADING' });
+    const next = globalStateReducer(initialState, {
+      type: 'USER_PROFILE_DATA_LOADING',
+    });
     expect(next.userProfileStatus).toBe('loading');
   });
 
@@ -133,7 +140,9 @@ describe('globalStateReducer', () => {
   // --- USER_PROFILE_DATA_ERROR ----------------------------------------------
 
   it('handles USER_PROFILE_DATA_ERROR: sets userProfileStatus to error', () => {
-    const next = globalStateReducer(initialState, { type: 'USER_PROFILE_DATA_ERROR' });
+    const next = globalStateReducer(initialState, {
+      type: 'USER_PROFILE_DATA_ERROR',
+    });
     expect(next.userProfileStatus).toBe('error');
   });
 

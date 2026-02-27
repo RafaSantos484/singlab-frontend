@@ -9,5 +9,11 @@
  * - `getFirebaseFirestore`  — singleton `Firestore` instance
  */
 export { getFirebaseApp } from './app';
-export { getFirebaseAuth, getCurrentUserIdToken, signIn, signUp, signOut } from './auth';
+export {
+  getFirebaseAuth,
+  getCurrentUserIdToken,
+  signIn,
+  signUp,
+  signOut,
+} from './auth';
 export { getFirebaseFirestore } from './firestore';

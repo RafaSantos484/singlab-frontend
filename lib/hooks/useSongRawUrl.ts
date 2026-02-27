@@ -104,9 +104,9 @@ export function useSongRawUrl(song: Song): UseSongRawUrlResult {
     return () => {
       refreshingRef.current = false;
     };
-  // Re-run when the song URL or its expiry changes. This picks up both the
-  // initial load and subsequent Firestore-pushed updates.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Re-run when the song URL or its expiry changes. This picks up both the
+    // initial load and subsequent Firestore-pushed updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [song.id, urlInfo?.expiresAt, urlInfo?.value]);
 
   return {

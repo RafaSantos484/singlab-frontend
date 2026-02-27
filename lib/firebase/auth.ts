@@ -38,10 +38,7 @@ export async function getCurrentUserIdToken(
  *
  * @throws {FirebaseError} On invalid credentials or other auth errors.
  */
-export async function signIn(
-  email: string,
-  password: string,
-): Promise<void> {
+export async function signIn(email: string, password: string): Promise<void> {
   await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
 }
 

@@ -28,9 +28,7 @@ export function SongPlayer({ song }: SongPlayerProps): React.ReactElement {
   const { url, isRefreshing, error } = useSongRawUrl(song);
 
   if (error) {
-    return (
-      <p className="mt-2 text-xs text-red-400">{error}</p>
-    );
+    return <p className="mt-2 text-xs text-red-400">{error}</p>;
   }
 
   if (isRefreshing || !url) {
