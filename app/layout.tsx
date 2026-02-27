@@ -1,6 +1,10 @@
-import type { Metadata } from 'next';
+'use client';
+
 import { Geist, Geist_Mono } from 'next/font/google';
+import { ThemeProvider } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
 import { GlobalStateProvider } from '@/lib/store';
+import muiTheme from '@/lib/theme/muiTheme';
 import './globals.css';
 
 const geistSans = Geist({
@@ -13,12 +17,15 @@ const geistMono = Geist_Mono({
   subsets: ['latin'],
 });
 
-export const metadata: Metadata = {
-  title: 'SingLab — Karaoke & Singing Practice',
-  description:
-    'Upload a track and practice singing with AI-separated vocal and instrumental layers.',
-};
-
+/**
+ * Root layout component.
+ *
+ * Provides:
+ * - MUI ThemeProvider with custom brand theme
+ * - CssBaseline for consistent baseline styles
+ * - GlobalStateProvider for app-wide state (auth, songs, etc.)
+ * - Font configuration (Geist Sans, Geist Mono)
+ */
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -26,10 +33,20 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <title>SingLab — Karaoke & Singing Practice</title>
+        <meta
+          name="description"
+          content="Upload a track and practice singing with AI-separated vocal and instrumental layers."
+        />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <GlobalStateProvider>{children}</GlobalStateProvider>
+        <ThemeProvider theme={muiTheme}>
+          <CssBaseline />
+          <GlobalStateProvider>{children}</GlobalStateProvider>
+        </ThemeProvider>
       </body>
     </html>
   );
