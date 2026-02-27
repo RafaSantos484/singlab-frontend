@@ -1,21 +1,26 @@
 'use client';
 
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
-import { signIn } from '@/lib/firebase';
+import { signIn, EmailNotVerifiedError } from '@/lib/firebase';
 import { type FirebaseError } from 'firebase/app';
 import { SingLabLogo } from '@/components/ui/SingLabLogo';
 import { WaveformDecoration } from '@/components/ui/WaveformDecoration';
 import { SpectrumDecoration } from '@/components/ui/SpectrumDecoration';
+import { Toast } from '@/components/ui/Toast';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function getFirebaseErrorMessage(error: FirebaseError): string {
-  switch (error.code) {
+function getErrorMessage(error: unknown): string {
+  if (error instanceof EmailNotVerifiedError) {
+    return 'Please verify your email before signing in. Check your inbox for the verification link.';
+  }
+  const firebaseError = error as FirebaseError;
+  switch (firebaseError.code) {
     case 'auth/invalid-credential':
     case 'auth/user-not-found':
     case 'auth/wrong-password':
@@ -43,6 +48,19 @@ export default function LoginPage(): React.ReactElement | null {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showRegisteredToast, setShowRegisteredToast] = useState(false);
+
+  // Read the registration flag after mount to avoid SSR/hydration mismatches
+  // and to be immune to auth-state timing issues.
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const flag = sessionStorage.getItem('emailVerificationSent');
+      if (flag === 'true') {
+        sessionStorage.removeItem('emailVerificationSent');
+        setShowRegisteredToast(true);
+      }
+    }
+  }, []);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
@@ -53,8 +71,7 @@ export default function LoginPage(): React.ReactElement | null {
       await signIn(email, password);
       router.replace('/dashboard');
     } catch (err) {
-      const firebaseError = err as FirebaseError;
-      setError(getFirebaseErrorMessage(firebaseError));
+      setError(getErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -130,6 +147,17 @@ export default function LoginPage(): React.ReactElement | null {
           </div>
 
           {/* Form */}
+          {/* Confirmation toast — shown after successful registration */}
+          {showRegisteredToast && (
+            <div className="mb-4">
+              <Toast
+                variant="info"
+                message="Account created! Check your inbox and verify your email address before signing in."
+                onDismiss={() => setShowRegisteredToast(false)}
+              />
+            </div>
+          )}
+
           <form
             onSubmit={handleSubmit}
             className="flex flex-col gap-4"
