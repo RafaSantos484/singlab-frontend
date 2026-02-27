@@ -1,6 +1,10 @@
 'use client';
 
-import { type User as FirebaseUser, onAuthStateChanged } from 'firebase/auth';
+import {
+  type User as FirebaseUser,
+  onAuthStateChanged,
+  signOut as firebaseSignOut,
+} from 'firebase/auth';
 import {
   collection,
   doc,
@@ -78,6 +82,13 @@ export function GlobalStateProvider({ children }: GlobalStateProviderProps) {
 
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
+        if (!user.emailVerified) {
+          // Never surface unverified users as authenticated.
+          // Sign out silently — the UI will stay (or land) on the public pages.
+          void firebaseSignOut(auth);
+          dispatch({ type: 'AUTH_UNAUTHENTICATED' });
+          return;
+        }
         dispatch({ type: 'AUTH_AUTHENTICATED', payload: toAuthUser(user) });
       } else {
         dispatch({ type: 'AUTH_UNAUTHENTICATED' });
