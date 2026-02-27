@@ -56,11 +56,15 @@ conventions with server and client components as appropriate.
 
 Components are split into two groups:
 
-- **`components/ui/`** — Primitive, stateless components (Button, Input, etc.)
-- **`components/features/`** — Feature-specific composite components that
-  contain business logic.
-  - `SongPlayer` — inline `<audio>` player; delegates signed URL management to
-    `useSongRawUrl`.
+- **`components/layout/`** — Shared page wrappers for route families.
+     - `AuthLayout` — common visual shell for `/login` and `/register`.
+     - `DashboardLayout` — authenticated shell (app bar, profile, sign out).
+- **`components/ui/`** — Branding and decorative primitives (`SingLabLogo`,
+     waveform/spectrum decorations).
+- **`components/features/`** — Feature-specific composite components.
+     - `SongPlayer` — inline `<audio>` player; delegates signed URL management to
+          `useSongRawUrl`.
+     - `SongCreateDialog` — upload workflow (metadata + file validation + API).
 
 ### 3. Lib
 
@@ -69,9 +73,11 @@ Shared utilities used across the app:
 | Module | Responsibility |
 |---|---|
 | `lib/api/` | Typed HTTP client wrapping `singlab-api` endpoints |
+| `lib/api/song-creation.ts` | Song upload validation and orchestration logic |
 | `lib/firebase/` | Firebase app initialization (singleton) and auth helpers |
 | `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`) |
 | `lib/store/` | Global state — `GlobalStateProvider` (React Context + useReducer) |
+| `lib/theme/muiTheme.ts` | Centralized MUI theme tokens and component defaults |
 | `lib/env.ts` | Typed, validated environment variable access |
 
 ## Authentication Flow
@@ -134,9 +140,15 @@ call the REST API directly.
 
 ## Styling
 
-Tailwind CSS v4 with the Next.js PostCSS integration. Tailwind v4 has no
-`tailwind.config.ts` — all configuration, including the `@theme` block and
-custom design tokens, lives in [`app/globals.css`](app/globals.css).
+The frontend uses a **Tailwind + MUI hybrid** strategy:
+
+- **MUI** for interactive UI components (TextField, Button, Dialog, Card,
+  Snackbar/Alert, layout primitives).
+- **Tailwind CSS v4** for page-level layout utilities and decorative styling.
+
+Tailwind v4 has no `tailwind.config.ts` — all Tailwind configuration,
+including the `@theme` block and custom design tokens, lives in
+[`app/globals.css`](app/globals.css).
 
 ### Design Token Palette
 
