@@ -1,0 +1,56 @@
+/**
+ * @module lib/api
+ *
+ * Pre-wired API client singletons for all singlab-api resources.
+ *
+ * Usage (client components / hooks only):
+ * ```ts
+ * import { songsApi } from '@/lib/api';
+ *
+ * const list = await songsApi.listSongs();
+ * ```
+ *
+ * The underlying `ApiClient` automatically:
+ * - attaches the Firebase ID token as `Authorization: Bearer <token>`
+ * - force-refreshes the token and retries on `401` responses
+ * - throws `ApiError` for all non-2xx responses
+ */
+
+import { getCurrentUserIdToken } from '@/lib/firebase/auth';
+import { ApiClient } from './client';
+import { SongsApi } from './songs';
+
+// ---------------------------------------------------------------------------
+// Shared client instance
+// ---------------------------------------------------------------------------
+
+const apiClient = new ApiClient(getCurrentUserIdToken);
+
+// ---------------------------------------------------------------------------
+// Resource APIs
+// ---------------------------------------------------------------------------
+
+export const songsApi = new SongsApi(apiClient);
+
+// ---------------------------------------------------------------------------
+// Re-exports for consumers
+// ---------------------------------------------------------------------------
+
+export { ApiClient } from './client';
+export type { TokenProvider } from './client';
+
+export { SongsApi } from './songs';
+export type { UploadSongInput, SongList } from './songs';
+
+export { ApiError } from './types';
+export type {
+  Song,
+  SongRawUrl,
+  UploadSongResult,
+  RawSongInfo,
+  RawSongUrlInfo,
+  ApiSuccessResponse,
+  ApiListSuccessResponse,
+  ApiMessageSuccessResponse,
+  ApiErrorResponse,
+} from './types';
