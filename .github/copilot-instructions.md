@@ -119,6 +119,59 @@ ID tokens passed as `Authorization: Bearer <token>` headers.
 - Error messages should use `role="alert"`
 - Maintain WCAG AA contrast ratio (≥ 4.5:1) for body text on backgrounds
 
+## Responsive Design & Device Compatibility
+
+### Mobile-First Approach
+- **Always design mobile-first** — start with mobile layouts and progressively
+  enhance for larger screens
+- Use Tailwind's responsive prefixes (`sm:`, `md:`, `lg:`, `xl:`, `2xl:`) to
+  adapt layouts across breakpoints
+- Test on actual devices or emulators, not just browser resize tools
+
+### Tailwind Breakpoints
+- `sm` — 640px (landscape phones)
+- `md` — 768px (tablets)
+- `lg` — 1024px (desktop)
+- `xl` — 1280px (large desktop)
+- `2xl` — 1536px (ultra-wide)
+
+### Key Practices
+- **Typography scaling** — Use smaller text on mobile (`text-sm`, `text-base`),
+  increase on tablets/desktop (`md:text-lg`, `lg:text-xl`)
+- **Spacing & padding** — Apply smaller gaps on mobile (`px-4`, `py-3`),
+  expand on larger screens (`md:px-6`, `lg:px-8`)
+- **Grid & flexbox layouts** — Use single column on mobile, multi-column on
+  larger screens (e.g., `grid-cols-1 md:grid-cols-2 lg:grid-cols-3`)
+- **Images & media** — Always use `max-w-full` or responsive sizing to prevent
+  overflow; include `width` and `height` attributes for Next.js `<Image>`
+- **Touch targets** — Minimum 44px × 44px touch area on mobile for buttons and
+  interactive elements
+- **Viewport meta** — Already configured in layout; ensure no manual viewport
+  overrides in components
+- **Test landscape mode** — Verify layouts work correctly in both portrait and
+  landscape orientations on phones/tablets
+- **Font scaling** — Avoid fixed font sizes (px); use relative units that
+  scale with responsive prefixes
+
+### Common Patterns
+```tsx
+/* Single column on mobile, two columns on tablet+ */
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+  <Card />
+  <Card />
+</div>
+
+/* Responsive padding & text size */
+<h1 className="text-2xl md:text-3xl lg:text-4xl px-4 md:px-6 py-4 md:py-6">
+  Title
+</h1>
+
+/* Hide/show content conditionally */
+<div className="hidden md:block">
+  {/* Only visible on tablet+ */}
+</div>
+```
+
 ## Development Guidelines
 
 ### Environment Configuration
