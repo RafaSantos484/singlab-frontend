@@ -79,6 +79,46 @@ ID tokens passed as `Authorization: Bearer <token>` headers.
 - **All code, comments, docs, and commits MUST be in English**
 - Exception: Only if explicitly requested in current message
 
+## UI & Design System
+
+### Color Palette
+- **Always** use the project's design tokens — never raw Tailwind colors (e.g.
+  `purple-500`, `indigo-600`) or arbitrary hex values
+- `brand-*` scale — primary purple spectrum (backgrounds, borders, text)
+- `accent-*` scale — electric indigo/blue (CTAs, highlights, focus rings)
+- Semantic aliases defined in `globals.css` (use when appropriate):
+  - `bg-surface` / `bg-surface-raised` for card/panel backgrounds
+  - `border-border` / `border-border-subtle` for dividers and outlines
+
+### Background & Surface Hierarchy
+- Page background: `bg-brand-950`
+- Card/panel: `bg-brand-900` or `bg-brand-900/75` (with backdrop blur)
+- Elevated surface: `bg-brand-800`
+- Borders: `border-brand-500/40` (subtle) → `border-brand-300` (focused)
+
+### Text & Contrast
+- Body text on dark bg: `text-brand-100` or `text-white`
+- Secondary/muted text: minimum `text-brand-100/70` — avoid going below `/50`
+  as it fails readability on dark surfaces
+- Decorative/disabled text allowed as low as `/40`
+- Headings: prefer `bg-gradient-to-r … bg-clip-text text-transparent` for
+  brand gradient treatment
+
+### Interactive Elements (Buttons & Links)
+- All clickable elements must have `cursor-pointer`
+- Disabled states: `disabled:cursor-not-allowed disabled:opacity-50`
+- Always provide focus-visible styles:
+  `focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300/60`
+- Hover states should have a visible, non-jarring color shift (e.g. +1 shade
+  on gradient stops, or subtle bg tint)
+
+### Accessibility
+- Decorative SVGs must have `aria-hidden="true"`
+- Interactive elements must have accessible labels (`aria-label` or visible
+  text)
+- Error messages should use `role="alert"`
+- Maintain WCAG AA contrast ratio (≥ 4.5:1) for body text on backgrounds
+
 ## Development Guidelines
 
 ### Environment Configuration
