@@ -107,7 +107,9 @@ export function GlobalStateProvider({ children }: GlobalStateProviderProps) {
       (snap) => {
         dispatch({
           type: 'USER_PROFILE_DATA_READY',
-          payload: snap.exists() ? (snap.data() as import('./types').FirestoreUserData) : null,
+          payload: snap.exists()
+            ? (snap.data() as import('./types').FirestoreUserData)
+            : null,
         });
       },
       () => {
@@ -136,7 +138,6 @@ export function GlobalStateProvider({ children }: GlobalStateProviderProps) {
       unsubSongs();
     };
     // Re-run only when the authenticated UID changes (login / logout).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.userProfile?.auth.uid]);
 
   // -------------------------------------------------------------------------
