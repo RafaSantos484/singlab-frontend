@@ -4,8 +4,8 @@ import { type FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
-import { signUp } from '@/lib/firebase';
-import { type FirebaseError } from 'firebase/app';
+import { initiateEmailVerification } from '@/lib/firebase';
+import { usersApi, ApiError } from '@/lib/api';
 import { SingLabLogo } from '@/components/ui/SingLabLogo';
 import { WaveformDecoration } from '@/components/ui/WaveformDecoration';
 import { SpectrumDecoration } from '@/components/ui/SpectrumDecoration';
@@ -14,19 +14,17 @@ import { SpectrumDecoration } from '@/components/ui/SpectrumDecoration';
 // Helpers
 // ---------------------------------------------------------------------------
 
-function getFirebaseErrorMessage(error: FirebaseError): string {
-  switch (error.code) {
-    case 'auth/email-already-in-use':
+function getErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.statusCode === 409) {
       return 'This email address is already in use.';
-    case 'auth/invalid-email':
-      return 'The email address is not valid.';
-    case 'auth/weak-password':
-      return 'Password must be at least 6 characters.';
-    case 'auth/network-request-failed':
-      return 'Network error. Check your connection and try again.';
-    default:
-      return 'An unexpected error occurred. Please try again.';
+    }
+    if (error.statusCode === 400) {
+      return error.message;
+    }
+    return 'An unexpected error occurred. Please try again.';
   }
+  return 'An unexpected error occurred. Please try again.';
 }
 
 // ---------------------------------------------------------------------------
@@ -61,11 +59,20 @@ export default function RegisterPage(): React.ReactElement | null {
     setSubmitting(true);
 
     try {
-      await signUp(email, password, name.trim());
-      router.replace('/dashboard');
+      // 1. Create the user via singlab-api (Firebase Auth + Firestore).
+      await usersApi.createUser({ name: name.trim(), email, password });
+
+      // 2. Sign in temporarily to send the verification email, then sign out.
+      await initiateEmailVerification(email, password);
+
+      // 3. Store registration flag in sessionStorage so the login page can
+      //    display the confirmation toast regardless of auth state timing.
+      sessionStorage.setItem('emailVerificationSent', 'true');
+
+      // 4. Redirect to login.
+      router.replace('/login');
     } catch (err) {
-      const firebaseError = err as FirebaseError;
-      setError(getFirebaseErrorMessage(firebaseError));
+      setError(getErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
