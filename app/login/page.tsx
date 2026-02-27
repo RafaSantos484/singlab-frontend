@@ -2,6 +2,7 @@
 
 import { type FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
 import { signIn } from '@/lib/firebase';
 import { type FirebaseError } from 'firebase/app';
@@ -317,7 +318,7 @@ export default function LoginPage(): React.ReactElement | null {
               <h1 className="bg-gradient-to-r from-accent-300 via-brand-200 to-brand-100 bg-clip-text text-3xl font-bold tracking-tight text-transparent">
                 SingLab
               </h1>
-              <p className="mt-1.5 text-sm text-brand-100/50">
+              <p className="mt-1.5 text-sm text-brand-100/75">
                 Sign in to your account
               </p>
             </div>
@@ -333,7 +334,7 @@ export default function LoginPage(): React.ReactElement | null {
             <div className="flex flex-col gap-1.5">
               <label
                 htmlFor="email"
-                className="text-sm font-medium text-brand-100/80"
+                className="text-sm font-medium text-brand-100/95"
               >
                 Email
               </label>
@@ -355,7 +356,7 @@ export default function LoginPage(): React.ReactElement | null {
               <div className="flex items-center justify-between">
                 <label
                   htmlFor="password"
-                  className="text-sm font-medium text-brand-100/80"
+                  className="text-sm font-medium text-brand-100/95"
                 >
                   Password
                 </label>
@@ -365,7 +366,7 @@ export default function LoginPage(): React.ReactElement | null {
                   onClick={() => {
                     /* TODO: navigate to /forgot-password */
                   }}
-                  className="text-xs text-accent-300/70 transition hover:text-accent-200 focus:outline-none focus-visible:underline"
+                  className="cursor-pointer text-xs text-accent-300/90 transition hover:text-accent-200 focus:outline-none focus-visible:underline"
                 >
                   Forgot password?
                 </button>
@@ -397,7 +398,7 @@ export default function LoginPage(): React.ReactElement | null {
             <button
               type="submit"
               disabled={submitting || !email || !password}
-              className="mt-2 flex items-center justify-center rounded-lg bg-gradient-to-r from-accent-500 to-brand-300 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand-300/20 transition hover:from-accent-600 hover:to-brand-400 hover:shadow-brand-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300/60 disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-2 flex cursor-pointer items-center justify-center rounded-lg bg-gradient-to-r from-accent-500 to-brand-300 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand-300/20 transition hover:from-accent-600 hover:to-brand-400 hover:shadow-brand-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300/60 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting ? (
                 <>
@@ -413,20 +414,17 @@ export default function LoginPage(): React.ReactElement | null {
           {/* Divider */}
           <div className="my-6 flex items-center gap-3" aria-hidden="true">
             <div className="h-px flex-1 bg-gradient-to-r from-transparent via-brand-500/50 to-transparent" />
-            <span className="text-xs text-brand-100/25">or</span>
+            <span className="text-xs text-brand-100/55">or</span>
             <div className="h-px flex-1 bg-gradient-to-r from-transparent via-brand-500/50 to-transparent" />
           </div>
 
-          {/* Secondary action — Create new account (mock) */}
-          <button
-            type="button"
-            onClick={() => {
-              /* TODO: navigate to /register */
-            }}
-            className="w-full rounded-lg border border-brand-300/30 bg-transparent px-4 py-2.5 text-sm font-semibold text-brand-100/70 transition hover:border-brand-300/60 hover:bg-brand-300/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300/40"
+          {/* Secondary action — Create new account */}
+          <Link
+            href="/register"
+            className="flex w-full cursor-pointer items-center justify-center rounded-lg border border-brand-300/30 bg-transparent px-4 py-2.5 text-sm font-semibold text-brand-100/85 transition hover:border-brand-300/60 hover:bg-brand-300/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300/40"
           >
             Create new account
-          </button>
+          </Link>
         </div>
       </div>
     </div>
