@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
 import { initiateEmailVerification } from '@/lib/firebase';
 import { usersApi, ApiError } from '@/lib/api';
+import { validateCreateUser } from '@/lib/validation/create-user';
 import { SingLabLogo } from '@/components/ui/SingLabLogo';
 import { WaveformDecoration } from '@/components/ui/WaveformDecoration';
 import { SpectrumDecoration } from '@/components/ui/SpectrumDecoration';
@@ -40,6 +41,7 @@ export default function RegisterPage(): React.ReactElement | null {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
 
   const passwordMismatch =
@@ -49,13 +51,37 @@ export default function RegisterPage(): React.ReactElement | null {
     name.trim().length > 0 &&
     email.length > 0 &&
     password.length > 0 &&
-    password === confirmPassword;
+    confirmPassword.length > 0 &&
+    password === confirmPassword &&
+    Object.keys(fieldErrors).length === 0;
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
+
+    // Clear previous errors
+    setError(null);
+    setFieldErrors({});
+
+    // Validate form data
+    const validation = validateCreateUser({
+      name: name.trim(),
+      email,
+      password,
+    });
+
+    if (!validation.success) {
+      setFieldErrors(validation.errors);
+      return;
+    }
+
+    // Check password match
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+
     if (!isFormValid) return;
 
-    setError(null);
     setSubmitting(true);
 
     try {
@@ -164,11 +190,32 @@ export default function RegisterPage(): React.ReactElement | null {
                 autoComplete="name"
                 required
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  // Clear field error when user starts typing
+                  if (fieldErrors.name) {
+                    setFieldErrors((prev) => {
+                      const next = { ...prev };
+                      delete next.name;
+                      return next;
+                    });
+                  }
+                }}
                 disabled={submitting}
                 placeholder="Jane Doe"
-                className="rounded-lg border border-brand-500/60 bg-brand-800/60 px-3.5 py-2.5 text-sm text-white placeholder-brand-100/25 outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-300/20 disabled:opacity-50"
+                aria-describedby={fieldErrors.name ? 'name-error' : undefined}
+                className={[
+                  'rounded-lg border bg-brand-800/60 px-3.5 py-2.5 text-sm text-white placeholder-brand-100/25 outline-none transition focus:ring-2 disabled:opacity-50',
+                  fieldErrors.name
+                    ? 'border-red-500/60 focus:border-red-400 focus:ring-red-400/20'
+                    : 'border-brand-500/60 focus:border-brand-300 focus:ring-brand-300/20',
+                ].join(' ')}
               />
+              {fieldErrors.name && (
+                <p id="name-error" role="alert" className="text-xs text-red-400">
+                  {fieldErrors.name}
+                </p>
+              )}
             </div>
 
             {/* Email */}
@@ -185,11 +232,32 @@ export default function RegisterPage(): React.ReactElement | null {
                 autoComplete="email"
                 required
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  // Clear field error when user starts typing
+                  if (fieldErrors.email) {
+                    setFieldErrors((prev) => {
+                      const next = { ...prev };
+                      delete next.email;
+                      return next;
+                    });
+                  }
+                }}
                 disabled={submitting}
                 placeholder="you@example.com"
-                className="rounded-lg border border-brand-500/60 bg-brand-800/60 px-3.5 py-2.5 text-sm text-white placeholder-brand-100/25 outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-300/20 disabled:opacity-50"
+                aria-describedby={fieldErrors.email ? 'email-error' : undefined}
+                className={[
+                  'rounded-lg border bg-brand-800/60 px-3.5 py-2.5 text-sm text-white placeholder-brand-100/25 outline-none transition focus:ring-2 disabled:opacity-50',
+                  fieldErrors.email
+                    ? 'border-red-500/60 focus:border-red-400 focus:ring-red-400/20'
+                    : 'border-brand-500/60 focus:border-brand-300 focus:ring-brand-300/20',
+                ].join(' ')}
               />
+              {fieldErrors.email && (
+                <p id="email-error" role="alert" className="text-xs text-red-400">
+                  {fieldErrors.email}
+                </p>
+              )}
             </div>
 
             {/* Password */}
@@ -206,11 +274,36 @@ export default function RegisterPage(): React.ReactElement | null {
                 autoComplete="new-password"
                 required
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  // Clear field error when user starts typing
+                  if (fieldErrors.password) {
+                    setFieldErrors((prev) => {
+                      const next = { ...prev };
+                      delete next.password;
+                      return next;
+                    });
+                  }
+                }}
                 disabled={submitting}
                 placeholder="••••••••"
-                className="rounded-lg border border-brand-500/60 bg-brand-800/60 px-3.5 py-2.5 text-sm text-white placeholder-brand-100/25 outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-300/20 disabled:opacity-50"
+                aria-describedby={fieldErrors.password ? 'password-error' : undefined}
+                className={[
+                  'rounded-lg border bg-brand-800/60 px-3.5 py-2.5 text-sm text-white placeholder-brand-100/25 outline-none transition focus:ring-2 disabled:opacity-50',
+                  fieldErrors.password
+                    ? 'border-red-500/60 focus:border-red-400 focus:ring-red-400/20'
+                    : 'border-brand-500/60 focus:border-brand-300 focus:ring-brand-300/20',
+                ].join(' ')}
               />
+              {fieldErrors.password && (
+                <p
+                  id="password-error"
+                  role="alert"
+                  className="text-xs text-red-400"
+                >
+                  {fieldErrors.password}
+                </p>
+              )}
             </div>
 
             {/* Confirm Password */}
