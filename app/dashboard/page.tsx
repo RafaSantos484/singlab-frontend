@@ -29,7 +29,7 @@ export default function DashboardPage(): React.ReactElement | null {
     );
   }
 
-  const user = userProfile?.auth;
+  const user = userProfile;
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
