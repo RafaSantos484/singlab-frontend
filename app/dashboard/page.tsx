@@ -56,7 +56,8 @@ export default function DashboardPage(): React.ReactElement | null {
       <Card
         sx={{
           mb: { xs: 4, sm: 5, lg: 6 },
-          background: 'linear-gradient(135deg, rgba(19, 10, 53, 0.6) 0%, rgba(13, 7, 38, 0.4) 100%)',
+          background:
+            'linear-gradient(135deg, rgba(19, 10, 53, 0.6) 0%, rgba(13, 7, 38, 0.4) 100%)',
           border: '1px solid rgba(45, 26, 110, 0.4)',
           backdropFilter: 'blur(8px)',
         }}
@@ -77,8 +78,7 @@ export default function DashboardPage(): React.ReactElement | null {
               fontSize: { xs: '1.875rem', sm: '2.25rem', lg: '2.5rem' },
               fontWeight: 700,
               letterSpacing: '-0.02em',
-              background:
-                'linear-gradient(to right, #ededed, #818cf8)',
+              background: 'linear-gradient(to right, #ededed, #818cf8)',
               backgroundClip: 'text',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
@@ -218,10 +218,7 @@ export default function DashboardPage(): React.ReactElement | null {
                     </Box>
 
                     {/* Delete button */}
-                    <SongDeleteButton
-                      songId={song.id}
-                      songTitle={song.title}
-                    />
+                    <SongDeleteButton songId={song.id} songTitle={song.title} />
                   </Box>
 
                   {/* Song player */}

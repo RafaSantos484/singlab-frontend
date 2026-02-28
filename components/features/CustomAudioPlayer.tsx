@@ -68,7 +68,9 @@ export function CustomAudioPlayer({
   ariaLabel = 'Audio player',
 }: CustomAudioPlayerProps): React.ReactElement {
   const audioRef = useRef<HTMLAudioElement>(null);
-  const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+  const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(
+    null,
+  );
 
   // Generate unique player ID using React's useId hook
   const playerId = `player-${useId()}`;
@@ -125,7 +127,7 @@ export function CustomAudioPlayer({
       audio.currentTime = newTime;
       // The timeupdate event will sync the state automatically
     },
-    []
+    [],
   );
 
   // Toggle mute
@@ -155,7 +157,7 @@ export function CustomAudioPlayer({
         setIsMuted(false);
       }
     },
-    [isMuted]
+    [isMuted],
   );
 
   return (
@@ -183,11 +185,7 @@ export function CustomAudioPlayer({
 
       <Stack spacing={{ xs: 1.5, sm: 2 }}>
         {/* Controls row */}
-        <Stack
-          direction="row"
-          alignItems="center"
-          spacing={{ xs: 1, sm: 1.5 }}
-        >
+        <Stack direction="row" alignItems="center" spacing={{ xs: 1, sm: 1.5 }}>
           {/* Play/Pause button
               State is synchronized with audio events (play, playing, pause, ended).
               External controls (media keys, system buttons) are reflected in real-time. */}
@@ -218,9 +216,13 @@ export function CustomAudioPlayer({
                 }}
               >
                 {isPlaying ? (
-                  <PauseIcon sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem' } }} />
+                  <PauseIcon
+                    sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem' } }}
+                  />
                 ) : (
-                  <PlayArrowIcon sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem' } }} />
+                  <PlayArrowIcon
+                    sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem' } }}
+                  />
                 )}
               </IconButton>
             </span>
@@ -254,7 +256,8 @@ export function CustomAudioPlayer({
                   },
                   '& .MuiSlider-track': {
                     border: 'none',
-                    background: 'linear-gradient(90deg, #7c3aed 0%, #a855f7 100%)',
+                    background:
+                      'linear-gradient(90deg, #7c3aed 0%, #a855f7 100%)',
                   },
                   '& .MuiSlider-rail': {
                     opacity: 0.3,

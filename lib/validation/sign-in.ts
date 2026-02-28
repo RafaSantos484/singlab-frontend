@@ -34,7 +34,9 @@ export type SignInDto = z.infer<typeof SignInSchema>;
  */
 export function validateSignIn(
   data: unknown,
-): { success: true; data: SignInDto } | { success: false; errors: Record<string, string> } {
+):
+  | { success: true; data: SignInDto }
+  | { success: false; errors: Record<string, string> } {
   const result = SignInSchema.safeParse(data);
 
   if (result.success) {

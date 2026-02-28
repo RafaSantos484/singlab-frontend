@@ -129,8 +129,7 @@ export function SongDeleteButton({
           errorMessage =
             'Authentication expired. Please sign in again and retry.';
         } else if (statusCode === 403) {
-          errorMessage =
-            'You do not have permission to delete this song.';
+          errorMessage = 'You do not have permission to delete this song.';
         } else if (statusCode === 404) {
           errorMessage = 'This song no longer exists.';
         }

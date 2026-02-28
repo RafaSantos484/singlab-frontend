@@ -136,8 +136,8 @@ export default function LoginPage(): React.ReactElement | null {
           variant="filled"
           sx={{ width: '100%' }}
         >
-          Account created! Check your inbox and verify your email address
-          before signing in.
+          Account created! Check your inbox and verify your email address before
+          signing in.
         </Alert>
       </Snackbar>
 

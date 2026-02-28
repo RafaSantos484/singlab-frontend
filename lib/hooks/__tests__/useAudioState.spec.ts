@@ -17,17 +17,23 @@ describe('useAudioState', () => {
       paused: true,
       currentTime: 0,
       duration: 120,
-      addEventListener: jest.fn((event: string, handler: (...args: unknown[]) => void) => {
-        if (!eventListeners[event]) {
-          eventListeners[event] = [];
-        }
-        eventListeners[event].push(handler);
-      }),
-      removeEventListener: jest.fn((event: string, handler: (...args: unknown[]) => void) => {
-        if (eventListeners[event]) {
-          eventListeners[event] = eventListeners[event].filter(h => h !== handler);
-        }
-      }),
+      addEventListener: jest.fn(
+        (event: string, handler: (...args: unknown[]) => void) => {
+          if (!eventListeners[event]) {
+            eventListeners[event] = [];
+          }
+          eventListeners[event].push(handler);
+        },
+      ),
+      removeEventListener: jest.fn(
+        (event: string, handler: (...args: unknown[]) => void) => {
+          if (eventListeners[event]) {
+            eventListeners[event] = eventListeners[event].filter(
+              (h) => h !== handler,
+            );
+          }
+        },
+      ),
       pause: jest.fn(),
     } as unknown as HTMLAudioElement;
   });
@@ -38,7 +44,7 @@ describe('useAudioState', () => {
 
   const fireEvent = (eventName: string): void => {
     if (eventListeners[eventName]) {
-      eventListeners[eventName].forEach(handler => handler());
+      eventListeners[eventName].forEach((handler) => handler());
     }
   };
 
@@ -47,7 +53,7 @@ describe('useAudioState', () => {
       useAudioState({
         playerId: 'test-player',
         audioElement: mockAudioElement,
-      })
+      }),
     );
 
     expect(result.current.isPlaying).toBe(false);
@@ -61,28 +67,28 @@ describe('useAudioState', () => {
       useAudioState({
         playerId: 'test-player',
         audioElement: mockAudioElement,
-      })
+      }),
     );
 
     expect(mockAudioElement.addEventListener).toHaveBeenCalledWith(
       'play',
-      expect.any(Function)
+      expect.any(Function),
     );
     expect(mockAudioElement.addEventListener).toHaveBeenCalledWith(
       'playing',
-      expect.any(Function)
+      expect.any(Function),
     );
     expect(mockAudioElement.addEventListener).toHaveBeenCalledWith(
       'pause',
-      expect.any(Function)
+      expect.any(Function),
     );
     expect(mockAudioElement.addEventListener).toHaveBeenCalledWith(
       'timeupdate',
-      expect.any(Function)
+      expect.any(Function),
     );
     expect(mockAudioElement.addEventListener).toHaveBeenCalledWith(
       'loadedmetadata',
-      expect.any(Function)
+      expect.any(Function),
     );
   });
 
@@ -91,7 +97,7 @@ describe('useAudioState', () => {
       useAudioState({
         playerId: 'test-player',
         audioElement: mockAudioElement,
-      })
+      }),
     );
 
     expect(result.current.isPlaying).toBe(false);
@@ -112,7 +118,7 @@ describe('useAudioState', () => {
       useAudioState({
         playerId: 'test-player',
         audioElement: mockAudioElement,
-      })
+      }),
     );
 
     // First play
@@ -140,7 +146,7 @@ describe('useAudioState', () => {
       useAudioState({
         playerId: 'test-player',
         audioElement: mockAudioElement,
-      })
+      }),
     );
 
     // Play the track
@@ -173,7 +179,7 @@ describe('useAudioState', () => {
       useAudioState({
         playerId: 'test-player',
         audioElement: mockAudioElement,
-      })
+      }),
     );
 
     await act(async () => {
@@ -200,7 +206,7 @@ describe('useAudioState', () => {
       useAudioState({
         playerId: 'test-player',
         audioElement: mockAudioElement,
-      })
+      }),
     );
 
     expect(result.current.duration).toBe(0);
@@ -222,7 +228,7 @@ describe('useAudioState', () => {
       useAudioState({
         playerId: 'test-player',
         audioElement: mockAudioElement,
-      })
+      }),
     );
 
     expect(result.current.isLoading).toBe(true);
@@ -252,7 +258,7 @@ describe('useAudioState', () => {
         playerId: 'test-player',
         audioElement: mockAudioElement,
         onStateChange,
-      })
+      }),
     );
 
     await act(async () => {
@@ -280,22 +286,23 @@ describe('useAudioState', () => {
       useAudioState({
         playerId: 'test-player',
         audioElement: mockAudioElement,
-      })
+      }),
     );
 
-    const initialRemoveEventListenerCallCount =
-      (mockAudioElement.removeEventListener as jest.Mock).mock.calls.length;
+    const initialRemoveEventListenerCallCount = (
+      mockAudioElement.removeEventListener as jest.Mock
+    ).mock.calls.length;
 
     // Note: We don't have direct access to unmount the hook here,
     // so we test that event listeners were properly attached.
     // The actual cleanup happens when the component unmounts.
     expect(mockAudioElement.addEventListener).toHaveBeenCalledWith(
       'play',
-      expect.any(Function)
+      expect.any(Function),
     );
     expect(mockAudioElement.addEventListener).toHaveBeenCalledWith(
       'pause',
-      expect.any(Function)
+      expect.any(Function),
     );
     expect(initialRemoveEventListenerCallCount).toBeGreaterThanOrEqual(0);
   });
@@ -305,7 +312,7 @@ describe('useAudioState', () => {
       useAudioState({
         playerId: 'test-player',
         audioElement: mockAudioElement,
-      })
+      }),
     );
 
     // Simulate rate change
@@ -323,7 +330,7 @@ describe('useAudioState', () => {
       useAudioState({
         playerId: 'test-player',
         audioElement: null,
-      })
+      }),
     );
 
     expect(result.current.isPlaying).toBe(false);

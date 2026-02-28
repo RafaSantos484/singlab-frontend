@@ -54,9 +54,9 @@ describe('SignInSchema', () => {
     });
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(
-        result.error.issues.some((i) => i.path.includes('password')),
-      ).toBe(true);
+      expect(result.error.issues.some((i) => i.path.includes('password'))).toBe(
+        true,
+      );
     }
   });
 
@@ -67,9 +67,9 @@ describe('SignInSchema', () => {
     });
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(
-        result.error.issues.some((i) => i.path.includes('password')),
-      ).toBe(true);
+      expect(result.error.issues.some((i) => i.path.includes('password'))).toBe(
+        true,
+      );
     }
   });
 
@@ -80,9 +80,9 @@ describe('SignInSchema', () => {
     });
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(
-        result.error.issues.some((i) => i.path.includes('password')),
-      ).toBe(true);
+      expect(result.error.issues.some((i) => i.path.includes('password'))).toBe(
+        true,
+      );
     }
   });
 
@@ -93,9 +93,9 @@ describe('SignInSchema', () => {
     });
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(
-        result.error.issues.some((i) => i.path.includes('password')),
-      ).toBe(true);
+      expect(result.error.issues.some((i) => i.path.includes('password'))).toBe(
+        true,
+      );
     }
   });
 

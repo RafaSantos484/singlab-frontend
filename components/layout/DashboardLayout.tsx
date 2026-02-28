@@ -41,7 +41,9 @@ export function DashboardLayout({
 
   const user = userProfile;
   const displayName = user?.displayName ?? user?.email ?? 'User';
-  const avatarInitial = (user?.displayName ?? user?.email ?? 'U')[0].toUpperCase();
+  const avatarInitial = (user?.displayName ??
+    user?.email ??
+    'U')[0].toUpperCase();
 
   return (
     <Box

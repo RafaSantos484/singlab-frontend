@@ -81,7 +81,9 @@ export function SongCreateDialog({
    * Extracts metadata from audio file using jsmediatags.
    * Returns extracted title and artist, or null if extraction fails.
    */
-  function extractMetadata(file: File): Promise<{ title: string; artist: string } | null> {
+  function extractMetadata(
+    file: File,
+  ): Promise<{ title: string; artist: string } | null> {
     return new Promise((resolve) => {
       jsmediatags.read(file, {
         onSuccess: (tag) => {
@@ -113,7 +115,9 @@ export function SongCreateDialog({
    *
    * @param e - Change event from file input element
    */
-  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+  async function handleFileSelect(
+    e: React.ChangeEvent<HTMLInputElement>,
+  ): Promise<void> {
     const file = e.currentTarget.files?.[0];
     const inputElement = e.currentTarget;
 
@@ -305,7 +309,8 @@ export function SongCreateDialog({
               },
             }}
           >
-            Attach the file first, then fill in Title and Author. We&apos;ll auto-detect metadata when possible.
+            Attach the file first, then fill in Title and Author. We&apos;ll
+            auto-detect metadata when possible.
           </Alert>
 
           {/* File upload section - moved to top */}
@@ -368,7 +373,10 @@ export function SongCreateDialog({
                   gap: 1,
                 }}
               >
-                <CircularProgress size={16} sx={{ color: 'rgb(199, 210, 254)' }} />
+                <CircularProgress
+                  size={16}
+                  sx={{ color: 'rgb(199, 210, 254)' }}
+                />
                 Extracting metadata...
               </Typography>
             )}
@@ -389,7 +397,8 @@ export function SongCreateDialog({
                   gap: 1,
                 }}
               >
-                ✓ {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(1)} MB)
+                ✓ {selectedFile.name} (
+                {(selectedFile.size / 1024 / 1024).toFixed(1)} MB)
               </Typography>
             )}
 
@@ -431,7 +440,12 @@ export function SongCreateDialog({
               }
             }}
             error={!!fieldErrors.title}
-            helperText={fieldErrors.title || (selectedFile && isExtractingMetadata ? 'Detecting metadata...' : '')}
+            helperText={
+              fieldErrors.title ||
+              (selectedFile && isExtractingMetadata
+                ? 'Detecting metadata...'
+                : '')
+            }
             fullWidth
             disabled={isLoading || !selectedFile || isExtractingMetadata}
             placeholder="e.g., Bohemian Rhapsody"
@@ -476,7 +490,12 @@ export function SongCreateDialog({
               }
             }}
             error={!!fieldErrors.author}
-            helperText={fieldErrors.author || (selectedFile && isExtractingMetadata ? 'Detecting metadata...' : '')}
+            helperText={
+              fieldErrors.author ||
+              (selectedFile && isExtractingMetadata
+                ? 'Detecting metadata...'
+                : '')
+            }
             fullWidth
             disabled={isLoading || !selectedFile || isExtractingMetadata}
             placeholder="e.g., Queen"
@@ -509,7 +528,6 @@ export function SongCreateDialog({
               },
             }}
           />
-
         </Box>
       </DialogContent>
 
@@ -535,7 +553,9 @@ export function SongCreateDialog({
 
         <Button
           onClick={handleSubmit}
-          disabled={isLoading || !title.trim() || !author.trim() || !selectedFile}
+          disabled={
+            isLoading || !title.trim() || !author.trim() || !selectedFile
+          }
           variant="contained"
           sx={{
             background: 'linear-gradient(135deg, #a78bfa 0%, #c4b5fd 100%)',
@@ -544,8 +564,7 @@ export function SongCreateDialog({
             textTransform: 'none',
             fontSize: '0.95rem',
             '&:hover': {
-              background:
-                'linear-gradient(135deg, #b8a3e0 0%, #d4c4ff 100%)',
+              background: 'linear-gradient(135deg, #b8a3e0 0%, #d4c4ff 100%)',
             },
             '&.Mui-disabled': {
               background: 'rgba(168, 85, 247, 0.3)',
@@ -555,10 +574,7 @@ export function SongCreateDialog({
         >
           {isLoading ? (
             <>
-              <CircularProgress
-                size={20}
-                sx={{ mr: 1, color: '#1a0e2e' }}
-              />
+              <CircularProgress size={20} sx={{ mr: 1, color: '#1a0e2e' }} />
               Uploading...
             </>
           ) : (

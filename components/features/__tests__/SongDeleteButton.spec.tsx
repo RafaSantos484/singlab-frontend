@@ -284,9 +284,7 @@ describe('SongDeleteButton', () => {
 
     // Error snackbar should appear
     await waitFor(() => {
-      expect(
-        screen.getByText(/failed to delete song/i),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/failed to delete song/i)).toBeInTheDocument();
     });
 
     // Dialog should remain open for retry
@@ -313,9 +311,7 @@ describe('SongDeleteButton', () => {
 
     // Specific 401 error message should appear
     await waitFor(() => {
-      expect(
-        screen.getByText(/authentication expired/i),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/authentication expired/i)).toBeInTheDocument();
     });
 
     // Dialog should remain open
@@ -399,9 +395,7 @@ describe('SongDeleteButton', () => {
 
     // Wait for success snackbar
     await waitFor(() => {
-      expect(
-        screen.getByText(/deleted successfully/i),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/deleted successfully/i)).toBeInTheDocument();
     });
 
     // Wait for dialog to fully close before looking for close button

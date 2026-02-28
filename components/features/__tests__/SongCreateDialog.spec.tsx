@@ -40,28 +40,24 @@ describe('SongCreateDialog', () => {
   });
 
   it('renders dialog title and form fields when open', () => {
-    render(
-      <SongCreateDialog open onClose={mockOnClose} />,
-    );
+    render(<SongCreateDialog open onClose={mockOnClose} />);
 
     expect(screen.getByText('Upload New Song')).toBeInTheDocument();
     expect(screen.getByLabelText('Song Title')).toBeInTheDocument();
     expect(screen.getByLabelText('Artist / Author')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /choose audio file/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /choose audio file/i }),
+    ).toBeInTheDocument();
   });
 
   it('does not render when open is false', () => {
-    render(
-      <SongCreateDialog open={false} onClose={mockOnClose} />,
-    );
+    render(<SongCreateDialog open={false} onClose={mockOnClose} />);
 
     expect(screen.queryByText('Upload New Song')).not.toBeInTheDocument();
   });
 
   it('disables submit button when form fields are empty', () => {
-    render(
-      <SongCreateDialog open onClose={mockOnClose} />,
-    );
+    render(<SongCreateDialog open onClose={mockOnClose} />);
 
     const submitButton = screen.getByRole('button', {
       name: /upload song/i,
@@ -71,9 +67,7 @@ describe('SongCreateDialog', () => {
 
   it('calls onClose when Cancel button is clicked', async () => {
     const user = userEvent.setup();
-    render(
-      <SongCreateDialog open onClose={mockOnClose} />,
-    );
+    render(<SongCreateDialog open onClose={mockOnClose} />);
 
     const cancelButton = screen.getByRole('button', { name: /cancel/i });
     await user.click(cancelButton);
@@ -82,20 +76,20 @@ describe('SongCreateDialog', () => {
   });
 
   it('shows file upload button and helper text', () => {
-    render(
-      <SongCreateDialog open onClose={mockOnClose} />,
-    );
+    render(<SongCreateDialog open onClose={mockOnClose} />);
 
-    expect(screen.getByRole('button', { name: /choose audio file/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /choose audio file/i }),
+    ).toBeInTheDocument();
     expect(screen.getByText(/supported.*mp3.*wav.*ogg/i)).toBeInTheDocument();
   });
 
   it('shows selected file name after selection', async () => {
-    render(
-      <SongCreateDialog open onClose={mockOnClose} />,
-    );
+    render(<SongCreateDialog open onClose={mockOnClose} />);
 
-    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const input = document.querySelector(
+      'input[type="file"]',
+    ) as HTMLInputElement;
     const file = new File(['audio'], 'test.mp3', { type: 'audio/mpeg' });
     fireEvent.change(input, { target: { files: [file] } });
 
@@ -106,9 +100,7 @@ describe('SongCreateDialog', () => {
 
   it('has accessible keyboard navigation', async () => {
     const user = userEvent.setup();
-    render(
-      <SongCreateDialog open onClose={mockOnClose} />,
-    );
+    render(<SongCreateDialog open onClose={mockOnClose} />);
 
     const titleInput = screen.getByLabelText('Song Title');
     // Title should be autofocused
@@ -119,4 +111,3 @@ describe('SongCreateDialog', () => {
     // Verify tab order works (browser default)
   });
 });
-

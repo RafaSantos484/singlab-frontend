@@ -39,7 +39,9 @@ export type CreateUserDto = z.infer<typeof CreateUserSchema>;
  */
 export function validateCreateUser(
   data: unknown,
-): { success: true; data: CreateUserDto } | { success: false; errors: Record<string, string> } {
+):
+  | { success: true; data: CreateUserDto }
+  | { success: false; errors: Record<string, string> } {
   const result = CreateUserSchema.safeParse(data);
 
   if (result.success) {
