@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useCallback, useId } from 'react';
 import {
   Box,
   IconButton,
@@ -13,6 +13,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import VolumeOffIcon from '@mui/icons-material/VolumeOff';
+import { useAudioState } from '@/lib/hooks/useAudioState';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -49,85 +50,70 @@ function formatTime(seconds: number): string {
  * Custom audio player component with MUI styling.
  *
  * Features:
- * - Play/Pause control
+ * - Play/Pause control (responds to button clicks and external controls)
  * - Progress bar with seek functionality
  * - Current/total time display
  * - Volume/mute control
  * - Responsive design
  * - Theme-consistent styling
- * - Full accessibility support
+ * - Full accessibility support (aria-pressed, aria-label, keyboard)
+ *
+ * State Synchronization:
+ * Uses useAudioState hook to synchronize the Play/Pause icon with the actual
+ * audio element state. This ensures the UI reflects true playback state, even
+ * when playback is controlled externally (e.g., media keys, system buttons).
  */
 export function CustomAudioPlayer({
   src,
   ariaLabel = 'Audio player',
 }: CustomAudioPlayerProps): React.ReactElement {
   const audioRef = useRef<HTMLAudioElement>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+
+  // Generate unique player ID using React's useId hook
+  const playerId = `player-${useId()}`;
+
+  // Callback ref to detect when audio element mounts.
+  // Instead of just assigning audioRef.current, we also set state so the hook
+  // can detect the element and attach event listeners. This ensures useAudioState
+  // receives the audio element after first render.
+  const setAudioRef = useCallback((element: HTMLAudioElement | null): void => {
+    audioRef.current = element;
+    // Update state to trigger hook with actual element
+    // Only update if element actually changed to avoid unnecessary re-renders
+    setAudioElement(element);
+  }, []);
+
+  // Use the audio state hook that syncs with HTMLAudioElement events
+  const { isPlaying, currentTime, duration, isLoading } = useAudioState({
+    playerId,
+    audioElement,
+  });
+
+  // Local state for volume (not managed by useAudioState)
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
 
-  // Update current time as audio plays
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const updateTime = (): void => {
-      setCurrentTime(audio.currentTime);
-    };
-
-    const updateDuration = (): void => {
-      setDuration(audio.duration);
-      setIsLoading(false);
-    };
-
-    const handleEnded = (): void => {
-      setIsPlaying(false);
-      setCurrentTime(0);
-    };
-
-    const handleLoadStart = (): void => {
-      setIsLoading(true);
-    };
-
-    const handleCanPlay = (): void => {
-      setIsLoading(false);
-    };
-
-    audio.addEventListener('timeupdate', updateTime);
-    audio.addEventListener('loadedmetadata', updateDuration);
-    audio.addEventListener('ended', handleEnded);
-    audio.addEventListener('loadstart', handleLoadStart);
-    audio.addEventListener('canplay', handleCanPlay);
-
-    return () => {
-      audio.removeEventListener('timeupdate', updateTime);
-      audio.removeEventListener('loadedmetadata', updateDuration);
-      audio.removeEventListener('ended', handleEnded);
-      audio.removeEventListener('loadstart', handleLoadStart);
-      audio.removeEventListener('canplay', handleCanPlay);
-    };
-  }, [src]);
-
-  // Toggle play/pause
+  // Toggle play/pause by calling audio.play() or audio.pause().
+  // Important: This handler doesn't update isPlaying directly.
+  // The actual state update happens via audio events (play/playing/pause).
+  // This ensures state updates even when external controls are used (media keys, etc).
   const togglePlay = useCallback(async (): Promise<void> => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    if (isPlaying) {
-      audio.pause();
-      setIsPlaying(false);
-    } else {
+    if (audio.paused) {
       try {
         await audio.play();
-        setIsPlaying(true);
+        // State will update via 'play' and 'playing' events
       } catch (error) {
         console.error('Failed to play audio:', error);
       }
+    } else {
+      audio.pause();
+      // State will update via 'pause' event
     }
-  }, [isPlaying]);
+  }, []);
 
   // Handle progress bar seek
   const handleSeek = useCallback(
@@ -137,7 +123,7 @@ export function CustomAudioPlayer({
 
       const newTime = Array.isArray(value) ? value[0] : value;
       audio.currentTime = newTime;
-      setCurrentTime(newTime);
+      // The timeupdate event will sync the state automatically
     },
     []
   );
@@ -191,7 +177,7 @@ export function CustomAudioPlayer({
       aria-label={ariaLabel}
     >
       {/* Hidden audio element */}
-      <audio ref={audioRef} src={src} preload="metadata">
+      <audio ref={setAudioRef} src={src} preload="metadata">
         <track kind="captions" />
       </audio>
 
@@ -202,13 +188,16 @@ export function CustomAudioPlayer({
           alignItems="center"
           spacing={{ xs: 1, sm: 1.5 }}
         >
-          {/* Play/Pause button */}
+          {/* Play/Pause button
+              State is synchronized with audio events (play, playing, pause, ended).
+              External controls (media keys, system buttons) are reflected in real-time. */}
           <Tooltip title={isPlaying ? 'Pause' : 'Play'} arrow>
             <span>
               <IconButton
                 onClick={togglePlay}
                 disabled={isLoading}
                 aria-label={isPlaying ? 'Pause' : 'Play'}
+                aria-pressed={isPlaying}
                 sx={{
                   color: 'primary.main',
                   bgcolor: 'rgba(124, 58, 237, 0.1)',
