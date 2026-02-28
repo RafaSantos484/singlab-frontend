@@ -44,6 +44,8 @@ describe('globalStateReducer', () => {
     expect(initialState.userProfile).toBeNull();
     expect(initialState.songs).toEqual([]);
     expect(initialState.songsStatus).toBe('idle');
+    expect(initialState.currentSongId).toBeNull();
+    expect(initialState.playbackStatus).toBe('idle');
   });
 
   // --- AUTH_LOADING ---------------------------------------------------------
@@ -117,6 +119,69 @@ describe('globalStateReducer', () => {
   it('handles SONGS_ERROR: sets songsStatus to error', () => {
     const next = globalStateReducer(initialState, { type: 'SONGS_ERROR' });
     expect(next.songsStatus).toBe('error');
+  });
+
+  // --- PLAYER_LOAD_SONG -----------------------------------------------------
+
+  it('handles PLAYER_LOAD_SONG: sets currentSongId and playbackStatus to loading', () => {
+    const action: GlobalStateAction = {
+      type: 'PLAYER_LOAD_SONG',
+      payload: 'song-123',
+    };
+    const next = globalStateReducer(initialState, action);
+
+    expect(next.currentSongId).toBe('song-123');
+    expect(next.playbackStatus).toBe('loading');
+  });
+
+  // --- PLAYER_SET_STATUS ----------------------------------------------------
+
+  it('handles PLAYER_SET_STATUS: updates playbackStatus', () => {
+    const stateWithSong = {
+      ...initialState,
+      currentSongId: 'song-123',
+      playbackStatus: 'loading' as const,
+    };
+
+    const action: GlobalStateAction = {
+      type: 'PLAYER_SET_STATUS',
+      payload: 'playing',
+    };
+    const next = globalStateReducer(stateWithSong, action);
+
+    expect(next.playbackStatus).toBe('playing');
+    expect(next.currentSongId).toBe('song-123'); // unchanged
+  });
+
+  it('handles PLAYER_SET_STATUS: can pause', () => {
+    const stateWithSong = {
+      ...initialState,
+      currentSongId: 'song-123',
+      playbackStatus: 'playing' as const,
+    };
+
+    const action: GlobalStateAction = {
+      type: 'PLAYER_SET_STATUS',
+      payload: 'paused',
+    };
+    const next = globalStateReducer(stateWithSong, action);
+
+    expect(next.playbackStatus).toBe('paused');
+  });
+
+  // --- PLAYER_STOP ----------------------------------------------------------
+
+  it('handles PLAYER_STOP: clears currentSongId and sets playbackStatus to idle', () => {
+    const stateWithSong = {
+      ...initialState,
+      currentSongId: 'song-123',
+      playbackStatus: 'playing' as const,
+    };
+
+    const next = globalStateReducer(stateWithSong, { type: 'PLAYER_STOP' });
+
+    expect(next.currentSongId).toBeNull();
+    expect(next.playbackStatus).toBe('idle');
   });
 
   // --- immutability ---------------------------------------------------------

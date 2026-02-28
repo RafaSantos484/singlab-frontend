@@ -59,6 +59,19 @@ export type UserProfile = AuthUser;
 export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 // ---------------------------------------------------------------------------
+// Player
+// ---------------------------------------------------------------------------
+
+/**
+ * Playback status of the global audio player.
+ * - `'idle'`    – no song loaded
+ * - `'loading'` – song is being loaded
+ * - `'playing'` – song is currently playing
+ * - `'paused'`  – song is paused
+ */
+export type PlaybackStatus = 'idle' | 'loading' | 'playing' | 'paused';
+
+// ---------------------------------------------------------------------------
 // Global state shape
 // ---------------------------------------------------------------------------
 
@@ -82,4 +95,13 @@ export interface GlobalState {
   songs: Song[];
   /** Loading status of the Firestore `/users/{uid}/songs` listener. */
   songsStatus: LoadStatus;
+
+  // --- Player ---
+  /**
+   * ID of the currently playing/loaded song.
+   * `null` when no song is loaded in the global player.
+   */
+  currentSongId: string | null;
+  /** Current playback status of the global player. */
+  playbackStatus: PlaybackStatus;
 }

@@ -17,7 +17,10 @@ import { getFirebaseAuth } from '@/lib/firebase/auth';
 import { getFirebaseFirestore } from '@/lib/firebase/firestore';
 import type { RawSongInfo } from '@/lib/api/types';
 
-import { GlobalStateContext } from './GlobalStateContext';
+import {
+  GlobalStateContext,
+  GlobalStateDispatchContext,
+} from './GlobalStateContext';
 import { globalStateReducer, initialState } from './reducer';
 import type { AuthUser, Song } from './types';
 
@@ -136,7 +139,9 @@ export function GlobalStateProvider({ children }: GlobalStateProviderProps) {
 
   return (
     <GlobalStateContext.Provider value={state}>
-      {children}
+      <GlobalStateDispatchContext.Provider value={dispatch}>
+        {children}
+      </GlobalStateDispatchContext.Provider>
     </GlobalStateContext.Provider>
   );
 }
