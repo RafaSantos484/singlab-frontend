@@ -19,14 +19,17 @@ import {
   FormControl,
   InputLabel,
   Chip,
+  Button,
+  LinearProgress,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import SearchIcon from '@mui/icons-material/Search';
 import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import GraphicEqIcon from '@mui/icons-material/GraphicEq';
+import RefreshIcon from '@mui/icons-material/Refresh';
 
-import { GlobalPlayer } from '@/components/features/GlobalPlayer';
 import { SongCreateDialog } from '@/components/features/SongCreateDialog';
 import { SongEditDialog } from '@/components/features/SongEditDialog';
 import { SongDeleteButton } from '@/components/features/SongDeleteButton';
@@ -37,6 +40,8 @@ import { useGlobalState } from '@/lib/store';
 import { useGlobalStateDispatch } from '@/lib/store/GlobalStateContext';
 import { DashboardLayout } from '@/components/layout';
 import type { Song } from '@/lib/api/types';
+import { useSeparationStatus } from '@/lib/hooks/useSeparationStatus';
+import { GlobalPlayer } from '@/components/features/GlobalPlayer';
 
 // ---------------------------------------------------------------------------
 // Page
@@ -317,124 +322,15 @@ export default function DashboardPage(): React.ReactElement | null {
         {filteredAndSortedSongs.length > 0 && (
           <Stack spacing={{ xs: 2, md: 3 }}>
             {filteredAndSortedSongs.map((song) => (
-              <Card
+              <SongCardItem
                 key={song.id}
-                sx={{
-                  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                  '&:hover': {
-                    borderColor: 'rgba(124, 58, 237, 0.6)',
-                    bgcolor: 'rgba(19, 10, 53, 0.7)',
-                  },
-                }}
-              >
-                <CardContent sx={{ p: { xs: 2.5, sm: 3 } }}>
-                  {/* Song metadata */}
-                  <Box
-                    sx={{
-                      mb: 2,
-                      display: 'flex',
-                      flexDirection: { xs: 'column', sm: 'row' },
-                      alignItems: { xs: 'flex-start', sm: 'center' },
-                      justifyContent: 'space-between',
-                      gap: 1,
-                    }}
-                  >
-                    <Box sx={{ minWidth: 0, flex: 1 }}>
-                      {/* Now Playing indicator */}
-                      {song.id === currentSongId && (
-                        <Chip
-                          icon={<PlayCircleIcon />}
-                          label="Now Playing"
-                          size="small"
-                          sx={{
-                            mb: 1,
-                            height: '24px',
-                            bgcolor: 'rgba(124, 58, 237, 0.15)',
-                            color: 'rgba(168, 85, 247, 1)',
-                            borderColor: 'rgba(124, 58, 237, 0.4)',
-                            border: '1px solid',
-                            '& .MuiChip-icon': {
-                              color: 'rgba(168, 85, 247, 1)',
-                            },
-                          }}
-                        />
-                      )}
-                      <Typography
-                        variant="body1"
-                        sx={{
-                          fontWeight: 600,
-                          color: 'text.primary',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {song.title}
-                      </Typography>
-                      <Typography
-                        variant="body2"
-                        sx={{
-                          color: 'text.secondary',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {song.author}
-                      </Typography>
-                    </Box>
-
-                    {/* Action buttons */}
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                      {/* Play button */}
-                      <Tooltip title="Play song">
-                        <IconButton
-                          onClick={() =>
-                            dispatch({
-                              type: 'PLAYER_LOAD_SONG',
-                              payload: song.id,
-                            })
-                          }
-                          size="small"
-                          sx={{
-                            color: 'rgba(124, 58, 237, 0.8)',
-                            bgcolor: 'rgba(124, 58, 237, 0.1)',
-                            '&:hover': {
-                              color: 'rgba(168, 85, 247, 1)',
-                              bgcolor: 'rgba(124, 58, 237, 0.2)',
-                            },
-                          }}
-                        >
-                          <PlayArrowIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-
-                      {/* Edit button */}
-                      <Tooltip title="Edit song">
-                        <IconButton
-                          onClick={() => setEditingSong(song)}
-                          size="small"
-                          sx={{
-                            color: 'rgba(168, 85, 247, 0.8)',
-                            '&:hover': {
-                              color: 'rgba(168, 85, 247, 1)',
-                              bgcolor: 'rgba(168, 85, 247, 0.1)',
-                            },
-                          }}
-                        >
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-
-                      {/* Delete button */}
-                      <SongDeleteButton
-                        songId={song.id}
-                        songTitle={song.title}
-                      />
-                    </Box>
-                  </Box>
-                </CardContent>
-              </Card>
+                song={song}
+                isCurrent={song.id === currentSongId}
+                onPlay={() =>
+                  dispatch({ type: 'PLAYER_LOAD_SONG', payload: song.id })
+                }
+                onEdit={() => setEditingSong(song)}
+              />
             ))}
           </Stack>
         )}
@@ -482,5 +378,290 @@ export default function DashboardPage(): React.ReactElement | null {
       {/* Global audio player */}
       <GlobalPlayer />
     </DashboardLayout>
+  );
+}
+
+/**
+ * Props for the `SongCardItem` component.
+ *
+ * @property song - The song to display
+ * @property isCurrent - Whether this song is currently playing in the global player
+ * @property onPlay - Callback when the play button is clicked
+ * @property onEdit - Callback when the edit button is clicked
+ */
+interface SongCardItemProps {
+  song: Song;
+  isCurrent: boolean;
+  onPlay: () => void;
+  onEdit: () => void;
+}
+
+/**
+ * Individual song card component with metadata, playback controls, and separation status.
+ *
+ * Displays:
+ * - Song title and author with truncation
+ * - "Now Playing" badge (when `isCurrent`)
+ * - Play, edit, and delete action buttons
+ * - Stem separation status panel:
+ *   - Not started: button to initiate separation
+ *   - Processing: progress bar with current progress % and refresh button
+ *   - Finished: available stems with provider/task info
+ *   - Failed: error message with retry button
+ *
+ * Uses the `useSeparationStatus` hook to manage the separation lifecycle,
+ * including automatic polling during processing. Firestore real-time
+ * listener updates `song.separatedSongInfo` which triggers re-render.
+ *
+ * @component
+ */
+function SongCardItem({
+  song,
+  isCurrent,
+  onPlay,
+  onEdit,
+}: SongCardItemProps): React.ReactElement {
+  const {
+    separation,
+    isRequesting,
+    isRefreshing,
+    error: separationError,
+    requestSeparation,
+    refreshStatus,
+  } = useSeparationStatus(song);
+
+  const isProcessing = separation?.status === 'processing';
+  const isFinished = separation?.status === 'finished';
+  const isFailed = separation?.status === 'failed';
+
+  const availableStems = isFinished
+    ? (Object.entries(separation.stems)
+      .filter(([, url]) => Boolean(url))
+      .map(([key]) => key) as Array<keyof typeof separation.stems>)
+    : [];
+
+  return (
+    <Card
+      sx={{
+        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+        '&:hover': {
+          borderColor: 'rgba(124, 58, 237, 0.6)',
+          bgcolor: 'rgba(19, 10, 53, 0.7)',
+        },
+      }}
+    >
+      <CardContent sx={{ p: { xs: 2.5, sm: 3 } }}>
+        <Box
+          sx={{
+            mb: 2,
+            display: 'flex',
+            flexDirection: { xs: 'column', sm: 'row' },
+            alignItems: { xs: 'flex-start', sm: 'center' },
+            justifyContent: 'space-between',
+            gap: 1,
+          }}
+        >
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            {isCurrent && (
+              <Chip
+                icon={<PlayCircleIcon />}
+                label="Now Playing"
+                size="small"
+                sx={{
+                  mb: 1,
+                  height: '24px',
+                  bgcolor: 'rgba(124, 58, 237, 0.15)',
+                  color: 'rgba(168, 85, 247, 1)',
+                  borderColor: 'rgba(124, 58, 237, 0.4)',
+                  border: '1px solid',
+                  '& .MuiChip-icon': {
+                    color: 'rgba(168, 85, 247, 1)',
+                  },
+                }}
+              />
+            )}
+            <Typography
+              variant="body1"
+              sx={{
+                fontWeight: 600,
+                color: 'text.primary',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {song.title}
+            </Typography>
+            <Typography
+              variant="body2"
+              sx={{
+                color: 'text.secondary',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {song.author}
+            </Typography>
+          </Box>
+
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Tooltip title="Play song">
+              <IconButton
+                onClick={onPlay}
+                size="small"
+                sx={{
+                  color: 'rgba(124, 58, 237, 0.8)',
+                  bgcolor: 'rgba(124, 58, 237, 0.1)',
+                  '&:hover': {
+                    color: 'rgba(168, 85, 247, 1)',
+                    bgcolor: 'rgba(124, 58, 237, 0.2)',
+                  },
+                }}
+              >
+                <PlayArrowIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title="Edit song">
+              <IconButton
+                onClick={onEdit}
+                size="small"
+                sx={{
+                  color: 'rgba(168, 85, 247, 0.8)',
+                  '&:hover': {
+                    color: 'rgba(168, 85, 247, 1)',
+                    bgcolor: 'rgba(168, 85, 247, 0.1)',
+                  },
+                }}
+              >
+                <EditIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+
+            <SongDeleteButton songId={song.id} songTitle={song.title} />
+          </Box>
+        </Box>
+
+        {/* Separation status */}
+        <Box
+          sx={{
+            mt: 1,
+            p: 2,
+            borderRadius: 2,
+            border: '1px solid rgba(124, 58, 237, 0.2)',
+            bgcolor: 'rgba(124, 58, 237, 0.05)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 1.5,
+          }}
+        >
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+            }}
+          >
+            <GraphicEqIcon fontSize="small" sx={{ color: 'primary.main' }} />
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              Stem separation
+            </Typography>
+          </Box>
+
+          {separationError && (
+            <Alert severity="error" sx={{ mb: 1 }}>
+              {separationError}
+            </Alert>
+          )}
+
+          {!song.separatedSongInfo && (
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 2,
+              }}
+            >
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                No separation requested yet.
+              </Typography>
+              <Button
+                variant="contained"
+                onClick={() => requestSeparation('poyo')}
+                disabled={isRequesting}
+              >
+                {isRequesting ? 'Starting…' : 'Start stem separation'}
+              </Button>
+            </Box>
+          )}
+
+          {song.separatedSongInfo && isProcessing && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Separating audio… {separation?.progress ?? 0}%
+              </Typography>
+              <LinearProgress
+                variant={
+                  typeof separation?.progress === 'number'
+                    ? 'determinate'
+                    : 'indeterminate'
+                }
+                value={separation?.progress ?? undefined}
+                sx={{ height: 6, borderRadius: 1 }}
+              />
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<RefreshIcon fontSize="small" />}
+                onClick={refreshStatus}
+                disabled={isRefreshing}
+                sx={{ alignSelf: 'flex-start' }}
+              >
+                {isRefreshing ? 'Refreshing…' : 'Refresh status'}
+              </Button>
+            </Box>
+          )}
+
+          {song.separatedSongInfo && isFinished && separation && (
+            <Stack spacing={1}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Chip label={`Provider: ${separation.provider}`} size="small" />
+                {separation.taskId && (
+                  <Chip label={`Task ${separation.taskId}`} size="small" />
+                )}
+              </Box>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Stems ready. Select them in the player below.
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                {availableStems.map((stem) => (
+                  <Chip key={stem} label={stem} size="small" />
+                ))}
+              </Box>
+            </Stack>
+          )}
+
+          {song.separatedSongInfo && isFailed && separation && (
+            <Stack spacing={1.5}>
+              <Alert severity="error" sx={{ mb: 0 }}>
+                Separation failed: {separation.errorMessage ?? 'Unknown error'}
+              </Alert>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<RefreshIcon fontSize="small" />}
+                onClick={refreshStatus}
+                disabled={isRefreshing}
+                sx={{ alignSelf: 'flex-start' }}
+              >
+                {isRefreshing ? 'Retrying…' : 'Retry separation status'}
+              </Button>
+            </Stack>
+          )}
+        </Box>
+      </CardContent>
+    </Card>
   );
 }
