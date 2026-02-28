@@ -15,7 +15,10 @@ import AddIcon from '@mui/icons-material/Add';
 
 import { SongPlayer } from '@/components/features/SongPlayer';
 import { SongCreateDialog } from '@/components/features/SongCreateDialog';
+import { SongDeleteButton } from '@/components/features/SongDeleteButton';
+// useAuthGuard ensures user is authenticated before rendering the page
 import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+// useGlobalState provides access to user profile and songs list via Firestore
 import { useGlobalState } from '@/lib/store';
 import { DashboardLayout } from '@/components/layout';
 
@@ -213,6 +216,12 @@ export default function DashboardPage(): React.ReactElement | null {
                         {song.author}
                       </Typography>
                     </Box>
+
+                    {/* Delete button */}
+                    <SongDeleteButton
+                      songId={song.id}
+                      songTitle={song.title}
+                    />
                   </Box>
 
                   {/* Song player */}
