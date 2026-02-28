@@ -107,6 +107,31 @@ export class SongsApi {
   }
 
   // -------------------------------------------------------------------------
+  // PATCH /songs/:songId
+  // -------------------------------------------------------------------------
+
+  /**
+   * Updates a song's metadata (title and/or author).
+   * Only the provided fields are updated.
+   *
+   * @param songId - Song document ID.
+   * @param updates - Partial song metadata with title and/or author.
+   * @returns Updated song with id, title, and author.
+   * @throws {ApiError} With status 404 when the song does not exist.
+   */
+  async updateSong(
+    songId: string,
+    updates: Partial<UploadSongInput>,
+  ): Promise<Song> {
+    const res = await this.client.patch<ApiSuccessResponse<Song>>(
+      `/songs/${songId}`,
+      updates,
+    );
+
+    return res.data;
+  }
+
+  // -------------------------------------------------------------------------
   // DELETE /songs/:songId
   // -------------------------------------------------------------------------
 
