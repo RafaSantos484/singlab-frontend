@@ -17,6 +17,7 @@ import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
 import { signIn, EmailNotVerifiedError } from '@/lib/firebase';
 import { type FirebaseError } from 'firebase/app';
 import { AuthLayout } from '@/components/layout';
+import { validateSignIn } from '@/lib/validation/sign-in';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -54,8 +55,14 @@ export default function LoginPage(): React.ReactElement | null {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [showRegisteredToast, setShowRegisteredToast] = useState(false);
+
+  const isFormValid =
+    email.length > 0 &&
+    password.length > 0 &&
+    Object.keys(fieldErrors).length === 0;
 
   // Read the registration flag after mount to avoid SSR/hydration mismatches
   // and to be immune to auth-state timing issues.
@@ -71,7 +78,21 @@ export default function LoginPage(): React.ReactElement | null {
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
+
+    // Clear previous errors
     setError(null);
+    setFieldErrors({});
+
+    // Validate form data
+    const validation = validateSignIn({ email, password });
+
+    if (!validation.success) {
+      setFieldErrors(validation.errors);
+      return;
+    }
+
+    if (!isFormValid) return;
+
     setSubmitting(true);
 
     try {
@@ -132,9 +153,21 @@ export default function LoginPage(): React.ReactElement | null {
             required
             fullWidth
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              // Clear field error when user starts typing
+              if (fieldErrors.email) {
+                setFieldErrors((prev) => {
+                  const next = { ...prev };
+                  delete next.email;
+                  return next;
+                });
+              }
+            }}
             disabled={submitting}
             placeholder="you@example.com"
+            error={!!fieldErrors.email}
+            helperText={fieldErrors.email}
             inputProps={{
               'aria-label': 'Email address',
             }}
@@ -190,9 +223,21 @@ export default function LoginPage(): React.ReactElement | null {
               required
               fullWidth
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                // Clear field error when user starts typing
+                if (fieldErrors.password) {
+                  setFieldErrors((prev) => {
+                    const next = { ...prev };
+                    delete next.password;
+                    return next;
+                  });
+                }
+              }}
               disabled={submitting}
               placeholder="••••••••"
+              error={!!fieldErrors.password}
+              helperText={fieldErrors.password}
               inputProps={{
                 'aria-label': 'Password',
               }}
@@ -211,7 +256,7 @@ export default function LoginPage(): React.ReactElement | null {
             type="submit"
             variant="contained"
             fullWidth
-            disabled={submitting || !email || !password}
+            disabled={submitting || !isFormValid}
             size="large"
             sx={{ mt: 1 }}
             startIcon={
