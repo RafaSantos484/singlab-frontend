@@ -15,7 +15,7 @@ import { useEffect, useReducer } from 'react';
 
 import { getFirebaseAuth } from '@/lib/firebase/auth';
 import { getFirebaseFirestore } from '@/lib/firebase/firestore';
-import type { RawSongInfo } from '@/lib/api/types';
+import type { RawSongInfo, SeparatedSongInfo } from '@/lib/api/types';
 
 import {
   GlobalStateContext,
@@ -47,6 +47,7 @@ function docToSong(snap: QueryDocumentSnapshot<DocumentData>): Song {
     title: d['title'] as string,
     author: d['author'] as string,
     rawSongInfo: d['rawSongInfo'] as RawSongInfo,
+    separatedSongInfo: (d['separatedSongInfo'] as SeparatedSongInfo) ?? null,
   };
 }
 

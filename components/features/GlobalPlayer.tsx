@@ -1,35 +1,68 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import type React from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   Box,
+  Button,
   Card,
   CardContent,
-  Typography,
+  Chip,
+  CircularProgress,
   IconButton,
   Slider,
   Stack,
-  CircularProgress,
-  Alert,
+  ToggleButton,
+  ToggleButtonGroup,
   Tooltip,
+  Typography,
 } from '@mui/material';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import GraphicEqIcon from '@mui/icons-material/GraphicEq';
 import PauseIcon from '@mui/icons-material/Pause';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import StopIcon from '@mui/icons-material/Stop';
-import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import VolumeOffIcon from '@mui/icons-material/VolumeOff';
+import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 
 import { useGlobalState } from '@/lib/store';
 import { useGlobalStateDispatch } from '@/lib/store/GlobalStateContext';
 import { useSongRawUrl } from '@/lib/hooks/useSongRawUrl';
-import type { Song } from '@/lib/api/types';
+import type {
+  NormalizedSeparationInfo,
+  SeparationStemOutputs,
+  Song,
+} from '@/lib/api/types';
+import { normalizeSeparationInfo } from '@/lib/separations';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+type PlaybackSource = 'raw' | 'separated';
+type StemKey = keyof SeparationStemOutputs;
+
+const STEM_ORDER: StemKey[] = [
+  'vocals',
+  'bass',
+  'drums',
+  'piano',
+  'guitar',
+  'other',
+];
+
+const STEM_LABELS: Record<StemKey, string> = {
+  vocals: 'Vocals',
+  bass: 'Bass',
+  drums: 'Drums',
+  piano: 'Piano',
+  guitar: 'Guitar',
+  other: 'Other',
+};
+
 /**
- * Format seconds into MM:SS format.
+ * Format seconds into MM:SS format for display.
+ * Handles non-finite values gracefully.
  */
 function formatTime(seconds: number): string {
   if (!isFinite(seconds)) {
@@ -40,140 +73,417 @@ function formatTime(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
+/**
+ * Extract the list of available stems from normalized separation info,
+ * ordered by STEM_ORDER. Returns empty array if separation is not finished.
+ */
+function extractAvailableStems(
+  separation: NormalizedSeparationInfo | null,
+): StemKey[] {
+  if (!separation || separation.status !== 'finished') return [];
+  return STEM_ORDER.filter((stem) => Boolean(separation.stems[stem]));
+}
+
+/**
+ * Build a default stem selection fallback when no stems are explicitly selected.
+ *
+ * Strategy:
+ * 1. If instrumental stems are available (all except vocals), show those
+ *    (sensible default for practice/karaoke)
+ * 2. Otherwise, show all available stems
+ *
+ * This ensures the player always has something to play when separation finishes.
+ */
+function buildDefaultStemSelection(stems: StemKey[]): StemKey[] {
+  const withoutVocals = stems.filter((stem) => stem !== 'vocals');
+  if (withoutVocals.length > 0) return withoutVocals;
+  return stems;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-/**
- * Global audio player component.
- *
- * Renders a single player that displays the currently playing song from global state.
- * Features:
- * - Single audio element for all playback
- * - Play/Pause/Stop controls
- * - Progress bar with seek functionality
- * - Volume control
- * - Displays currently playing song info
- * - Integrated with global state
- */
 export function GlobalPlayer(): React.ReactElement {
   const { currentSongId, songs } = useGlobalState();
 
-  // Find the current song
   const currentSong = currentSongId
     ? songs.find((s) => s.id === currentSongId)
     : null;
 
-  // Don't render if no song is loaded
   if (!currentSongId || !currentSong) {
     return <></>;
   }
 
-  return <GlobalPlayerInner song={currentSong} />;
+  return <GlobalPlayerInner key={currentSong.id} song={currentSong} />;
 }
-
-// ---------------------------------------------------------------------------
-// Inner component (receives a guaranteed Song)
-// ---------------------------------------------------------------------------
 
 interface GlobalPlayerInnerProps {
   song: Song;
 }
 
-function GlobalPlayerInner({
-  song,
-}: GlobalPlayerInnerProps): React.ReactElement {
+/**
+ * Inner player component that renders the actual audio player for a loaded song.
+ *
+ * Supports dual-mode playback:
+ * - **Raw mode**: Single <audio> element for the original uploaded file
+ * - **Separated mode**: Multiple <audio> elements (one per stem) with:
+ *   - Manual playhead synchronization (capped to 150ms drift tolerance)
+ *   - Stem selection via toggleable chips (build custom mixes)
+ *   - Preset shortcuts (instruments, vocals-only, all-stems)
+ *   - Per-stem volume control (selected stems play at master volume, others muted)
+ *
+ * State management is split between:
+ * - Global state: currentSongId, playbackStatus (PLAY/PAUSE/STOP)
+ * - Local state: selectedStems, playbackSource, currentTime, volume
+ * - Effect hooks: wire up audio listeners, sync stems, apply volumes, auto-play
+ *
+ * The component handles edge cases like:
+ * - Browser autoplay policy (gracefully degrades to paused)
+ * - URL expiry (via useSongRawUrl hook)
+ * - Stem sync drift (resyncs every timeupdate and on seek)
+ * - Hydration mismatch (no initial preload attempt)
+ *
+ * @component
+ */
+function GlobalPlayerInner({ song }: GlobalPlayerInnerProps): React.ReactElement {
   const { playbackStatus } = useGlobalState();
   const dispatch = useGlobalStateDispatch();
 
-  // Get the signed URL for the current song
-  const { url, isRefreshing, error } = useSongRawUrl(song);
+  const { url: rawUrl, isRefreshing: isRawRefreshing, error: rawError } =
+    useSongRawUrl(song);
+  const separation = useMemo(
+    () => normalizeSeparationInfo(song.separatedSongInfo),
+    [song.separatedSongInfo],
+  );
 
-  // Audio element ref
+  const [playbackSource, setPlaybackSource] = useState<PlaybackSource>('raw');
+  const [selectedStems, setSelectedStems] = useState<StemKey[]>([]);
+  const availableStems = useMemo(
+    () => extractAvailableStems(separation),
+    [separation],
+  );
+
   const audioRef = useRef<HTMLAudioElement>(null);
+  const stemAudioRefs = useRef<Partial<Record<StemKey, HTMLAudioElement>>>({});
 
-  // Local state for playback controls
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
+  const shouldAutoPlayRef = useRef<boolean>(true);
+
+  const hasSeparatedAudio = separation?.status === 'finished';
+
+  const effectiveSelectedStems = useMemo(() => {
+    const filtered = selectedStems.filter((stem) => availableStems.includes(stem));
+    if (filtered.length > 0) return filtered;
+    if (availableStems.length > 0) return buildDefaultStemSelection(availableStems);
+    return [];
+  }, [availableStems, selectedStems]);
+
+  // Create audio elements for stems when separation data is ready
+  // Each stem gets its own <audio> element; we sync their playheads manually
+  useEffect(() => {
+    if (!separation || separation.status !== 'finished') {
+      stemAudioRefs.current = {};
+      return;
+    }
+
+    const map: Partial<Record<StemKey, HTMLAudioElement>> = {};
+    STEM_ORDER.forEach((stem) => {
+      const src = separation.stems[stem];
+      if (!src) return;
+      const audio = new Audio(src);
+      audio.preload = 'auto';
+      map[stem] = audio;
+    });
+    stemAudioRefs.current = map;
+  }, [separation]);
+
+  const masterStemKey = effectiveSelectedStems[0] ?? availableStems[0];
+
+  const hasActiveAudio = useMemo(() => {
+    if (playbackSource === 'raw') {
+      return Boolean(rawUrl);
+    }
+    if (playbackSource === 'separated') {
+      if (!hasSeparatedAudio || !masterStemKey) return false;
+      return effectiveSelectedStems.length > 0 && Boolean(separation?.stems[masterStemKey]);
+    }
+    return false;
+  }, [effectiveSelectedStems, hasSeparatedAudio, masterStemKey, playbackSource, rawUrl, separation]);
+
+  const getActiveAudio = useCallback((): HTMLAudioElement | null => {
+    if (playbackSource === 'raw') {
+      return audioRef.current;
+    }
+    if (!masterStemKey) return null;
+    return stemAudioRefs.current[masterStemKey] ?? null;
+  }, [masterStemKey, playbackSource]);
+
+  const syncStemsToTime = useCallback(
+    (time: number): void => {
+      if (playbackSource !== 'separated') return;
+      STEM_ORDER.forEach((stem) => {
+        const audio = stemAudioRefs.current[stem];
+        if (audio && Math.abs(audio.currentTime - time) > 0.15) {
+          audio.currentTime = time;
+        }
+      });
+    },
+    [playbackSource],
+  );
+
+  const pauseAllStems = useCallback((): void => {
+    if (playbackSource !== 'separated') return;
+    STEM_ORDER.forEach((stem) => {
+      const audio = stemAudioRefs.current[stem];
+      if (audio) {
+        audio.pause();
+      }
+    });
+  }, [playbackSource]);
+
+  const playAllStems = useCallback(async (): Promise<void> => {
+    if (playbackSource !== 'separated') return;
+    const audios = STEM_ORDER.map((stem) => stemAudioRefs.current[stem]).filter(
+      (audio): audio is HTMLAudioElement => Boolean(audio),
+    );
+    if (audios.length === 0) return;
+
+    const targetTime = getActiveAudio()?.currentTime ?? 0;
+    audios.forEach((audio) => {
+      if (Math.abs(audio.currentTime - targetTime) > 0.05) {
+        audio.currentTime = targetTime;
+      }
+    });
+
+    await Promise.all(
+      audios.map((audio) =>
+        audio.play().catch(() => {
+          return undefined;
+        }),
+      ),
+    );
+  }, [getActiveAudio, playbackSource]);
+
+  const applyStemVolumes = useCallback(
+    (nextVolume: number): void => {
+      if (playbackSource !== 'separated') return;
+      STEM_ORDER.forEach((stem) => {
+        const audio = stemAudioRefs.current[stem];
+        if (!audio) return;
+        const desiredVolume = effectiveSelectedStems.includes(stem) ? nextVolume : 0;
+        audio.volume = isMuted ? 0 : desiredVolume;
+      });
+    },
+    [effectiveSelectedStems, isMuted, playbackSource],
+  );
+
+  const disableAutoPlay = useCallback((): void => {
+    shouldAutoPlayRef.current = false;
+  }, []);
+
+  useEffect(() => {
+    // Reset auto-play allowance whenever a new song is loaded into the player.
+    shouldAutoPlayRef.current = true;
+  }, [song.id]);
 
   // Toggle play/pause
   const togglePlay = useCallback(async (): Promise<void> => {
-    const audio = audioRef.current;
-    if (!audio || !url) return;
+    disableAutoPlay();
+
+    if (playbackSource === 'raw') {
+      const audio = audioRef.current;
+      if (!audio || !rawUrl) return;
+
+      if (playbackStatus === 'playing') {
+        audio.pause();
+      } else {
+        try {
+          await audio.play();
+          dispatch({ type: 'PLAYER_SET_STATUS', payload: 'playing' });
+        } catch (err) {
+          console.error('Failed to play audio:', err);
+        }
+      }
+      return;
+    }
+
+    const targetAudio = getActiveAudio();
+
+    if (!targetAudio || availableStems.length === 0) return;
 
     if (playbackStatus === 'playing') {
-      audio.pause();
-    } else {
-      try {
-        await audio.play();
-        dispatch({ type: 'PLAYER_SET_STATUS', payload: 'playing' });
-      } catch (error) {
-        console.error('Failed to play audio:', error);
-      }
+      pauseAllStems();
+      dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
+      return;
     }
-  }, [dispatch, playbackStatus, url]);
 
-  // Stop playback and clear current song
+    try {
+      await playAllStems();
+      applyStemVolumes(volume);
+      dispatch({ type: 'PLAYER_SET_STATUS', payload: 'playing' });
+    } catch (err) {
+      console.error('Failed to play stems:', err);
+    }
+  }, [
+    applyStemVolumes,
+    availableStems.length,
+    dispatch,
+    getActiveAudio,
+    pauseAllStems,
+    playAllStems,
+    playbackSource,
+    playbackStatus,
+    rawUrl,
+    volume,
+    disableAutoPlay,
+  ]);
+
   const handleStop = useCallback((): void => {
-    const audio = audioRef.current;
-    if (audio) {
-      audio.pause();
-      audio.currentTime = 0;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
     }
+    pauseAllStems();
+    STEM_ORDER.forEach((stem) => {
+      const audio = stemAudioRefs.current[stem];
+      if (audio) {
+        audio.currentTime = 0;
+      }
+    });
     dispatch({ type: 'PLAYER_STOP' });
-  }, [dispatch]);
+    setCurrentTime(0);
+    disableAutoPlay();
+  }, [disableAutoPlay, dispatch, pauseAllStems]);
 
-  // Handle seek
   const handleSeek = useCallback(
     (_event: Event, value: number | number[]): void => {
-      const audio = audioRef.current;
-      if (!audio) return;
-
       const newTime = Array.isArray(value) ? value[0] : value;
-      audio.currentTime = newTime;
+
+      const targetAudio = getActiveAudio();
+
+      if (targetAudio) {
+        targetAudio.currentTime = newTime;
+      }
+
+      syncStemsToTime(newTime);
+      setCurrentTime(newTime);
     },
-    [],
+    [getActiveAudio, syncStemsToTime],
   );
 
-  // Toggle mute
   const toggleMute = useCallback((): void => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
     if (isMuted) {
-      audio.volume = volume;
+      if (playbackSource === 'raw' && audioRef.current) {
+        audioRef.current.volume = volume;
+      }
+      applyStemVolumes(volume);
       setIsMuted(false);
     } else {
-      audio.volume = 0;
+      if (audioRef.current) {
+        audioRef.current.volume = 0;
+      }
+      applyStemVolumes(0);
       setIsMuted(true);
     }
-  }, [isMuted, volume]);
+  }, [applyStemVolumes, isMuted, playbackSource, volume]);
 
-  // Handle volume change
   const handleVolumeChange = useCallback(
     (_event: Event, value: number | number[]): void => {
-      const audio = audioRef.current;
-      if (!audio) return;
-
       const newVolume = Array.isArray(value) ? value[0] : value;
-      audio.volume = newVolume;
+      if (audioRef.current) {
+        audioRef.current.volume = newVolume;
+      }
+      applyStemVolumes(newVolume);
       setVolume(newVolume);
       if (newVolume > 0 && isMuted) {
         setIsMuted(false);
       }
     },
-    [isMuted],
+    [applyStemVolumes, isMuted],
   );
 
-  // Sync audio events with global state
-  // This effect sets up event listeners on the audio element to keep the global
-  // state synchronized with the actual playback state. This ensures the UI
-  // accurately reflects what the audio element is doing, including responses to
-  // browser-level controls (media keys, picture-in-picture, etc.).
+  const handleSelectSource = useCallback(
+    (_event: React.MouseEvent<HTMLElement>, value: PlaybackSource | null): void => {
+      if (!value) return;
+
+      if (value === 'separated') {
+        const rawAudio = audioRef.current;
+        const current = rawAudio?.currentTime ?? getActiveAudio()?.currentTime ?? 0;
+        if (rawAudio) rawAudio.pause();
+        STEM_ORDER.forEach((stem) => {
+          const audio = stemAudioRefs.current[stem];
+          if (audio) {
+            audio.currentTime = current;
+          }
+        });
+        applyStemVolumes(volume);
+        setPlaybackSource('separated');
+        if (playbackStatus === 'playing') {
+          void playAllStems();
+        }
+        disableAutoPlay();
+        return;
+      }
+
+      // value === 'raw'
+      const rawAudio = audioRef.current;
+      const current = getActiveAudio()?.currentTime ?? rawAudio?.currentTime ?? 0;
+      pauseAllStems();
+      if (rawAudio) {
+        rawAudio.currentTime = current;
+        if (playbackStatus === 'playing') {
+          void rawAudio.play().catch((err) => {
+            console.error('Failed to resume raw playback:', err);
+          });
+        }
+      }
+      setPlaybackSource('raw');
+      disableAutoPlay();
+    },
+    [applyStemVolumes, disableAutoPlay, getActiveAudio, pauseAllStems, playAllStems, playbackStatus, volume],
+  );
+
+  const toggleStem = useCallback(
+    (stem: StemKey): void => {
+      setSelectedStems((prev) => {
+        if (prev.includes(stem)) {
+          if (prev.length === 1) return prev;
+          return prev.filter((s) => s !== stem);
+        }
+        return [...prev, stem];
+      });
+    },
+    [],
+  );
+
+  const setPreset = useCallback(
+    (preset: 'vocals' | 'instrumental' | 'all'): void => {
+      if (preset === 'vocals') {
+        setSelectedStems((prev) => {
+          const vocals = availableStems.includes('vocals') ? ['vocals'] : prev;
+          return vocals as StemKey[];
+        });
+        return;
+      }
+      if (preset === 'instrumental') {
+        const stems = availableStems.filter((stem) => stem !== 'vocals');
+        if (stems.length > 0) {
+          setSelectedStems(stems);
+        }
+        return;
+      }
+      setSelectedStems(availableStems);
+    },
+    [availableStems],
+  );
+
+  // Wire audio events for active source
   useEffect(() => {
-    const audio = audioRef.current;
+    const audio = getActiveAudio();
     if (!audio) return;
 
     const handlePlay = (): void => {
@@ -186,22 +496,18 @@ function GlobalPlayerInner({
 
     const handleTimeUpdate = (): void => {
       setCurrentTime(audio.currentTime);
+      syncStemsToTime(audio.currentTime);
     };
 
     const handleLoadedMetadata = (): void => {
       setDuration(audio.duration);
-
-      // Only mark paused if the element is actually paused. When autoplaying,
-      // loadedmetadata can fire after play(), so avoid clobbering the
-      // 'playing' state.
-      if (audio.paused) {
-        dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
-      }
     };
 
     const handleEnded = (): void => {
       dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
       audio.currentTime = 0;
+      syncStemsToTime(0);
+      setCurrentTime(0);
     };
 
     audio.addEventListener('play', handlePlay);
@@ -217,41 +523,76 @@ function GlobalPlayerInner({
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
       audio.removeEventListener('ended', handleEnded);
     };
-  }, [dispatch]);
+  }, [dispatch, getActiveAudio, syncStemsToTime]);
 
-  // Auto-play when song changes and URL is ready
-  // This effect runs when a new song is loaded (playbackStatus === 'loading')
-  // and a signed URL becomes available. It sets the audio source and attempts
-  // to begin playback automatically. The effect only triggers for status 'loading'
-  // to avoid interfering with user-initiated play/pause actions.
+  // Keep stems aligned with playback status
+  useEffect(() => {
+    if (playbackSource !== 'separated') return;
+    if (playbackStatus === 'playing') {
+      void playAllStems();
+      applyStemVolumes(volume);
+    } else {
+      pauseAllStems();
+    }
+  }, [applyStemVolumes, pauseAllStems, playAllStems, playbackSource, playbackStatus, volume]);
+
+  // Keep raw audio aligned with playback status when selected
+  useEffect(() => {
+    if (playbackSource !== 'raw') return;
+    const audio = audioRef.current;
+    if (!audio || !rawUrl) return;
+
+    if (playbackStatus === 'playing') {
+      void audio.play().catch((err) => {
+        console.error('Failed to resume raw playback:', err);
+      });
+    } else if (playbackStatus === 'paused') {
+      audio.pause();
+    }
+  }, [playbackSource, playbackStatus, rawUrl]);
+
+  // Auto-play when raw URL becomes ready for loading state
   useEffect(() => {
     const audio = audioRef.current;
-    if (!audio || !url || playbackStatus !== 'loading') return;
+    if (!audio || !rawUrl || !shouldAutoPlayRef.current) return;
 
-    // Changing the src stops prior playback automatically; avoid calling
-    // pause() here to prevent AbortError from an in-flight play() promise.
     audio.currentTime = 0;
-    audio.src = url;
+    audio.src = rawUrl;
 
-    // Attempt to play; modern browsers may reject autoplay without user gesture.
-    const playPromise = audio.play();
-    if (playPromise !== undefined) {
-      playPromise
-        .then(() => {
-          dispatch({ type: 'PLAYER_SET_STATUS', payload: 'playing' });
-        })
-        .catch((error: unknown) => {
-          // AbortError happens if the browser cancels play; treat as paused.
-          if ((error as Error).name === 'AbortError') {
+    const handleCanPlay = (): void => {
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            dispatch({ type: 'PLAYER_SET_STATUS', payload: 'playing' });
+          })
+          .catch((err: unknown) => {
+            if ((err as Error).name === 'AbortError') {
+              dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
+              return;
+            }
+            console.error('Failed to auto-play:', err);
             dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
-            return;
-          }
+          })
+          .finally(() => {
+            disableAutoPlay();
+          });
+      } else {
+        disableAutoPlay();
+      }
+    };
 
-          console.error('Failed to auto-play:', error);
-          dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
-        });
-    }
-  }, [url, song.id, playbackStatus, dispatch]);
+    audio.addEventListener('canplay', handleCanPlay, { once: true });
+
+    return () => {
+      audio.removeEventListener('canplay', handleCanPlay);
+    };
+  }, [disableAutoPlay, dispatch, rawUrl, song.id]);
+
+  // Apply stem volumes when selection changes
+  useEffect(() => {
+    applyStemVolumes(volume);
+  }, [applyStemVolumes, effectiveSelectedStems, volume]);
 
   return (
     <Card
@@ -268,20 +609,17 @@ function GlobalPlayerInner({
       }}
     >
       <CardContent sx={{ p: { xs: 2, sm: 3 }, '&:last-child': { pb: 2 } }}>
-        {/* Hidden audio element */}
         <audio ref={audioRef} preload="metadata">
           <track kind="captions" />
         </audio>
 
-        {/* Error state */}
-        {error && (
+        {rawError && (
           <Alert severity="error" sx={{ mb: 2, fontSize: '0.875rem' }}>
-            {error}
+            {rawError}
           </Alert>
         )}
 
         <Stack spacing={2}>
-          {/* Song info */}
           <Box
             sx={{
               display: 'flex',
@@ -316,20 +654,49 @@ function GlobalPlayerInner({
               </Typography>
             </Box>
 
-            {/* Loading indicator */}
-            {(isRefreshing || playbackStatus === 'loading') && (
+            {(isRawRefreshing || playbackStatus === 'loading') && (
               <CircularProgress size={20} sx={{ color: 'primary.main' }} />
             )}
           </Box>
 
-          {/* Controls */}
+          {hasSeparatedAudio && (
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 2,
+              }}
+            >
+              <Stack direction="row" spacing={1} alignItems="center">
+                <GraphicEqIcon fontSize="small" sx={{ color: 'primary.main' }} />
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                  Audio source
+                </Typography>
+              </Stack>
+              <ToggleButtonGroup
+                size="small"
+                value={playbackSource}
+                exclusive
+                onChange={handleSelectSource}
+              >
+                <ToggleButton value="raw">Raw</ToggleButton>
+                <ToggleButton value="separated" disabled={!hasSeparatedAudio}>
+                  Separated
+                </ToggleButton>
+              </ToggleButtonGroup>
+            </Box>
+          )}
+
           <Stack direction="row" alignItems="center" spacing={{ xs: 1, sm: 2 }}>
-            {/* Play/Pause button */}
             <Tooltip title={playbackStatus === 'playing' ? 'Pause' : 'Play'}>
               <span>
                 <IconButton
                   onClick={togglePlay}
-                  disabled={!url || isRefreshing}
+                  disabled={
+                    (playbackSource === 'raw' && !rawUrl) ||
+                    (playbackSource === 'separated' && effectiveSelectedStems.length === 0)
+                  }
                   aria-label={playbackStatus === 'playing' ? 'Pause' : 'Play'}
                   sx={{
                     color: 'primary.main',
@@ -343,16 +710,11 @@ function GlobalPlayerInner({
                     },
                   }}
                 >
-                  {playbackStatus === 'playing' ? (
-                    <PauseIcon />
-                  ) : (
-                    <PlayArrowIcon />
-                  )}
+                  {playbackStatus === 'playing' ? <PauseIcon /> : <PlayArrowIcon />}
                 </IconButton>
               </span>
             </Tooltip>
 
-            {/* Stop button */}
             <Tooltip title="Stop">
               <IconButton
                 onClick={handleStop}
@@ -370,13 +732,12 @@ function GlobalPlayerInner({
               </IconButton>
             </Tooltip>
 
-            {/* Progress slider */}
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Slider
                 value={currentTime}
                 max={duration || 100}
                 onChange={handleSeek}
-                disabled={!url}
+                disabled={!hasActiveAudio}
                 aria-label="Seek"
                 sx={{
                   color: 'primary.main',
@@ -396,7 +757,6 @@ function GlobalPlayerInner({
               />
             </Box>
 
-            {/* Time display */}
             <Typography
               variant="caption"
               sx={{
@@ -409,7 +769,6 @@ function GlobalPlayerInner({
               {formatTime(currentTime)} / {formatTime(duration)}
             </Typography>
 
-            {/* Volume controls */}
             <Box
               sx={{
                 display: { xs: 'none', sm: 'flex' },
@@ -455,6 +814,54 @@ function GlobalPlayerInner({
               />
             </Box>
           </Stack>
+
+          {playbackSource === 'separated' && availableStems.length > 0 && (
+            <Stack spacing={1}>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Toggle stems to create your mix.
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                {availableStems.map((stem) => {
+                  const selected = effectiveSelectedStems.includes(stem);
+                  return (
+                    <Chip
+                      key={stem}
+                      label={STEM_LABELS[stem]}
+                      color={selected ? 'primary' : 'default'}
+                      variant={selected ? 'filled' : 'outlined'}
+                      onClick={() => toggleStem(stem)}
+                      sx={{ textTransform: 'capitalize' }}
+                    />
+                  );
+                })}
+              </Box>
+              <Stack direction="row" spacing={1}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => setPreset('instrumental')}
+                  disabled={!availableStems.some((stem) => stem !== 'vocals')}
+                >
+                  Instrumental
+                </Button>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => setPreset('vocals')}
+                  disabled={!availableStems.includes('vocals')}
+                >
+                  Vocals only
+                </Button>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => setPreset('all')}
+                >
+                  All stems
+                </Button>
+              </Stack>
+            </Stack>
+          )}
         </Stack>
       </CardContent>
     </Card>
