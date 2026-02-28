@@ -1,6 +1,8 @@
 'use client';
 
+import { Box, CircularProgress, Alert } from '@mui/material';
 import { useSongRawUrl } from '@/lib/hooks/useSongRawUrl';
+import { CustomAudioPlayer } from './CustomAudioPlayer';
 import type { Song } from '@/lib/api/types';
 
 // ---------------------------------------------------------------------------
@@ -19,8 +21,8 @@ interface SongPlayerProps {
 /**
  * Inline audio player for a single song.
  *
- * Renders a native `<audio>` element pre-loaded with the song's signed raw
- * URL. If the URL is expired or about to expire, the `useSongRawUrl` hook
+ * Renders a custom audio player with the song's signed raw URL.
+ * If the URL is expired or about to expire, the `useSongRawUrl` hook
  * transparently fetches a fresh one from the API before handing it to the
  * player.
  */
@@ -28,30 +30,47 @@ export function SongPlayer({ song }: SongPlayerProps): React.ReactElement {
   const { url, isRefreshing, error } = useSongRawUrl(song);
 
   if (error) {
-    return <p className="mt-2 text-xs text-red-400">{error}</p>;
+    return (
+      <Alert severity="error" sx={{ fontSize: '0.875rem' }}>
+        {error}
+      </Alert>
+    );
   }
 
   if (isRefreshing || !url) {
     return (
-      <div className="mt-2 flex items-center gap-2 text-xs text-zinc-500">
-        <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-400" />
-        {isRefreshing ? 'Refreshing audio link…' : 'Loading…'}
-      </div>
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1.5,
+          p: 2,
+          borderRadius: 2,
+          bgcolor: 'rgba(19, 10, 53, 0.5)',
+          border: '1px solid rgba(124, 58, 237, 0.2)',
+        }}
+      >
+        <CircularProgress size={16} sx={{ color: 'primary.main' }} />
+        <Box
+          component="span"
+          sx={{
+            fontSize: '0.875rem',
+            color: 'text.secondary',
+          }}
+        >
+          {isRefreshing ? 'Refreshing audio link…' : 'Loading…'}
+        </Box>
+      </Box>
     );
   }
 
   return (
     // Re-key on the URL so React replaces the element when the signed URL
     // changes, preventing the browser from playing a stale source.
-    <audio
+    <CustomAudioPlayer
       key={url}
-      controls
-      preload="metadata"
-      className="mt-2 h-8 w-full"
-      aria-label={`Play ${song.title} by ${song.author}`}
-    >
-      <source src={url} />
-      Your browser does not support the audio element.
-    </audio>
+      src={url}
+      ariaLabel={`Play ${song.title} by ${song.author}`}
+    />
   );
 }
