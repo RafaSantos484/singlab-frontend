@@ -171,6 +171,12 @@ export function AuthLayout({
             bgcolor: 'rgba(10, 5, 32, 0.85)',
             backdropFilter: 'blur(24px)',
             boxShadow: '0 24px 48px rgba(124, 58, 237, 0.05)',
+            transition: 'none',
+            '&:hover': {
+              bgcolor: 'rgba(10, 5, 32, 0.85)',
+              border: '1px solid rgba(45, 26, 110, 0.4)',
+              boxShadow: '0 24px 48px rgba(124, 58, 237, 0.05)',
+            },
           }}
         >
           <CardContent
