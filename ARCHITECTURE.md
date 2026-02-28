@@ -64,7 +64,11 @@ Components are split into two groups:
 - **`components/features/`** — Feature-specific composite components.
      - `GlobalPlayer` — single global audio player component; displays currently
           playing song with play/pause/stop controls, progress bar, and volume.
+          Supports both raw audio and separated stem playback with stem selection UI.
           Integrated with global state for centralized playback control.
+     - `SongCardItem` — reusable song card displaying metadata, play/edit buttons,
+          and separation status (pending, processing, finished, or failed).
+          Uses `useSeparationStatus` hook to manage the separation lifecycle.
      - `SongDeleteButton` — reusable confirmation dialog for deleting songs with
           loading state, accessibility features, and error handling.
      - `SongCreateDialog` — upload workflow (metadata + file validation + API).
@@ -78,8 +82,10 @@ Shared utilities used across the app:
 |---|---|
 | `lib/api/` | Typed HTTP client wrapping `singlab-api` endpoints |
 | `lib/api/song-creation.ts` | Song upload validation and orchestration logic |
+| `lib/api/separations.ts` | API client for stem separation operations (request and refresh) |
 | `lib/firebase/` | Firebase app initialization (singleton) and auth helpers |
-| `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`) |
+| `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`, `useSeparationStatus`) |
+| `lib/separations/` | Adapter pattern for provider-agnostic separation normalization and polling |
 | `lib/store/` | Global state — `GlobalStateProvider` (React Context + useReducer) manages auth, songs, and player state |
 | `lib/theme/muiTheme.ts` | Centralized MUI theme tokens and component defaults |
 | `lib/validation/` | Zod-based validation schemas and functions (sign-in, user creation) |
@@ -146,15 +152,21 @@ Server-side interactions that are not covered by real-time listeners (e.g.
 refreshing a signed URL) are handled by dedicated hooks (`useSongRawUrl`) that
 call the REST API directly.
 
-## Audio Playback Management
+## Audio Playback & Stem Separation
 
 The app uses a single global audio player with centralized state management to
-ensure a consistent playback experience.
+ensure a consistent playback experience. The player supports both raw audio
+playback and separated stem playback with dynamic stem selection.
 
 ### Architecture
 
 ```
 Song Cards (dashboard)
+    │
+    ├─→ useSeparationStatus(song)
+    │       ├─→ Fetch separation status via separationsApi
+    │       ├─→ Poll backend every 5s while processing
+    │       └─→ Display UI (request pending/progress/finished/failed)
     │
     │ dispatch({ type: 'PLAYER_LOAD_SONG', payload: songId })
     ▼
@@ -165,13 +177,19 @@ Global State (useReducer)
 GlobalPlayer (component)
     │
     ├─→ useSongRawUrl(currentSong)
-    │       └─→ Fetch/refresh signed URL
+    │       └─→ Fetch/refresh signed URL for raw audio
     │
-    └─→ Single <audio> element
-            │
-            ├─→ play()/pause() methods
-            └─→ Event listeners (play, pause, ended, timeupdate)
-                    └─→ dispatch({ type: 'PLAYER_SET_STATUS', ... })
+    ├─→ Playback Source Selection (raw vs. separated)
+    │       │
+    │       ├─→ RAW: Single <audio> element
+    │       │
+    │       └─→ SEPARATED: Multiple <audio> elements (one per stem)
+    │               ├─→ Sync playhead across all stems
+    │               ├─→ Apply stem selection (vocals, bass, drums, etc.)
+    │               └─→ Apply preset mixes (instrumental, vocals-only, all)
+    │
+    └─→ Event listeners
+            └─→ dispatch({ type: 'PLAYER_SET_STATUS', ... })
 ```
 
 ### Key Components
@@ -179,16 +197,32 @@ GlobalPlayer (component)
 - **`GlobalPlayer` (`components/features/GlobalPlayer.tsx`)** — Single audio
   player component that renders at the bottom of the dashboard. Displays the
   currently playing song with full playback controls (play/pause/stop, seek,
-  volume). Reads `currentSongId` from global state and manages a single audio
-  element.
+  volume). Supports playback source selection (raw vs. separated audio) and
+  dynamic stem selection with preset mixes. Reads `currentSongId` from global
+  state and manages either a single audio element (raw) or multiple synced
+  audio elements (separated stems).
 
-- **Song Cards** — Display song metadata with a Play button. Clicking dispatches
-  `PLAYER_LOAD_SONG` action to load the song into the global player. The "Now
-  Playing" card shows a visual indicator and is pinned to the top of the list.
+- **Song Cards (`SongCardItem`)** — Display song metadata, play/edit/delete buttons,
+  and separation status panel. The separation panel shows:
+  - No separation requested: button to initiate separation
+  - Processing: progress bar with refresh button
+  - Finished: available stems with provider/task info
+  - Failed: error message with retry button
+  Uses `useSeparationStatus` hook for lifecycle management and polling.
+  Clicking Play dispatches `PLAYER_LOAD_SONG` action to load the song into
+  the global player. The "Now Playing" card shows a visual indicator and is
+  pinned to the top of the list.
 
 - **Global State** — `currentSongId` and `playbackStatus` tracked in the
   app-wide state managed by `GlobalStateProvider`. Audio events update the
-  state, which triggers re-renders of the player UI.
+  state, which triggers re-renders of the player UI. The `songs` array includes
+  `separatedSongInfo` which is updated in real-time via Firestore listener.
+
+- **Separation Polling (`useSeparationStatus` hook)** — Manages the separation
+  lifecycle for a song: submission via `separationsApi.requestSeparation()`,
+  polling via `separationsApi.refreshSeparationStatus()` every 5 seconds while
+  in-progress, and error handling. Automatically sets up/tears down the polling
+  interval based on task status.
 
 ### Benefits
 

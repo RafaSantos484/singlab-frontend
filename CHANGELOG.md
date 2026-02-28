@@ -21,6 +21,32 @@ All notable changes to the SingLab Frontend will be documented in this file.
 - **useAudioState hook**: Replaced with simpler event listeners in `GlobalPlayer`.
 
 ### Added
+
+#### Stem Separation Feature
+- **Stem separation API client** (`lib/api/separations.ts`) — Typed API wrapper
+  for separation operations (`requestSeparation`, `refreshSeparationStatus`).
+- **`useSeparationStatus` hook** — Manages the complete separation lifecycle:
+  submission, automatic polling (5s intervals), status normalization, and error
+  handling. Integrates with Firestore real-time updates for separation status.
+- **Separation adapter pattern** (`lib/separations/`) — Provider-agnostic
+  normalization layer for separation task data. Includes `PoyoSeparationAdapter`
+  for normalizing PoYo provider responses into a unified schema. Extensible for
+  additional providers.
+- **`SongCardItem` component** — Extracted song card UI with separation status
+  panel showing: request button (not started), progress bar with refresh (processing),
+  available stems (finished), or error message with retry (failed).
+- **GlobalPlayer separation support** — Player now supports both raw and separated
+  audio playback:
+  - Playback source toggle (Raw vs. Separated)
+  - Multiple synced `<audio>` elements for separated stems
+  - Stem selection UI with toggleable chips
+  - Preset mixes: Instrumental (all stems except vocals), Vocals only, All stems
+  - Synchronized playhead and volume control across all stems
+- **Song type updates** — Added `separatedSongInfo` field to `Song` type to store
+  provider-specific separation task data. Updated Firestore synchronization to
+  include separation status in real-time listener.
+
+#### Other Additions
 - **GlobalPlayer component** (`components/features/GlobalPlayer.tsx`) — Single
   persistent audio player with play/pause/stop controls, progress bar with seek,
   volume control, and responsive design. Displays currently playing song metadata.
