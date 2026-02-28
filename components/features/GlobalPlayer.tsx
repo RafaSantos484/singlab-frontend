@@ -80,7 +80,9 @@ interface GlobalPlayerInnerProps {
   song: Song;
 }
 
-function GlobalPlayerInner({ song }: GlobalPlayerInnerProps): React.ReactElement {
+function GlobalPlayerInner({
+  song,
+}: GlobalPlayerInnerProps): React.ReactElement {
   const { playbackStatus } = useGlobalState();
   const dispatch = useGlobalStateDispatch();
 

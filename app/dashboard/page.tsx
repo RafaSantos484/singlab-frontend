@@ -97,7 +97,9 @@ export default function DashboardPage(): React.ReactElement | null {
     // This provides a consistent "Now Playing" location at the top of the page.
     // Only move it if it's not already at index 0 (no-op if already first).
     if (currentSongId) {
-      const playingIndex = sorted.findIndex((song) => song.id === currentSongId);
+      const playingIndex = sorted.findIndex(
+        (song) => song.id === currentSongId,
+      );
       if (playingIndex > 0) {
         const [playingSong] = sorted.splice(playingIndex, 1);
         sorted.unshift(playingSong);

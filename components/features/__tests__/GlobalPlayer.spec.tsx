@@ -18,9 +18,7 @@ const mockUseGlobalState = useGlobalState as jest.MockedFunction<
   typeof useGlobalState
 >;
 const mockUseGlobalStateDispatch =
-  useGlobalStateDispatch as jest.MockedFunction<
-    typeof useGlobalStateDispatch
-  >;
+  useGlobalStateDispatch as jest.MockedFunction<typeof useGlobalStateDispatch>;
 const mockUseSongRawUrl = useSongRawUrl as jest.MockedFunction<
   typeof useSongRawUrl
 >;
