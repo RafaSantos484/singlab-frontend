@@ -13,7 +13,7 @@ import {
   shouldPollSeparation,
 } from '@/lib/separations';
 
-const POLL_INTERVAL_MS = 5_000;
+const POLL_INTERVAL_MS = 1000 * 60; // 1 minute
 
 interface UseSeparationStatusResult {
   separation: NormalizedSeparationInfo | null;
