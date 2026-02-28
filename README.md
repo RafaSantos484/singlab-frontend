@@ -11,8 +11,10 @@ back the original, vocal-only, and instrumental tracks for karaoke practice.
 
 - Next.js 16 with App Router and TypeScript
 - Firebase Authentication for user sign-in
-- Song submission (file upload or approved link)
-- Async job tracking for AI processing pipeline
+- Song submission with automatic metadata extraction from audio files
+  - Detects title and artist from ID3/audio tags
+  - Auto-fills form fields (user can override)
+- Async job tracking for AI processing pipeline (vocal separation, lyrics transcription)
 - Karaoke playback with vocal / instrumental stem toggle
 - Event-driven audio player state synchronization (responds to media keys)
 - Song deletion with confirmation dialog
