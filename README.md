@@ -14,6 +14,8 @@ back the original, vocal-only, and instrumental tracks for karaoke practice.
 - Song submission (file upload or approved link)
 - Async job tracking for AI processing pipeline
 - Karaoke playback with vocal / instrumental stem toggle
+- Event-driven audio player state synchronization (responds to media keys)
+- Song deletion with confirmation dialog
 - Lyrics display synchronized with playback (planned)
 - Material UI (MUI) for component primitives (forms, dialogs, cards, alerts)
 - Tailwind CSS for page-level layout utilities and decorative styling

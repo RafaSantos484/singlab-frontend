@@ -65,7 +65,10 @@ Components are split into two groups:
      - `SongPlayer` — inline audio player; delegates signed URL management to
           `useSongRawUrl`.
      - `CustomAudioPlayer` — custom MUI-based audio player with play/pause,
-          progress bar, volume control, and responsive design.
+          progress bar, volume control, and responsive design. Uses `useAudioState`
+          hook for event-driven state synchronization.
+     - `SongDeleteButton` — reusable confirmation dialog for deleting songs with
+          loading state, accessibility features, and error handling.
      - `SongCreateDialog` — upload workflow (metadata + file validation + API).
 
 ### 3. Lib
@@ -76,8 +79,9 @@ Shared utilities used across the app:
 |---|---|
 | `lib/api/` | Typed HTTP client wrapping `singlab-api` endpoints |
 | `lib/api/song-creation.ts` | Song upload validation and orchestration logic |
+| `lib/audio/` | Audio playback management — `AudioManager` singleton enforces single-playback rule |
 | `lib/firebase/` | Firebase app initialization (singleton) and auth helpers |
-| `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`) |
+| `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`, `useAudioState`) |
 | `lib/store/` | Global state — `GlobalStateProvider` (React Context + useReducer) |
 | `lib/theme/muiTheme.ts` | Centralized MUI theme tokens and component defaults |
 | `lib/validation/` | Zod-based validation schemas and functions (sign-in, user creation) |
@@ -140,6 +144,50 @@ Global state is managed by `GlobalStateProvider` (`lib/store/`) using React
 Server-side interactions that are not covered by real-time listeners (e.g.
 refreshing a signed URL) are handled by dedicated hooks (`useSongRawUrl`) that
 call the REST API directly.
+
+## Audio Playback Management
+
+The audio player system ensures that the UI always reflects the actual audio
+state and enforces a "single active playback" rule across all players.
+
+### Architecture
+
+```
+CustomAudioPlayer (component)
+    ↓
+    └─→ useAudioState hook
+            ↓
+            └─→ Listens to HTMLAudioElement events (play, playing, pause, 
+                ended, timeupdate, loadedmetadata, etc.)
+            ↓
+            └─→ AudioManager singleton
+                    ↓
+                    └─→ Manages global playback state
+                    └─→ Pauses other players when one starts
+```
+
+### Key Components
+
+- **`AudioManager` (`lib/audio/AudioManager.ts`)** — Singleton that manages all
+  audio players globally. When one player starts playback, it automatically
+  pauses all others.
+
+- **`useAudioState` (`lib/hooks/useAudioState.ts`)** — Custom React hook that
+  synchronizes component state with actual HTMLAudioElement events. Updates
+  state based on real audio events (not click handlers), ensuring the UI always
+  reflects true playback state, even when controlled externally (e.g., media
+  keys, system controls).
+
+- **`CustomAudioPlayer`** — Renders the player UI and uses `useAudioState` to
+  stay synchronized. Click handlers call `audio.play()` or `audio.pause()`
+  (state updates come from events, not handlers).
+
+### Why This Pattern
+
+- **Reliable State** — UI reflects actual audio state, not button clicks
+- **External Control** — Responds to media keys, system buttons, etc.
+- **Single Playback** — Only one track plays at a time across the entire app
+- **Event-Driven** — Decouples click handlers from state updates
 
 ## Styling
 

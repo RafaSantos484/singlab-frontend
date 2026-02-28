@@ -5,6 +5,20 @@ All notable changes to the SingLab Frontend will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Audio player state synchronization**: Refactored `CustomAudioPlayer` to use new
+  `useAudioState` hook for event-driven state updates. UI now always reflects
+  actual audio playback state, including responses to external controls (media
+  keys, system buttons). See `AUDIO_PLAYER_IMPLEMENTATION.md` for architecture.
+- **AudioManager singleton** (`lib/audio/AudioManager.ts`) — Enforces "single
+  active playback" rule. When one player starts, all others are automatically
+  paused. Ensures only one audio track plays at a time across the entire app.
+- **useAudioState hook** (`lib/hooks/useAudioState.ts`) — Custom React hook that
+  listens to HTMLAudioElement events (play, playing, pause, ended, timeupdate,
+  loadedmetadata, etc.) and synchronizes component state accordingly.
+- **SongDeleteButton component** — Reusable button for deleting songs with
+  confirmation dialog, loading state, and comprehensive error handling (401, 403,
+  404, network failures). Includes full accessibility features.
+- Added `@mui/lab` dependency for additional Material-UI components.
 - Design token palette (`brand-*`, `accent-*`) defined via Tailwind v4 `@theme`
   block in `app/globals.css`, replacing the former neutral `zinc` colors. Tokens
   are available as utility classes project-wide.
@@ -22,6 +36,7 @@ All notable changes to the SingLab Frontend will be documented in this file.
   spinner while refreshing and an error message on failure.
 - Dashboard: each song card now renders an inline `SongPlayer` for direct
   playback without leaving the page.
+- Dashboard: each song card now includes a delete button for removing songs.
 
 ## [0.1.0] - 2026-02-27
 
