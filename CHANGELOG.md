@@ -4,17 +4,32 @@ All notable changes to the SingLab Frontend will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **Refactored to single global player architecture**: Replaced per-card audio
+  players with a unified `GlobalPlayer` component at the bottom of the dashboard.
+  Song cards now dispatch actions to load songs into the global player instead of
+  embedding individual audio elements. The currently playing song is pinned to
+  the top of the list with a "Now Playing" indicator and remains visible
+  regardless of filters or sorting.
+- Updated global state to include `currentSongId` and `playbackStatus` for
+  centralized playback control.
+
+### Removed
+- **Legacy per-card player components**: `SongPlayer` and `CustomAudioPlayer`
+  components removed in favor of the single global player.
+- **AudioManager singleton**: No longer needed with single audio element approach.
+- **useAudioState hook**: Replaced with simpler event listeners in `GlobalPlayer`.
+
 ### Added
-- **Audio player state synchronization**: Refactored `CustomAudioPlayer` to use new
-  `useAudioState` hook for event-driven state updates. UI now always reflects
-  actual audio playback state, including responses to external controls (media
-  keys, system buttons). See `AUDIO_PLAYER_IMPLEMENTATION.md` for architecture.
-- **AudioManager singleton** (`lib/audio/AudioManager.ts`) — Enforces "single
-  active playback" rule. When one player starts, all others are automatically
-  paused. Ensures only one audio track plays at a time across the entire app.
-- **useAudioState hook** (`lib/hooks/useAudioState.ts`) — Custom React hook that
-  listens to HTMLAudioElement events (play, playing, pause, ended, timeupdate,
-  loadedmetadata, etc.) and synchronizes component state accordingly.
+- **GlobalPlayer component** (`components/features/GlobalPlayer.tsx`) — Single
+  persistent audio player with play/pause/stop controls, progress bar with seek,
+  volume control, and responsive design. Displays currently playing song metadata.
+- **Player actions in global state**: `PLAYER_LOAD_SONG`, `PLAYER_SET_STATUS`,
+  and `PLAYER_STOP` actions for controlling global playback.
+- **useGlobalStateDispatch hook** — Allows components to dispatch actions to
+  global state.
+- **"Now Playing" indicator** — Song cards show a visual badge when playing and
+  are pinned to the top of the filtered list.
 - **SongDeleteButton component** — Reusable button for deleting songs with
   confirmation dialog, loading state, and comprehensive error handling (401, 403,
   404, network failures). Includes full accessibility features.
@@ -31,11 +46,7 @@ All notable changes to the SingLab Frontend will be documented in this file.
   and proactively refreshes the signed URL via `GET /songs/:songId/raw/url` when
   within 5 minutes of expiry. Caches the refreshed URL locally for immediate
   playback; subsequent Firestore-pushed updates are picked up automatically.
-- `components/features/SongPlayer` — inline `<audio controls>` player for a
-  single song. Delegates signed URL management to `useSongRawUrl`; shows a
-  spinner while refreshing and an error message on failure.
-- Dashboard: each song card now renders an inline `SongPlayer` for direct
-  playback without leaving the page.
+- Dashboard: Play buttons on song cards trigger global player playback.
 - Dashboard: each song card now includes a delete button for removing songs.
 
 ## [0.1.0] - 2026-02-27

@@ -9,12 +9,12 @@
 │  ┌─────────────────────────────────────────────────────────────┐ │
 │  │  Next.js App Router (singlab-frontend)                      │ │
 │  │                                                             │ │
-│  │  Pages & Layouts         Components         Lib (utils)     │ │
-│  │  ─────────────────       ──────────────      ──────────     │ │
-│  │  app/layout.tsx          features/SongPlayer api/songs      │ │
-│  │  app/page.tsx            ui/…                firebase/auth  │ │
-│  │  app/login/              …                   hooks/useAuth  │ │
-│  │  app/dashboard/                              hooks/useSong  │ │
+│  │  Pages & Layouts         Components            Lib (utils)     │ │
+│  │  ─────────────────       ──────────────         ──────────     │ │
+│  │  app/layout.tsx          features/GlobalPlayer  api/songs      │ │
+│  │  app/page.tsx            ui/…                   firebase/auth  │ │
+│  │  app/login/              …                      hooks/useAuth  │ │
+│  │  app/dashboard/                                 hooks/useSong  │ │
 │  └──────────────┬──────────────────────────────────────────────┘ │
 └─────────────────│─────────────────────────────────────────────────┘
                   │  HTTP (REST)
@@ -62,14 +62,13 @@ Components are split into two groups:
 - **`components/ui/`** — Branding and decorative primitives (`SingLabLogo`,
      waveform/spectrum decorations).
 - **`components/features/`** — Feature-specific composite components.
-     - `SongPlayer` — inline audio player; delegates signed URL management to
-          `useSongRawUrl`.
-     - `CustomAudioPlayer` — custom MUI-based audio player with play/pause,
-          progress bar, volume control, and responsive design. Uses `useAudioState`
-          hook for event-driven state synchronization.
+     - `GlobalPlayer` — single global audio player component; displays currently
+          playing song with play/pause/stop controls, progress bar, and volume.
+          Integrated with global state for centralized playback control.
      - `SongDeleteButton` — reusable confirmation dialog for deleting songs with
           loading state, accessibility features, and error handling.
      - `SongCreateDialog` — upload workflow (metadata + file validation + API).
+     - `SongEditDialog` — song metadata editing with validation and error handling.
 
 ### 3. Lib
 
@@ -79,10 +78,9 @@ Shared utilities used across the app:
 |---|---|
 | `lib/api/` | Typed HTTP client wrapping `singlab-api` endpoints |
 | `lib/api/song-creation.ts` | Song upload validation and orchestration logic |
-| `lib/audio/` | Audio playback management — `AudioManager` singleton enforces single-playback rule |
 | `lib/firebase/` | Firebase app initialization (singleton) and auth helpers |
-| `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`, `useAudioState`) |
-| `lib/store/` | Global state — `GlobalStateProvider` (React Context + useReducer) |
+| `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`) |
+| `lib/store/` | Global state — `GlobalStateProvider` (React Context + useReducer) manages auth, songs, and player state |
 | `lib/theme/muiTheme.ts` | Centralized MUI theme tokens and component defaults |
 | `lib/validation/` | Zod-based validation schemas and functions (sign-in, user creation) |
 | `lib/env.ts` | Typed, validated environment variable access |
@@ -140,6 +138,9 @@ Global state is managed by `GlobalStateProvider` (`lib/store/`) using React
 - **User profile** — data comes directly from Firebase Auth (name, email, UID)
 - **Songs library** — subscribed to `/users/{uid}/songs` Firestore listener
   for real-time updates via `onSnapshot`
+- **Player state** — `currentSongId` and `playbackStatus` managed in global state.
+  Cards dispatch actions (`PLAYER_LOAD_SONG`) to trigger playback, and the
+  `GlobalPlayer` component handles audio element control and UI rendering.
 
 Server-side interactions that are not covered by real-time listeners (e.g.
 refreshing a signed URL) are handled by dedicated hooks (`useSongRawUrl`) that
@@ -147,47 +148,54 @@ call the REST API directly.
 
 ## Audio Playback Management
 
-The audio player system ensures that the UI always reflects the actual audio
-state and enforces a "single active playback" rule across all players.
+The app uses a single global audio player with centralized state management to
+ensure a consistent playback experience.
 
 ### Architecture
 
 ```
-CustomAudioPlayer (component)
-    ↓
-    └─→ useAudioState hook
-            ↓
-            └─→ Listens to HTMLAudioElement events (play, playing, pause, 
-                ended, timeupdate, loadedmetadata, etc.)
-            ↓
-            └─→ AudioManager singleton
-                    ↓
-                    └─→ Manages global playback state
-                    └─→ Pauses other players when one starts
+Song Cards (dashboard)
+    │
+    │ dispatch({ type: 'PLAYER_LOAD_SONG', payload: songId })
+    ▼
+Global State (useReducer)
+    │
+    │ currentSongId, playbackStatus
+    ▼
+GlobalPlayer (component)
+    │
+    ├─→ useSongRawUrl(currentSong)
+    │       └─→ Fetch/refresh signed URL
+    │
+    └─→ Single <audio> element
+            │
+            ├─→ play()/pause() methods
+            └─→ Event listeners (play, pause, ended, timeupdate)
+                    └─→ dispatch({ type: 'PLAYER_SET_STATUS', ... })
 ```
 
 ### Key Components
 
-- **`AudioManager` (`lib/audio/AudioManager.ts`)** — Singleton that manages all
-  audio players globally. When one player starts playback, it automatically
-  pauses all others.
+- **`GlobalPlayer` (`components/features/GlobalPlayer.tsx`)** — Single audio
+  player component that renders at the bottom of the dashboard. Displays the
+  currently playing song with full playback controls (play/pause/stop, seek,
+  volume). Reads `currentSongId` from global state and manages a single audio
+  element.
 
-- **`useAudioState` (`lib/hooks/useAudioState.ts`)** — Custom React hook that
-  synchronizes component state with actual HTMLAudioElement events. Updates
-  state based on real audio events (not click handlers), ensuring the UI always
-  reflects true playback state, even when controlled externally (e.g., media
-  keys, system controls).
+- **Song Cards** — Display song metadata with a Play button. Clicking dispatches
+  `PLAYER_LOAD_SONG` action to load the song into the global player. The "Now
+  Playing" card shows a visual indicator and is pinned to the top of the list.
 
-- **`CustomAudioPlayer`** — Renders the player UI and uses `useAudioState` to
-  stay synchronized. Click handlers call `audio.play()` or `audio.pause()`
-  (state updates come from events, not handlers).
+- **Global State** — `currentSongId` and `playbackStatus` tracked in the
+  app-wide state managed by `GlobalStateProvider`. Audio events update the
+  state, which triggers re-renders of the player UI.
 
-### Why This Pattern
+### Benefits
 
-- **Reliable State** — UI reflects actual audio state, not button clicks
-- **External Control** — Responds to media keys, system buttons, etc.
-- **Single Playback** — Only one track plays at a time across the entire app
-- **Event-Driven** — Decouples click handlers from state updates
+- **Single Source of Truth** — One audio element, one playback state
+- **Persistent Controls** — Player always visible while song is loaded
+- **Clean Architecture** — Separation of concerns (cards trigger, player controls)
+- **Always Visible Now Playing** — Current song pinned to top, unaffected by filters
 
 ## Styling
 
