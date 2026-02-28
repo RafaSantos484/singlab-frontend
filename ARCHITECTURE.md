@@ -62,8 +62,10 @@ Components are split into two groups:
 - **`components/ui/`** — Branding and decorative primitives (`SingLabLogo`,
      waveform/spectrum decorations).
 - **`components/features/`** — Feature-specific composite components.
-     - `SongPlayer` — inline `<audio>` player; delegates signed URL management to
+     - `SongPlayer` — inline audio player; delegates signed URL management to
           `useSongRawUrl`.
+     - `CustomAudioPlayer` — custom MUI-based audio player with play/pause,
+          progress bar, volume control, and responsive design.
      - `SongCreateDialog` — upload workflow (metadata + file validation + API).
 
 ### 3. Lib
@@ -78,6 +80,7 @@ Shared utilities used across the app:
 | `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`) |
 | `lib/store/` | Global state — `GlobalStateProvider` (React Context + useReducer) |
 | `lib/theme/muiTheme.ts` | Centralized MUI theme tokens and component defaults |
+| `lib/validation/` | Zod-based validation schemas and functions (sign-in, user creation) |
 | `lib/env.ts` | Typed, validated environment variable access |
 
 ## Authentication Flow

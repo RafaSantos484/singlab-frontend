@@ -89,6 +89,7 @@ npm run type-check      # TypeScript check (no emit)
 │   │   └── song-creation.ts # Song upload validation/service layer
 │   ├── firebase/           # Firebase client initialization
 │   ├── theme/              # Central MUI theme configuration
+│   ├── validation/         # Zod validation schemas (sign-in, user creation)
 │   └── hooks/              # Custom React hooks
 ├── public/                 # Static assets
 ├── .env.local              # Local environment variables (not committed)
