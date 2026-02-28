@@ -15,6 +15,7 @@ import {
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import { useState, useRef } from 'react';
+import jsmediatags from 'jsmediatags';
 
 import {
   createSong,
@@ -38,11 +39,14 @@ interface SongCreateDialogProps {
  *
  * Features:
  * - File picker for audio files (with format validation)
- * - Text fields for title and author
- * - Real-time validation feedback
- * - Loading and error states
+ * - Automatic metadata extraction from audio tags (title, artist)
+ * - Text fields for title and author with real-time validation
+ * - Loading and error states for file upload and metadata processing
  * - Accessible keyboard navigation (ESC to close, TAB order)
+ * - Field auto-fill from extracted metadata, with manual override
  *
+ * Workflow: User selects file → metadata automatically extracted → fields
+ * auto-fill with extracted data (user can edit) → form submission.
  * After successful upload, the dialog closes automatically and the songs
  * list updates via Firestore real-time listener in the global state.
  */
@@ -57,6 +61,7 @@ export function SongCreateDialog({
 
   // UI state
   const [isLoading, setIsLoading] = useState(false);
+  const [isExtractingMetadata, setIsExtractingMetadata] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<{
     title?: string;
@@ -73,11 +78,44 @@ export function SongCreateDialog({
   // -------------------------------------------------------------------------
 
   /**
-   * Handles file selection from the file input.
-   * Validates the file immediately and shows errors if needed.
+   * Extracts metadata from audio file using jsmediatags.
+   * Returns extracted title and artist, or null if extraction fails.
    */
-  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>): void {
+  function extractMetadata(file: File): Promise<{ title: string; artist: string } | null> {
+    return new Promise((resolve) => {
+      jsmediatags.read(file, {
+        onSuccess: (tag) => {
+          const title = tag.tags.title?.trim() || '';
+          const artist = tag.tags.artist?.trim() || '';
+
+          if (title || artist) {
+            resolve({ title, artist });
+          } else {
+            resolve(null);
+          }
+        },
+        onError: () => {
+          resolve(null);
+        },
+      });
+    });
+  }
+
+  /**
+   * Handles file selection from the file input.
+   *
+   * Process:
+   * 1. Validates file type and size
+   * 2. Shows metadata extraction loading state
+   * 3. Attempts to extract title and artist from audio tags
+   * 4. Auto-fills empty title/author fields with extracted data
+   * 5. Disables title/author fields during extraction to signal async operation
+   *
+   * @param e - Change event from file input element
+   */
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
     const file = e.currentTarget.files?.[0];
+    const inputElement = e.currentTarget;
 
     if (!file) {
       setSelectedFile(null);
@@ -90,15 +128,34 @@ export function SongCreateDialog({
       setSelectedFile(file);
       setFieldErrors((prev) => ({ ...prev, file: undefined }));
       setError(null);
+
+      // Extract metadata if file is audio
+      setIsExtractingMetadata(true);
+      const metadata = await extractMetadata(file);
+
+      if (metadata) {
+        // Auto-fill fields with extracted metadata
+        if (metadata.title && !title) {
+          setTitle(metadata.title);
+        }
+        if (metadata.artist && !author) {
+          setAuthor(metadata.artist);
+        }
+      }
+
+      setIsExtractingMetadata(false);
     } catch (err) {
       const message =
         err instanceof InvalidFileError ? err.message : 'Invalid file';
       setSelectedFile(null);
       setFieldErrors((prev) => ({ ...prev, file: message }));
+      setIsExtractingMetadata(false);
     }
 
     // Reset input so same file can be selected again
-    e.currentTarget.value = '';
+    if (inputElement) {
+      inputElement.value = '';
+    }
   }
 
   /**
@@ -236,100 +293,22 @@ export function SongCreateDialog({
             </Alert>
           )}
 
-          {/* Title field */}
-          <TextField
-            inputRef={titleInputRef}
-            autoFocus
-            label="Song Title"
-            value={title}
-            onChange={(e) => {
-              setTitle(e.target.value);
-              // Clear error when user starts typing
-              if (fieldErrors.title) {
-                setFieldErrors((prev) => ({ ...prev, title: undefined }));
-              }
-            }}
-            error={!!fieldErrors.title}
-            helperText={fieldErrors.title}
-            fullWidth
-            disabled={isLoading}
-            placeholder="e.g., Bohemian Rhapsody"
-            inputProps={{
-              maxLength: 255,
-            }}
+          {/* Helper text */}
+          <Alert
+            severity="info"
             sx={{
-              '& .MuiOutlinedInput-root': {
-                color: 'rgb(243, 232, 255)',
-                borderColor: 'rgba(168, 85, 247, 0.3)',
-                '&:hover fieldset': {
-                  borderColor: 'rgba(168, 85, 247, 0.6)',
-                },
-                '&.Mui-focused fieldset': {
-                  borderColor: 'rgba(168, 85, 247, 1)',
-                },
-              },
-              '& .MuiInputBase-input::placeholder': {
-                color: 'rgba(243, 232, 255, 0.5)',
-                opacity: 1,
-              },
-              '& .MuiInputLabel-root': {
-                color: 'rgba(243, 232, 255, 0.7)',
-                '&.Mui-focused': {
-                  color: 'rgba(168, 85, 247, 1)',
-                },
-              },
-              '& .MuiFormHelperText-root': {
-                color: 'rgba(252, 165, 165, 1)',
+              backgroundColor: 'rgba(129, 140, 248, 0.1)',
+              color: '#c7d2fe',
+              border: '1px solid rgba(129, 140, 248, 0.3)',
+              '& .MuiAlert-icon': {
+                color: '#c7d2fe',
               },
             }}
-          />
+          >
+            Attach the file first, then fill in Title and Author. We&apos;ll auto-detect metadata when possible.
+          </Alert>
 
-          {/* Author field */}
-          <TextField
-            label="Artist / Author"
-            value={author}
-            onChange={(e) => {
-              setAuthor(e.target.value);
-              if (fieldErrors.author) {
-                setFieldErrors((prev) => ({ ...prev, author: undefined }));
-              }
-            }}
-            error={!!fieldErrors.author}
-            helperText={fieldErrors.author}
-            fullWidth
-            disabled={isLoading}
-            placeholder="e.g., Queen"
-            inputProps={{
-              maxLength: 255,
-            }}
-            sx={{
-              '& .MuiOutlinedInput-root': {
-                color: 'rgb(243, 232, 255)',
-                borderColor: 'rgba(168, 85, 247, 0.3)',
-                '&:hover fieldset': {
-                  borderColor: 'rgba(168, 85, 247, 0.6)',
-                },
-                '&.Mui-focused fieldset': {
-                  borderColor: 'rgba(168, 85, 247, 1)',
-                },
-              },
-              '& .MuiInputBase-input::placeholder': {
-                color: 'rgba(243, 232, 255, 0.5)',
-                opacity: 1,
-              },
-              '& .MuiInputLabel-root': {
-                color: 'rgba(243, 232, 255, 0.7)',
-                '&.Mui-focused': {
-                  color: 'rgba(168, 85, 247, 1)',
-                },
-              },
-              '& .MuiFormHelperText-root': {
-                color: 'rgba(252, 165, 165, 1)',
-              },
-            }}
-          />
-
-          {/* File upload section */}
+          {/* File upload section - moved to top */}
           <Box>
             <input
               ref={fileInputRef}
@@ -373,8 +352,29 @@ export function SongCreateDialog({
               Choose Audio File
             </Button>
 
+            {/* Metadata extraction loading state */}
+            {isExtractingMetadata && (
+              <Typography
+                variant="body2"
+                sx={{
+                  mt: 1.5,
+                  p: 1.5,
+                  backgroundColor: 'rgba(129, 140, 248, 0.1)',
+                  borderRadius: 1,
+                  border: '1px solid rgba(129, 140, 248, 0.3)',
+                  color: 'rgb(199, 210, 254)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                }}
+              >
+                <CircularProgress size={16} sx={{ color: 'rgb(199, 210, 254)' }} />
+                Extracting metadata...
+              </Typography>
+            )}
+
             {/* File name display */}
-            {selectedFile && (
+            {selectedFile && !isExtractingMetadata && (
               <Typography
                 variant="body2"
                 sx={{
@@ -417,6 +417,99 @@ export function SongCreateDialog({
               </FormHelperText>
             )}
           </Box>
+
+          {/* Title field */}
+          <TextField
+            inputRef={titleInputRef}
+            label="Song Title"
+            value={title}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              // Clear error when user starts typing
+              if (fieldErrors.title) {
+                setFieldErrors((prev) => ({ ...prev, title: undefined }));
+              }
+            }}
+            error={!!fieldErrors.title}
+            helperText={fieldErrors.title || (selectedFile && isExtractingMetadata ? 'Detecting metadata...' : '')}
+            fullWidth
+            disabled={isLoading || !selectedFile || isExtractingMetadata}
+            placeholder="e.g., Bohemian Rhapsody"
+            inputProps={{
+              maxLength: 255,
+            }}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                color: 'rgb(243, 232, 255)',
+                borderColor: 'rgba(168, 85, 247, 0.3)',
+                '&:hover fieldset': {
+                  borderColor: 'rgba(168, 85, 247, 0.6)',
+                },
+                '&.Mui-focused fieldset': {
+                  borderColor: 'rgba(168, 85, 247, 1)',
+                },
+              },
+              '& .MuiInputBase-input::placeholder': {
+                color: 'rgba(243, 232, 255, 0.5)',
+                opacity: 1,
+              },
+              '& .MuiInputLabel-root': {
+                color: 'rgba(243, 232, 255, 0.7)',
+                '&.Mui-focused': {
+                  color: 'rgba(168, 85, 247, 1)',
+                },
+              },
+              '& .MuiFormHelperText-root': {
+                color: 'rgba(252, 165, 165, 1)',
+              },
+            }}
+          />
+
+          {/* Author field */}
+          <TextField
+            label="Artist / Author"
+            value={author}
+            onChange={(e) => {
+              setAuthor(e.target.value);
+              if (fieldErrors.author) {
+                setFieldErrors((prev) => ({ ...prev, author: undefined }));
+              }
+            }}
+            error={!!fieldErrors.author}
+            helperText={fieldErrors.author || (selectedFile && isExtractingMetadata ? 'Detecting metadata...' : '')}
+            fullWidth
+            disabled={isLoading || !selectedFile || isExtractingMetadata}
+            placeholder="e.g., Queen"
+            inputProps={{
+              maxLength: 255,
+            }}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                color: 'rgb(243, 232, 255)',
+                borderColor: 'rgba(168, 85, 247, 0.3)',
+                '&:hover fieldset': {
+                  borderColor: 'rgba(168, 85, 247, 0.6)',
+                },
+                '&.Mui-focused fieldset': {
+                  borderColor: 'rgba(168, 85, 247, 1)',
+                },
+              },
+              '& .MuiInputBase-input::placeholder': {
+                color: 'rgba(243, 232, 255, 0.5)',
+                opacity: 1,
+              },
+              '& .MuiInputLabel-root': {
+                color: 'rgba(243, 232, 255, 0.7)',
+                '&.Mui-focused': {
+                  color: 'rgba(168, 85, 247, 1)',
+                },
+              },
+              '& .MuiFormHelperText-root': {
+                color: 'rgba(252, 165, 165, 1)',
+              },
+            }}
+          />
+
         </Box>
       </DialogContent>
 
