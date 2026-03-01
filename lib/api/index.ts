@@ -7,7 +7,7 @@
  * ```ts
  * import { songsApi } from '@/lib/api';
  *
- * const list = await songsApi.listSongs();
+ * const created = await songsApi.uploadSong(file, { title, author });
  * ```
  *
  * The underlying `ApiClient` automatically:
@@ -46,7 +46,7 @@ export { ApiClient } from './client';
 export type { TokenProvider } from './client';
 
 export { SongsApi } from './songs';
-export type { UploadSongInput, SongList } from './songs';
+export type { UploadSongInput } from './songs';
 
 export { UsersApi } from './users';
 export { SeparationsApi } from './separations';
@@ -54,15 +54,14 @@ export { SeparationsApi } from './separations';
 export { ApiError } from './types';
 export type {
   Song,
-  SongRawUrl,
   UploadSongResult,
   RawSongInfo,
-  RawSongUrlInfo,
   SeparatedSongInfo,
   NormalizedSeparationInfo,
   SeparationJobStatus,
   SeparationProviderName,
-  SeparationStemOutputs,
+  SeparationStemName,
+  SeparationStems,
   PoyoSeparationTaskDetails,
   PoyoSeparationStatus,
   PoyoSeparatedSongInfo,
