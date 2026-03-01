@@ -214,9 +214,10 @@ GlobalPlayer (component)
   pinned to the top of the list.
 
 - **Global State** — `currentSongId` and `playbackStatus` tracked in the
-  app-wide state managed by `GlobalStateProvider`. Audio events update the
-  state, which triggers re-renders of the player UI. The `songs` array includes
-  `separatedSongInfo` which is updated in real-time via Firestore listener.
+     app-wide state managed by `GlobalStateProvider`. Audio events update the
+     state, which triggers re-renders of the player UI. The `songs` array includes
+     `separatedSongInfo` (provider data plus processed stem URLs with expiry
+     metadata) which is updated in real-time via Firestore listener.
 
 - **Separation Polling (`useSeparationStatus` hook)** — Manages the separation
   lifecycle for a song: submission via `separationsApi.requestSeparation()`,
