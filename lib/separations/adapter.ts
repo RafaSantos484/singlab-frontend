@@ -2,7 +2,7 @@ import type {
   NormalizedSeparationInfo,
   SeparationJobStatus,
   SeparationProviderName,
-  SeparationStemOutputs,
+  SeparationStems,
   SeparatedSongInfo,
 } from '@/lib/api/types';
 
@@ -14,7 +14,7 @@ export interface SeparationProviderAdapter<TData> {
   readonly name: SeparationProviderName;
 
   /** Derive a provider-agnostic view of the separation state. */
-  toNormalized(info: SeparatedSongInfo<TData>): NormalizedSeparationInfo;
+  toNormalized(info: SeparatedSongInfo<TData>): NormalizedSeparationInfo<TData>;
 
   /** Current high-level status. */
   getStatus(data: TData): SeparationJobStatus;
@@ -29,7 +29,10 @@ export interface SeparationProviderAdapter<TData> {
   getErrorMessage(data: TData): string | null;
 
   /** Generated stems with their URLs. */
-  getStems(data: TData): SeparationStemOutputs;
+  getStems(
+    data: TData,
+    storedStems: SeparatedSongInfo<TData>['stems'],
+  ): SeparationStems | null;
 
   /** Creation timestamp when available. */
   getRequestedAt(data: TData): string | null;

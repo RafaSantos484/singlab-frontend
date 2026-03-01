@@ -34,5 +34,5 @@ export function normalizeSeparationInfo(
 export function shouldPollSeparation(info: SeparatedSongInfo | null): boolean {
   if (!info) return false;
   const adapter = getSeparationAdapter(info.provider);
-  return adapter.shouldPoll(info.data as unknown);
+  return adapter.shouldPoll(info.providerData as unknown);
 }

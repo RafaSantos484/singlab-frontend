@@ -3,7 +3,7 @@ import type {
   PoyoSeparationStatus,
   PoyoSeparationTaskDetails,
   SeparationJobStatus,
-  SeparationStemOutputs,
+  SeparationStems,
   SeparatedSongInfo,
 } from '@/lib/api/types';
 import { type SeparationProviderAdapter } from './adapter';
@@ -19,25 +19,14 @@ function mapStatus(status: PoyoSeparationStatus): SeparationJobStatus {
   }
 }
 
-function extractStems(data: PoyoSeparationTaskDetails): SeparationStemOutputs {
-  if (data.status === 'finished') {
-    return {
-      vocals: data.files[0].vocal_removal.vocals,
-      bass: data.files[0].vocal_removal.bass,
-      drums: data.files[0].vocal_removal.drums,
-      piano: data.files[0].vocal_removal.piano,
-      guitar: data.files[0].vocal_removal.guitar,
-      other: data.files[0].vocal_removal.other,
-    };
-  }
+function mapStoredStems(
+  stems: SeparatedSongInfo<PoyoSeparationTaskDetails>['stems'],
+): SeparationStems | null {
+  if (!stems) return null;
 
   return {
-    vocals: null,
-    bass: null,
-    drums: null,
-    piano: null,
-    guitar: null,
-    other: null,
+    uploadedAt: stems.uploadedAt,
+    paths: stems.paths,
   };
 }
 
@@ -46,8 +35,8 @@ export class PoyoSeparationAdapter implements SeparationProviderAdapter<PoyoSepa
 
   toNormalized(
     info: SeparatedSongInfo<PoyoSeparationTaskDetails>,
-  ): NormalizedSeparationInfo {
-    const data = info.data;
+  ): NormalizedSeparationInfo<PoyoSeparationTaskDetails> {
+    const data = info.providerData;
     const status = mapStatus(data.status);
 
     return {
@@ -58,7 +47,7 @@ export class PoyoSeparationAdapter implements SeparationProviderAdapter<PoyoSepa
       errorMessage: this.getErrorMessage(data),
       requestedAt: this.getRequestedAt(data),
       finishedAt: this.getFinishedAt(data),
-      stems: this.getStems(data),
+      stems: this.getStems(data, info.stems),
       providerData: data,
       metadata: {
         status: data.status,
@@ -86,8 +75,11 @@ export class PoyoSeparationAdapter implements SeparationProviderAdapter<PoyoSepa
     return data.error_message ?? null;
   }
 
-  getStems(data: PoyoSeparationTaskDetails): SeparationStemOutputs {
-    return extractStems(data);
+  getStems(
+    _data: PoyoSeparationTaskDetails,
+    storedStems: SeparatedSongInfo<PoyoSeparationTaskDetails>['stems'],
+  ): SeparationStems | null {
+    return mapStoredStems(storedStems);
   }
 
   getRequestedAt(data: PoyoSeparationTaskDetails): string | null {
