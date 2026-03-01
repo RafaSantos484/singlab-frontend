@@ -11,11 +11,13 @@ import {
   Box,
   Alert,
 } from '@mui/material';
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 import { type Song } from '@/lib/api/types';
+import { type UploadSongInput } from '@/lib/api/songs';
 import { songsApi } from '@/lib/api';
 import { ApiError } from '@/lib/api/types';
+import { validateSongMetadata } from '@/lib/api/song-creation';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -58,9 +60,6 @@ export function SongEditDialog({
     author?: string;
   }>({});
 
-  // Refs
-  const titleInputRef = useRef<HTMLInputElement>(null);
-
   // Pre-fill form with existing song data when dialog opens
   useEffect(() => {
     if (open) {
@@ -70,38 +69,6 @@ export function SongEditDialog({
       setFieldErrors({});
     }
   }, [open, song.title, song.author]);
-
-  // -------------------------------------------------------------------------
-  // Validation
-  // -------------------------------------------------------------------------
-
-  /**
-   * Validates title and author fields.
-   * Returns validation errors or null if valid.
-   */
-  function validateMetadata(): {
-    title?: string;
-    author?: string;
-  } | null {
-    const errors: { title?: string; author?: string } = {};
-
-    const trimmedTitle = title.trim();
-    const trimmedAuthor = author.trim();
-
-    if (!trimmedTitle) {
-      errors.title = 'Song title is required';
-    } else if (trimmedTitle.length > 255) {
-      errors.title = 'Title must be at most 255 characters';
-    }
-
-    if (!trimmedAuthor) {
-      errors.author = 'Artist/Author is required';
-    } else if (trimmedAuthor.length > 255) {
-      errors.author = 'Author must be at most 255 characters';
-    }
-
-    return Object.keys(errors).length > 0 ? errors : null;
-  }
 
   // -------------------------------------------------------------------------
   // Event handlers
@@ -116,16 +83,17 @@ export function SongEditDialog({
     setError(null);
     setFieldErrors({});
 
-    // Validate metadata
-    const validationErrors = validateMetadata();
+    const trimmedTitle = title.trim();
+    const trimmedAuthor = author.trim();
+
+    // Validate metadata using shared rules to keep create/edit consistent
+    const validationErrors = validateSongMetadata(trimmedTitle, trimmedAuthor);
     if (validationErrors) {
       setFieldErrors(validationErrors);
       return;
     }
 
     // Check if anything actually changed
-    const trimmedTitle = title.trim();
-    const trimmedAuthor = author.trim();
     if (trimmedTitle === song.title && trimmedAuthor === song.author) {
       // No changes made, just close the dialog
       onClose();
@@ -133,7 +101,7 @@ export function SongEditDialog({
     }
 
     // Prepare update payload (only include changed fields)
-    const updates: { title?: string; author?: string } = {};
+    const updates: Partial<UploadSongInput> = {};
     if (trimmedTitle !== song.title) {
       updates.title = trimmedTitle;
     }
@@ -255,7 +223,6 @@ export function SongEditDialog({
 
           {/* Title field */}
           <TextField
-            inputRef={titleInputRef}
             label="Song Title"
             value={title}
             onChange={(e) => {
