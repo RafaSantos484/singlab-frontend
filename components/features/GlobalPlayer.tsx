@@ -37,11 +37,18 @@ import { normalizeSeparationInfo } from '@/lib/separations';
 import { useStorageDownloadUrls } from '@/lib/hooks/useStorageDownloadUrls';
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Types & Constants
 // ---------------------------------------------------------------------------
 
 type PlaybackSource = 'raw' | 'separated';
 type StemKey = SeparationStemName;
+type TrackId = 'raw' | StemKey;
+
+interface Track {
+  id: TrackId;
+  label: string;
+  src: string;
+}
 
 const STEM_ORDER: StemKey[] = [
   'vocals',
@@ -61,22 +68,28 @@ const STEM_LABELS: Record<StemKey, string> = {
   other: 'Other',
 };
 
+/** Seconds of allowed drift before a track is forcibly resynced. */
+const DRIFT_TOLERANCE_SEC = 0.06;
+/** How often (ms) to run the drift-correction sweep across all tracks. */
+const DRIFT_CHECK_INTERVAL_MS = 250;
+/** Maximum ms to wait for a single track to buffer at a seek target. */
+const BARRIER_TIMEOUT_MS = 7_000;
+/** Minimum HTMLMediaElement.readyState required before a track is "ready". */
+const HAVE_FUTURE_DATA = 3; // HTMLMediaElement.HAVE_FUTURE_DATA
+
 /**
- * Format seconds into MM:SS format for display.
- * Handles non-finite values gracefully.
+ * Format seconds into M:SS for display.
  */
 function formatTime(seconds: number): string {
-  if (!isFinite(seconds)) {
-    return '0:00';
-  }
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
+  if (!isFinite(seconds)) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
 /**
- * Extract the list of available stems from normalized separation info,
- * ordered by STEM_ORDER. Returns empty array if separation is not finished.
+ * Extract stems that have finished processing and have a download URL,
+ * preserving the canonical STEM_ORDER.
  */
 function extractAvailableStems(
   separation: NormalizedSeparationInfo | null,
@@ -84,22 +97,6 @@ function extractAvailableStems(
 ): StemKey[] {
   if (!separation || separation.status !== 'finished') return [];
   return STEM_ORDER.filter((stem) => Boolean(stemUrls[stem]));
-}
-
-/**
- * Build a default stem selection fallback when no stems are explicitly selected.
- *
- * Strategy:
- * 1. If instrumental stems are available (all except vocals), show those
- *    (sensible default for practice/karaoke)
- * 2. Otherwise, show all available stems
- *
- * This ensures the player always has something to play when separation finishes.
- */
-function buildDefaultStemSelection(stems: StemKey[]): StemKey[] {
-  const withoutVocals = stems.filter((stem) => stem !== 'vocals');
-  if (withoutVocals.length > 0) return withoutVocals;
-  return stems;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,40 +122,38 @@ interface GlobalPlayerInnerProps {
 }
 
 /**
- * Inner player component that renders the actual audio player for a loaded song.
+ * Inner player component – barrier-based multi-track audio player.
  *
- * Supports dual-mode playback:
- * - **Raw mode**: Single <audio> element for the original uploaded file
- * - **Separated mode**: Multiple <audio> elements (one per stem) with:
- *   - Manual playhead synchronization (capped to 150ms drift tolerance)
- *   - Stem selection via toggleable chips (build custom mixes)
- *   - Preset shortcuts (instruments, vocals-only, all-stems)
- *   - Per-stem volume control (selected stems play at master volume, others muted)
+ * Design principles
+ * -----------------
+ * 1. **All tracks always play simultaneously.** Selecting/deselecting a stem
+ *    only changes its volume (0 = muted), so no track ever needs a cold-start
+ *    mid-playback, guaranteeing perfect sync.
  *
- * State management is split between:
- * - Global state: currentSongId, playbackStatus (PLAY/PAUSE/STOP)
- * - Local state: selectedStems, playbackSource, currentTime, volume
- * - Effect hooks: wire up audio listeners, sync stems, apply volumes, auto-play
+ * 2. **Barrier before every play/seek.** `prepareAt(time, autoResume)` seeks
+ *    every track to `time` and waits until *all* of them reach
+ *    `HAVE_FUTURE_DATA` before calling `.play()` in a single coordinated
+ *    burst. This eliminates the "some tracks ready, others still buffering"
+ *    race condition.
  *
- * The component handles edge cases like:
- * - Browser autoplay policy (gracefully degrades to paused)
- * - URL expiry (via useSongRawUrl hook)
- * - Stem sync drift (resyncs every timeupdate and on seek)
- * - Hydration mismatch (no initial preload attempt)
+ * 3. **Periodic drift correction.** While playing, a setInterval checks every
+ *    250 ms whether any non-master track has drifted more than 60 ms and
+ *    corrects it with a silent `currentTime` snap.
+ *
+ * 4. **Automatic rebuffer on stall.** If any track fires `waiting` or
+ *    `stalled` during playback, the player pauses everything, re-runs the
+ *    barrier at the master's current position, then resumes automatically.
  *
  * @component
  */
 function GlobalPlayerInner({
   song,
 }: GlobalPlayerInnerProps): React.ReactElement {
-  const { playbackStatus } = useGlobalState();
   const dispatch = useGlobalStateDispatch();
+  const { playbackStatus } = useGlobalState();
 
-  const {
-    url: rawUrl,
-    isRefreshing: isRawRefreshing,
-    error: rawError,
-  } = useSongRawUrl(song);
+  const { url: rawUrl, isRefreshing: isRawRefreshing, error: rawError } =
+    useSongRawUrl(song);
   const separation = useMemo(
     () => normalizeSeparationInfo(song.separatedSongInfo),
     [song.separatedSongInfo],
@@ -166,437 +161,527 @@ function GlobalPlayerInner({
   const { urls: stemUrls, isLoading: areStemUrlsLoading } =
     useStorageDownloadUrls(separation?.stems?.paths ?? null);
 
-  const [playbackSource, setPlaybackSource] = useState<PlaybackSource>('raw');
-  const [selectedStems, setSelectedStems] = useState<StemKey[]>([]);
   const availableStems = useMemo(
     () => extractAvailableStems(separation, stemUrls),
     [separation, stemUrls],
   );
-
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const stemAudioRefs = useRef<Partial<Record<StemKey, HTMLAudioElement>>>({});
-
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(1);
-  const [isMuted, setIsMuted] = useState(false);
-  const shouldAutoPlayRef = useRef<boolean>(true);
 
   const hasSeparatedAudio =
     separation?.status === 'finished' &&
     !areStemUrlsLoading &&
     availableStems.length > 0;
 
-  const effectiveSelectedStems = useMemo(() => {
-    const filtered = selectedStems.filter((stem) =>
-      availableStems.includes(stem),
-    );
-    if (filtered.length > 0) return filtered;
-    if (availableStems.length > 0)
-      return buildDefaultStemSelection(availableStems);
+  // ── UI selection state ───────────────────────────────────────────────────
+
+  const [playbackSource, setPlaybackSource] = useState<PlaybackSource>('raw');
+  const [selectedStems, setSelectedStems] = useState<StemKey[]>([]);
+
+  /**
+   * Stems after filtering unavailable ones and falling back to
+   * "instrumental" when nothing is explicitly selected.
+   */
+  const effectiveSelectedStems = useMemo<StemKey[]>(() => {
+    const valid = selectedStems.filter((s) => availableStems.includes(s));
+    if (valid.length > 0) return valid;
+    if (availableStems.length > 0) {
+      const withoutVocals = availableStems.filter((s) => s !== 'vocals');
+      return withoutVocals.length > 0 ? withoutVocals : availableStems;
+    }
     return [];
   }, [availableStems, selectedStems]);
 
-  // Create audio elements for stems when separation data is ready
-  // Each stem gets its own <audio> element; we sync their playheads manually
-  useEffect(() => {
-    // Cleanup previous stem audios
-    const previousStems = stemAudioRefs.current;
-    Object.values(previousStems).forEach((audio) => {
-      if (audio) {
-        audio.pause();
-        audio.src = '';
-        audio.load();
-      }
-    });
+  /**
+   * Track IDs audible at any given moment.
+   * Everything outside this set plays at volume 0.
+   */
+  const audibleTrackIds = useMemo<Set<TrackId>>(() => {
+    if (playbackSource === 'raw') return new Set<TrackId>(['raw']);
+    return new Set<TrackId>(effectiveSelectedStems);
+  }, [effectiveSelectedStems, playbackSource]);
 
-    if (!separation || separation.status !== 'finished') {
-      stemAudioRefs.current = {};
-      return;
-    }
+  // ── Unified track list ───────────────────────────────────────────────────
 
-    const map: Partial<Record<StemKey, HTMLAudioElement>> = {};
+  /** All sources (raw + finished stems) as a flat array, raw first. */
+  const tracks = useMemo<Track[]>(() => {
+    const result: Track[] = [];
+    if (rawUrl) result.push({ id: 'raw', label: 'Raw', src: rawUrl });
     STEM_ORDER.forEach((stem) => {
-      const src = stemUrls[stem];
-      if (!src) return;
-      const audio = new Audio(src);
-      audio.preload = 'auto';
-      map[stem] = audio;
+      const url = stemUrls[stem];
+      if (url) result.push({ id: stem, label: STEM_LABELS[stem], src: url });
     });
-    stemAudioRefs.current = map;
+    return result;
+  }, [rawUrl, stemUrls]);
 
-    return () => {
-      // Cleanup on unmount: use captured `map` instead of ref to ensure
-      // cleanup accesses the correct audio elements even if ref changes
-      Object.values(map).forEach((audio) => {
-        if (audio) {
-          audio.pause();
-          audio.src = '';
-          audio.load();
+  /** Changes only when track identities or source URLs change. */
+  const trackKey = useMemo(
+    () => tracks.map((t) => `${t.id}:${t.src}`).join('|'),
+    [tracks],
+  );
+
+  /** Master track drives time display and drift corrections. */
+  const masterId = useMemo<TrackId | null>(() => {
+    if (tracks.length === 0) return null;
+    return tracks.find((t) => t.id === 'raw')?.id ?? tracks[0]?.id ?? null;
+  }, [tracks]);
+
+  // ── Audio engine state ───────────────────────────────────────────────────
+
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  // ── Refs ─────────────────────────────────────────────────────────────────
+
+  const audioMapRef = useRef<Map<TrackId, HTMLAudioElement>>(new Map());
+  const barrierTicketRef = useRef(0);
+  const driftIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Mirrors of state for use in stable callbacks / event handlers
+  const isPlayingRef = useRef(false);
+  const volumeRef = useRef(volume);
+  const isMutedRef = useRef(isMuted);
+  const audibleTrackIdsRef = useRef(audibleTrackIds);
+  const masterIdRef = useRef(masterId);
+
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+  useEffect(() => { volumeRef.current = volume; }, [volume]);
+  useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
+  useEffect(() => { audibleTrackIdsRef.current = audibleTrackIds; }, [audibleTrackIds]);
+  useEffect(() => { masterIdRef.current = masterId; }, [masterId]);
+
+  // Stable ref so audio-element event handlers always call latest prepareAt
+  const prepareAtRef = useRef<(time: number, autoResume: boolean) => Promise<void>>(
+    async () => { /* noop until wired */ },
+  );
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
+
+  /** Get the master audio element (drives time display and drift corrections). */
+  const getMaster = useCallback((): HTMLAudioElement | null => {
+    const id = masterIdRef.current;
+    if (!id) return null;
+    return audioMapRef.current.get(id) ?? null;
+  }, []);
+
+  /** Set volume on every track; unselected and muted tracks get 0. */
+  const applyVolumes = useCallback((): void => {
+    const base = isMutedRef.current ? 0 : volumeRef.current;
+    audioMapRef.current.forEach((el, id) => {
+      el.volume = audibleTrackIdsRef.current.has(id) ? base : 0;
+    });
+  }, []);
+
+  /** Cancel the RAF ticker and the drift-correction interval. */
+  const stopTimers = useCallback((): void => {
+    if (driftIntervalRef.current !== null) {
+      clearInterval(driftIntervalRef.current);
+      driftIntervalRef.current = null;
+    }
+  }, []);
+
+  /**
+   * Start the periodic drift corrector.
+   * Time display is handled by the `timeupdate` listener attached to the
+   * master element in the `trackKey` effect – that listener is always active
+   * and is driven by the browser's playback engine, so it works regardless
+   * of React effect ordering or StrictMode double-invocation.
+   */
+  const startTimers = useCallback((): void => {
+    stopTimers();
+
+    driftIntervalRef.current = setInterval((): void => {
+      const master = getMaster();
+      if (!master) return;
+      const t = master.currentTime;
+      audioMapRef.current.forEach((a) => {
+        if (a === master) return;
+        if (Math.abs(a.currentTime - t) > DRIFT_TOLERANCE_SEC) {
+          a.currentTime = t;
         }
       });
-    };
-  }, [separation, stemUrls]);
+    }, DRIFT_CHECK_INTERVAL_MS);
+  }, [getMaster, stopTimers]);
 
-  const masterStemKey = effectiveSelectedStems[0] ?? availableStems[0];
+  /**
+   * Wait for a single audio element to have enough data at `time`.
+   *
+   * Seeks the element immediately (using `fastSeek` where available), then
+   * resolves as soon as `readyState >= HAVE_FUTURE_DATA` at that position,
+   * or after `BARRIER_TIMEOUT_MS` (best-effort: never rejects).
+   *
+   * The `ticket` lets the caller cancel stale barriers: if
+   * `barrierTicketRef.current` no longer matches when an event fires, the
+   * promise resolves immediately without side-effects.
+   */
+  const waitForReadyAt = useCallback(
+    (el: HTMLAudioElement, time: number, ticket: number): Promise<void> => {
+      const seekTo = (): void => {
+        try {
+          const media = el as HTMLMediaElement & { fastSeek?: (t: number) => void };
+          if (typeof media.fastSeek === 'function') media.fastSeek(time);
+          else el.currentTime = time;
+        } catch {
+          el.currentTime = time;
+        }
+      };
 
-  const hasActiveAudio = useMemo(() => {
-    if (playbackSource === 'raw') {
-      return Boolean(rawUrl);
-    }
-    if (playbackSource === 'separated') {
-      if (!hasSeparatedAudio || !masterStemKey) return false;
-      return (
-        effectiveSelectedStems.length > 0 && Boolean(stemUrls[masterStemKey])
-      );
-    }
-    return false;
-  }, [
-    effectiveSelectedStems,
-    hasSeparatedAudio,
-    masterStemKey,
-    playbackSource,
-    rawUrl,
-    stemUrls,
-  ]);
+      seekTo();
 
-  const getActiveAudio = useCallback((): HTMLAudioElement | null => {
-    if (playbackSource === 'raw') {
-      return audioRef.current;
-    }
-    if (!masterStemKey) return null;
-    return stemAudioRefs.current[masterStemKey] ?? null;
-  }, [masterStemKey, playbackSource]);
-
-  const syncAllAudio = useCallback(
-    (time: number): void => {
-      // Sync raw audio
-      const rawAudio = audioRef.current;
-      if (rawAudio && Math.abs(rawAudio.currentTime - time) > 0.15) {
-        rawAudio.currentTime = time;
+      if (
+        el.readyState >= HAVE_FUTURE_DATA &&
+        Math.abs(el.currentTime - time) < 0.05
+      ) {
+        return Promise.resolve();
       }
 
-      // Sync all stems
-      STEM_ORDER.forEach((stem) => {
-        const audio = stemAudioRefs.current[stem];
-        if (audio && Math.abs(audio.currentTime - time) > 0.15) {
-          audio.currentTime = time;
-        }
+      return new Promise<void>((resolve) => {
+        let settled = false;
+
+        const finish = (): void => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve();
+        };
+
+        const timeout = window.setTimeout(finish, BARRIER_TIMEOUT_MS);
+
+        // Re-seek if the element drifted while buffering
+        const recheckInterval = window.setInterval((): void => {
+          if (barrierTicketRef.current !== ticket) {
+            window.clearInterval(recheckInterval);
+            finish();
+            return;
+          }
+          if (
+            Math.abs(el.currentTime - time) > 0.2 &&
+            el.readyState < HAVE_FUTURE_DATA
+          ) {
+            seekTo();
+          }
+        }, 400);
+
+        const onReady = (): void => {
+          if (barrierTicketRef.current !== ticket) { finish(); return; }
+          if (
+            el.readyState >= HAVE_FUTURE_DATA &&
+            Math.abs(el.currentTime - time) < 0.05
+          ) {
+            finish();
+          }
+        };
+
+        const cleanup = (): void => {
+          window.clearTimeout(timeout);
+          window.clearInterval(recheckInterval);
+          el.removeEventListener('seeked', onReady);
+          el.removeEventListener('canplay', onReady);
+          el.removeEventListener('canplaythrough', onReady);
+          el.removeEventListener('error', finish);
+        };
+
+        el.addEventListener('seeked', onReady);
+        el.addEventListener('canplay', onReady);
+        el.addEventListener('canplaythrough', onReady);
+        el.addEventListener('error', finish);
       });
     },
     [],
   );
 
-  const pauseAllAudio = useCallback((): void => {
-    // Pause raw audio
-    if (audioRef.current) {
-      audioRef.current.pause();
-    }
-    // Pause all stems
-    STEM_ORDER.forEach((stem) => {
-      const audio = stemAudioRefs.current[stem];
-      if (audio) {
-        audio.pause();
+  /**
+   * Core synchronisation primitive.
+   *
+   * 1. Cancels all timers and pauses every track.
+   * 2. Issues a new barrier ticket to invalidate in-flight barriers.
+   * 3. Seeks every track to `time` and waits until **all** are ready.
+   * 4. If `autoResume`, fires a coordinated `.play()` on all tracks and
+   *    starts the timers. Otherwise leaves everything paused at `time`.
+   */
+  const prepareAt = useCallback(
+    async (time: number, autoResume: boolean): Promise<void> => {
+      stopTimers();
+      audioMapRef.current.forEach((a) => a.pause());
+
+      const ticket = ++barrierTicketRef.current;
+      setIsBuffering(true);
+
+      const allAudios = Array.from(audioMapRef.current.values());
+      await Promise.all(allAudios.map((a) => waitForReadyAt(a, time, ticket)));
+
+      if (barrierTicketRef.current !== ticket) {
+        // A newer barrier was started while we were awaiting; clear the
+        // loading indicator so the UI doesn't remain stuck.
+        setIsBuffering(false);
+        return;
       }
-    });
-  }, []);
 
-  const playAllAudio = useCallback(async (): Promise<void> => {
-    const allAudios: HTMLAudioElement[] = [];
-    const targetTime = getActiveAudio()?.currentTime ?? 0;
+      setIsBuffering(false);
 
-    // Add raw audio if available
-    if (audioRef.current && rawUrl) {
-      if (Math.abs(audioRef.current.currentTime - targetTime) > 0.05) {
-        audioRef.current.currentTime = targetTime;
-      }
-      allAudios.push(audioRef.current);
-    }
+      const master = getMaster();
+      if (master && isFinite(master.duration)) setDuration(master.duration);
 
-    // Add all stem audios
-    STEM_ORDER.forEach((stem) => {
-      const audio = stemAudioRefs.current[stem];
-      if (audio) {
-        if (Math.abs(audio.currentTime - targetTime) > 0.05) {
-          audio.currentTime = targetTime;
+      if (autoResume) {
+        const target = master?.currentTime ?? time;
+        allAudios.forEach((a) => {
+          if (Math.abs(a.currentTime - target) > 0.02) a.currentTime = target;
+        });
+
+        try {
+          await Promise.all(allAudios.map((a) => a.play().catch(() => undefined)));
+          applyVolumes();
+          setIsPlaying(true);
+          dispatch({ type: 'PLAYER_SET_STATUS', payload: 'playing' });
+          startTimers();
+        } catch {
+          setIsPlaying(false);
+          dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
         }
-        allAudios.push(audio);
+      } else {
+        setCurrentTime(time);
+        applyVolumes();
       }
-    });
-
-    if (allAudios.length === 0) {
-      throw new Error('No audio sources available');
-    }
-
-    // Filter audios based on current source - only wait for relevant ones
-    const relevantAudios =
-      playbackSource === 'raw'
-        ? allAudios.filter((audio) => audio === audioRef.current)
-        : allAudios.filter((audio) => audio !== audioRef.current);
-
-    // If no relevant audios for separated mode, throw error
-    if (relevantAudios.length === 0 && playbackSource === 'separated') {
-      throw new Error('Stems not ready yet');
-    }
-
-    // Wait for relevant audios to be ready before playing
-    // HAVE_FUTURE_DATA (3) = enough data to play
-    await Promise.all(
-      relevantAudios.map(
-        (audio) =>
-          new Promise<void>((resolve, reject) => {
-            if (audio.readyState >= 3) {
-              resolve();
-              return;
-            }
-
-            // Timeout to prevent waiting indefinitely
-            const timeout = setTimeout(() => {
-              audio.removeEventListener('canplay', handleCanPlay);
-              audio.removeEventListener('error', handleError);
-              // If timeout, try to play anyway (may work or fail)
-              if (audio.readyState >= 1) {
-                resolve();
-              } else {
-                reject(new Error('Audio loading timeout'));
-              }
-            }, 3000);
-
-            const handleCanPlay = (): void => {
-              clearTimeout(timeout);
-              audio.removeEventListener('canplay', handleCanPlay);
-              audio.removeEventListener('error', handleError);
-              resolve();
-            };
-
-            const handleError = (): void => {
-              clearTimeout(timeout);
-              audio.removeEventListener('canplay', handleCanPlay);
-              audio.removeEventListener('error', handleError);
-              reject(new Error('Audio loading error'));
-            };
-
-            audio.addEventListener('canplay', handleCanPlay);
-            audio.addEventListener('error', handleError);
-
-            // Trigger load if needed
-            if (audio.readyState === 0) {
-              audio.load();
-            }
-          }),
-      ),
-    );
-
-    // Sync all audios one final time before playing
-    allAudios.forEach((audio) => {
-      if (Math.abs(audio.currentTime - targetTime) > 0.05) {
-        audio.currentTime = targetTime;
-      }
-    });
-
-    // Play all audio sources simultaneously
-    await Promise.all(
-      allAudios.map((audio) =>
-        audio.play().catch(() => {
-          return undefined;
-        }),
-      ),
-    );
-  }, [getActiveAudio, playbackSource, rawUrl]);
-
-  const applyAllVolumes = useCallback(
-    (nextVolume: number): void => {
-      // Control raw audio volume
-      if (audioRef.current) {
-        const rawVolume =
-          playbackSource === 'raw' && !isMuted ? nextVolume : 0;
-        audioRef.current.volume = rawVolume;
-      }
-
-      // Control stem volumes
-      STEM_ORDER.forEach((stem) => {
-        const audio = stemAudioRefs.current[stem];
-        if (!audio) return;
-
-        let desiredVolume = 0;
-        if (playbackSource === 'separated' && !isMuted) {
-          desiredVolume = effectiveSelectedStems.includes(stem)
-            ? nextVolume
-            : 0;
-        }
-        audio.volume = desiredVolume;
-      });
     },
-    [effectiveSelectedStems, isMuted, playbackSource],
+    [applyVolumes, dispatch, getMaster, startTimers, stopTimers, waitForReadyAt],
   );
 
-  const disableAutoPlay = useCallback((): void => {
-    shouldAutoPlayRef.current = false;
-  }, []);
+  useEffect(() => { prepareAtRef.current = prepareAt; }, [prepareAt]);
+
+  // ── Rebuild audio elements when track list changes ───────────────────────
 
   useEffect(() => {
-    // Reset auto-play allowance whenever a new song is loaded into the player.
-    shouldAutoPlayRef.current = true;
-  }, [song.id]);
+    const prev = audioMapRef.current;
+    prev.forEach((a) => { a.pause(); a.src = ''; });
+    prev.clear();
+    stopTimers();
+    barrierTicketRef.current++;
+    setIsPlaying(false);
+    isPlayingRef.current = false;
+    setIsBuffering(false);
+    setCurrentTime(0);
+    // Reset so auto-play re-fires on the StrictMode second-pass and on URL refreshes
+    hasAutoPlayedRef.current = false;
 
-  // Cleanup all audio when component unmounts (song change)
-  // Capture refs at effect time so cleanup accesses the correct values
-  // even if refs change between effect creation and cleanup execution
-  useEffect(() => {
-    const rawAudio = audioRef.current;
-    const allStemAudios = stemAudioRefs.current;
+    if (tracks.length === 0) return;
 
-    return () => {
-      // Stop and cleanup raw audio using captured ref value
-      if (rawAudio) {
-        rawAudio.pause();
-        rawAudio.currentTime = 0;
+    const map = new Map<TrackId, HTMLAudioElement>();
+    const masterTrackId = tracks.find((t) => t.id === 'raw')?.id ?? tracks[0]?.id;
+
+    tracks.forEach((track) => {
+      const el = document.createElement('audio');
+      el.preload = 'auto';
+      el.src = track.src;
+
+      if (track.id === masterTrackId) {
+        // timeupdate drives the seek slider – attaching directly to the
+        // element is reliable regardless of React StrictMode or trackKey
+        // rebuilds (unlike RAF which can be cancelled by effect cleanup).
+        el.addEventListener('timeupdate', () => {
+          setCurrentTime(el.currentTime);
+        });
+        el.addEventListener('durationchange', () => {
+          if (isFinite(el.duration)) setDuration(el.duration);
+        });
+        el.addEventListener('loadedmetadata', () => {
+          if (isFinite(el.duration)) setDuration(el.duration);
+        });
+        el.addEventListener('ended', () => {
+          stopTimers();
+          audioMapRef.current.forEach((a) => a.pause());
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+          setCurrentTime(0);
+          dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
+        });
       }
 
-      // Stop and cleanup all stem audios
-      Object.values(allStemAudios).forEach((audio) => {
-        if (audio) {
-          audio.pause();
-          audio.currentTime = 0;
-        }
-      });
+      // Rebuffer if any track stalls during playback
+      const handleStall = (): void => {
+        if (!isPlayingRef.current) return;
+        const t = getMaster()?.currentTime ?? 0;
+        void prepareAtRef.current(t, true);
+      };
+      el.addEventListener('waiting', handleStall);
+      el.addEventListener('stalled', handleStall);
+
+      map.set(track.id, el);
+    });
+
+    audioMapRef.current = map;
+
+    return () => {
+      map.forEach((a) => { a.pause(); a.src = ''; });
+      stopTimers();
     };
-  }, []);
+    // trackKey is a stable string – only changes when track ids/srcs change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackKey]);
 
-  // Toggle play/pause
+  // ── Volume side-effects ──────────────────────────────────────────────────
+
+  useEffect(() => {
+    audibleTrackIdsRef.current = audibleTrackIds;
+    applyVolumes();
+  }, [audibleTrackIds, applyVolumes]);
+
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+    applyVolumes();
+  }, [isMuted, applyVolumes]);
+
+  useEffect(() => {
+    volumeRef.current = volume;
+    applyVolumes();
+  }, [volume, applyVolumes]);
+
+  // ── Auto-play when raw URL first becomes available ───────────────────────
+
+  const hasAutoPlayedRef = useRef(false);
+  useEffect(() => { hasAutoPlayedRef.current = false; }, [song.id]);
+
+  useEffect(() => {
+    if (!rawUrl || hasAutoPlayedRef.current) return;
+    if (audioMapRef.current.size === 0) return;
+    hasAutoPlayedRef.current = true;
+    void prepareAt(0, true);
+  }, [rawUrl, prepareAt]);
+
+  // ── Watchdog: recover from stuck buffering state ─────────────────────────
+  // If isBuffering stays true for more than 5 s without playback starting,
+  // something went wrong (e.g. StrictMode double-invoke race, stale ticket,
+  // etc.). We force-clear the spinner and re-trigger prepareAt so the user
+  // doesn't see an infinite loading circle without any action available.
+
+  const isBufferingRef = useRef(isBuffering);
+  useEffect(() => { isBufferingRef.current = isBuffering; }, [isBuffering]);
+
+  useEffect(() => {
+    if (!isBuffering) return;
+
+    const watchdog = window.setTimeout(() => {
+      // Only intervene if we're still stuck (buffering and not playing)
+      if (!isBufferingRef.current || isPlayingRef.current) return;
+
+      console.warn(
+        '[GlobalPlayer] Watchdog: buffering stuck for 5 s — resetting and retrying.',
+      );
+
+      // Force-clear the stuck state
+      setIsBuffering(false);
+
+      // If there is audio and a URL, retry from current position (or 0)
+      if (audioMapRef.current.size > 0 && rawUrl) {
+        const resumeTime = getMaster()?.currentTime ?? 0;
+        hasAutoPlayedRef.current = false; // allow auto-play to re-fire
+        void prepareAt(resumeTime, true);
+      }
+    }, 5_000);
+
+    return () => window.clearTimeout(watchdog);
+  }, [isBuffering, getMaster, prepareAt, rawUrl]);
+
+  // ── Controls ─────────────────────────────────────────────────────────────
+
   const togglePlay = useCallback(async (): Promise<void> => {
-    disableAutoPlay();
+    if (isBuffering) return;
+    const master = getMaster();
+    if (!master) return;
 
-    if (!hasActiveAudio) return;
-
-    if (playbackStatus === 'playing') {
-      pauseAllAudio();
+    if (isPlaying) {
+      stopTimers();
+      audioMapRef.current.forEach((a) => a.pause());
+      setIsPlaying(false);
       dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
       return;
     }
 
-    try {
-      await playAllAudio();
-      applyAllVolumes(volume);
-      dispatch({ type: 'PLAYER_SET_STATUS', payload: 'playing' });
-    } catch (err) {
-      console.error('Failed to play audio:', err);
-      dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
+    const allReady = Array.from(audioMapRef.current.values()).every(
+      (a) =>
+        a.readyState >= HAVE_FUTURE_DATA &&
+        Math.abs(a.currentTime - master.currentTime) < 0.1,
+    );
+
+    if (allReady) {
+      const target = master.currentTime;
+      audioMapRef.current.forEach((a) => {
+        if (Math.abs(a.currentTime - target) > 0.02) a.currentTime = target;
+      });
+      try {
+        await Promise.all(
+          Array.from(audioMapRef.current.values()).map((a) =>
+            a.play().catch(() => undefined),
+          ),
+        );
+        applyVolumes();
+        setIsPlaying(true);
+        dispatch({ type: 'PLAYER_SET_STATUS', payload: 'playing' });
+        startTimers();
+      } catch {
+        dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
+      }
+    } else {
+      await prepareAt(master.currentTime || 0, true);
     }
   }, [
-    applyAllVolumes,
+    applyVolumes,
     dispatch,
-    hasActiveAudio,
-    pauseAllAudio,
-    playAllAudio,
-    playbackStatus,
-    volume,
-    disableAutoPlay,
+    getMaster,
+    isBuffering,
+    isPlaying,
+    prepareAt,
+    startTimers,
+    stopTimers,
   ]);
 
-  const handleStop = useCallback((): void => {
-    pauseAllAudio();
-
-    // Reset raw audio position
-    if (audioRef.current) {
-      audioRef.current.currentTime = 0;
-    }
-
-    // Reset all stem positions
-    STEM_ORDER.forEach((stem) => {
-      const audio = stemAudioRefs.current[stem];
-      if (audio) {
-        audio.currentTime = 0;
-      }
-    });
-
+  const handleStop = useCallback(async (): Promise<void> => {
+    await prepareAt(0, false);
     dispatch({ type: 'PLAYER_STOP' });
-    setCurrentTime(0);
-    disableAutoPlay();
-  }, [disableAutoPlay, dispatch, pauseAllAudio]);
+  }, [dispatch, prepareAt]);
 
   const handleSeek = useCallback(
-    (_event: Event, value: number | number[]): void => {
+    async (_event: Event, value: number | number[]): Promise<void> => {
       const newTime = Array.isArray(value) ? value[0] : value;
-
-      const targetAudio = getActiveAudio();
-
-      if (targetAudio) {
-        targetAudio.currentTime = newTime;
-      }
-
-      syncAllAudio(newTime);
-      setCurrentTime(newTime);
+      await prepareAt(newTime, isPlaying);
     },
-    [getActiveAudio, syncAllAudio],
+    [isPlaying, prepareAt],
   );
 
   const toggleMute = useCallback((): void => {
-    if (isMuted) {
-      applyAllVolumes(volume);
-      setIsMuted(false);
-    } else {
-      applyAllVolumes(0);
-      setIsMuted(true);
-    }
-  }, [applyAllVolumes, isMuted, volume]);
+    setIsMuted((m) => !m);
+  }, []);
 
   const handleVolumeChange = useCallback(
     (_event: Event, value: number | number[]): void => {
-      const newVolume = Array.isArray(value) ? value[0] : value;
-      applyAllVolumes(newVolume);
-      setVolume(newVolume);
-      if (newVolume > 0 && isMuted) {
-        setIsMuted(false);
-      }
+      const v = Array.isArray(value) ? value[0] : value;
+      setVolume(v);
+      if (v > 0) setIsMuted(false);
     },
-    [applyAllVolumes, isMuted],
+    [],
   );
 
+  /**
+   * Switch between raw and separated source.
+   * Because all tracks are already playing simultaneously, this is a pure
+   * volume change – no restart is needed.
+   */
   const handleSelectSource = useCallback(
     (
       _event: React.MouseEvent<HTMLElement>,
       value: PlaybackSource | null,
     ): void => {
       if (!value || value === playbackSource) return;
-
-      const wasPlaying = playbackStatus === 'playing';
-
-      // Switch source and adjust volumes accordingly
       setPlaybackSource(value);
-
-      // If was playing, restart playback with new source
-      if (wasPlaying) {
-        // Pause everything first
-        pauseAllAudio();
-
-        // Small delay to allow source switch and state updates
-        setTimeout(() => {
-          void playAllAudio()
-            .then(() => {
-              applyAllVolumes(volume);
-              dispatch({ type: 'PLAYER_SET_STATUS', payload: 'playing' });
-            })
-            .catch((err) => {
-              console.error('Failed to resume playback after source switch:', err);
-              applyAllVolumes(volume);
-              dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
-            });
-        }, 150);
-      } else {
-        applyAllVolumes(volume);
-      }
-
-      disableAutoPlay();
     },
-    [applyAllVolumes, disableAutoPlay, dispatch, pauseAllAudio, playAllAudio, playbackSource, playbackStatus, volume],
+    [playbackSource],
   );
 
   const toggleStem = useCallback((stem: StemKey): void => {
     setSelectedStems((prev) => {
       if (prev.includes(stem)) {
-        if (prev.length === 1) return prev;
-        return prev.filter((s) => s !== stem);
+        return prev.length === 1 ? prev : prev.filter((s) => s !== stem);
       }
       return [...prev, stem];
     });
@@ -605,106 +690,25 @@ function GlobalPlayerInner({
   const setPreset = useCallback(
     (preset: 'vocals' | 'instrumental' | 'all'): void => {
       if (preset === 'vocals') {
-        setSelectedStems((prev) => {
-          const vocals = availableStems.includes('vocals') ? ['vocals'] : prev;
-          return vocals as StemKey[];
-        });
-        return;
+        setSelectedStems(
+          availableStems.includes('vocals') ? ['vocals'] : effectiveSelectedStems,
+        );
+      } else if (preset === 'instrumental') {
+        const stems = availableStems.filter((s) => s !== 'vocals');
+        if (stems.length > 0) setSelectedStems(stems);
+      } else {
+        setSelectedStems(availableStems);
       }
-      if (preset === 'instrumental') {
-        const stems = availableStems.filter((stem) => stem !== 'vocals');
-        if (stems.length > 0) {
-          setSelectedStems(stems);
-        }
-        return;
-      }
-      setSelectedStems(availableStems);
     },
-    [availableStems],
+    [availableStems, effectiveSelectedStems],
   );
 
-  // Wire audio events for active source
-  useEffect(() => {
-    const audio = getActiveAudio();
-    if (!audio) return;
+  // ── Derived UI flags ─────────────────────────────────────────────────────
 
-    const handlePlay = (): void => {
-      dispatch({ type: 'PLAYER_SET_STATUS', payload: 'playing' });
-    };
+  const isPlayerReady = tracks.length > 0;
+  const isLoading = isRawRefreshing || playbackStatus === 'loading';
 
-    const handlePause = (): void => {
-      dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
-    };
-
-    const handleTimeUpdate = (): void => {
-      setCurrentTime(audio.currentTime);
-      syncAllAudio(audio.currentTime);
-    };
-
-    const handleLoadedMetadata = (): void => {
-      setDuration(audio.duration);
-    };
-
-    const handleEnded = (): void => {
-      dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
-      audio.currentTime = 0;
-      syncAllAudio(0);
-      setCurrentTime(0);
-    };
-
-    audio.addEventListener('play', handlePlay);
-    audio.addEventListener('pause', handlePause);
-    audio.addEventListener('timeupdate', handleTimeUpdate);
-    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
-    audio.addEventListener('ended', handleEnded);
-
-    return () => {
-      audio.removeEventListener('play', handlePlay);
-      audio.removeEventListener('pause', handlePause);
-      audio.removeEventListener('timeupdate', handleTimeUpdate);
-      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      audio.removeEventListener('ended', handleEnded);
-    };
-  }, [dispatch, getActiveAudio, syncAllAudio]);
-
-  // Auto-play when raw URL becomes ready for loading state
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio || !rawUrl || !shouldAutoPlayRef.current) return;
-
-    audio.currentTime = 0;
-    audio.src = rawUrl;
-
-    const handleCanPlay = (): void => {
-      void playAllAudio()
-        .then(() => {
-          applyAllVolumes(volume);
-          dispatch({ type: 'PLAYER_SET_STATUS', payload: 'playing' });
-        })
-        .catch((err: unknown) => {
-          if ((err as Error).name === 'AbortError') {
-            dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
-            return;
-          }
-          console.error('Failed to auto-play:', err);
-          dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
-        })
-        .finally(() => {
-          disableAutoPlay();
-        });
-    };
-
-    audio.addEventListener('canplay', handleCanPlay, { once: true });
-
-    return () => {
-      audio.removeEventListener('canplay', handleCanPlay);
-    };
-  }, [applyAllVolumes, disableAutoPlay, dispatch, playAllAudio, rawUrl, song.id, volume]);
-
-  // Apply volumes when selection or playback source changes
-  useEffect(() => {
-    applyAllVolumes(volume);
-  }, [applyAllVolumes, effectiveSelectedStems, playbackSource, volume]);
+  // ── Render ───────────────────────────────────────────────────────────────
 
   return (
     <Card
@@ -721,10 +725,6 @@ function GlobalPlayerInner({
       }}
     >
       <CardContent sx={{ p: { xs: 2, sm: 3 }, '&:last-child': { pb: 2 } }}>
-        <audio ref={audioRef} preload="metadata">
-          <track kind="captions" />
-        </audio>
-
         {rawError && (
           <Alert severity="error" sx={{ mb: 2, fontSize: '0.875rem' }}>
             {rawError}
@@ -732,6 +732,7 @@ function GlobalPlayerInner({
         )}
 
         <Stack spacing={2}>
+          {/* Song info */}
           <Box
             sx={{
               display: 'flex',
@@ -766,11 +767,16 @@ function GlobalPlayerInner({
               </Typography>
             </Box>
 
-            {(isRawRefreshing || playbackStatus === 'loading') && (
-              <CircularProgress size={20} sx={{ color: 'primary.main' }} />
+            {(isLoading || isBuffering) && (
+              <Tooltip
+                title={isBuffering ? 'Buffering – waiting for all tracks…' : undefined}
+              >
+                <CircularProgress size={20} sx={{ color: 'primary.main' }} />
+              </Tooltip>
             )}
           </Box>
 
+          {/* Source toggle (only when separated audio is available) */}
           {hasSeparatedAudio && (
             <Box
               sx={{
@@ -796,68 +802,68 @@ function GlobalPlayerInner({
                 onChange={handleSelectSource}
               >
                 <ToggleButton value="raw">Raw</ToggleButton>
-                <ToggleButton value="separated" disabled={!hasSeparatedAudio}>
-                  Separated
-                </ToggleButton>
+                <ToggleButton value="separated">Separated</ToggleButton>
               </ToggleButtonGroup>
             </Box>
           )}
 
-          <Stack direction="row" alignItems="center" spacing={{ xs: 1, sm: 2 }}>
-            <Tooltip title={playbackStatus === 'playing' ? 'Pause' : 'Play'}>
+          {/* Transport controls */}
+          <Stack
+            direction="row"
+            alignItems="center"
+            spacing={{ xs: 1, sm: 2 }}
+          >
+            <Tooltip
+              title={isBuffering ? 'Buffering…' : isPlaying ? 'Pause' : 'Play'}
+            >
               <span>
                 <IconButton
                   onClick={togglePlay}
-                  disabled={
-                    (playbackSource === 'raw' && !rawUrl) ||
-                    (playbackSource === 'separated' &&
-                      effectiveSelectedStems.length === 0)
-                  }
-                  aria-label={playbackStatus === 'playing' ? 'Pause' : 'Play'}
+                  disabled={!isPlayerReady || isBuffering}
+                  aria-label={isPlaying ? 'Pause' : 'Play'}
                   sx={{
                     color: 'primary.main',
                     bgcolor: 'rgba(124, 58, 237, 0.1)',
-                    '&:hover': {
-                      bgcolor: 'rgba(124, 58, 237, 0.2)',
-                    },
+                    '&:hover': { bgcolor: 'rgba(124, 58, 237, 0.2)' },
                     '&:disabled': {
                       color: 'rgba(124, 58, 237, 0.3)',
                       bgcolor: 'rgba(124, 58, 237, 0.05)',
                     },
                   }}
                 >
-                  {playbackStatus === 'playing' ? (
-                    <PauseIcon />
-                  ) : (
-                    <PlayArrowIcon />
-                  )}
+                  {isPlaying ? <PauseIcon /> : <PlayArrowIcon />}
                 </IconButton>
               </span>
             </Tooltip>
 
             <Tooltip title="Stop">
-              <IconButton
-                onClick={handleStop}
-                aria-label="Stop"
-                size="small"
-                sx={{
-                  color: 'text.secondary',
-                  '&:hover': {
-                    color: 'text.primary',
-                    bgcolor: 'rgba(124, 58, 237, 0.1)',
-                  },
-                }}
-              >
-                <StopIcon fontSize="small" />
-              </IconButton>
+              <span>
+                <IconButton
+                  onClick={handleStop}
+                  disabled={!isPlayerReady || isBuffering}
+                  aria-label="Stop"
+                  size="small"
+                  sx={{
+                    color: 'text.secondary',
+                    '&:hover': {
+                      color: 'text.primary',
+                      bgcolor: 'rgba(124, 58, 237, 0.1)',
+                    },
+                  }}
+                >
+                  <StopIcon fontSize="small" />
+                </IconButton>
+              </span>
             </Tooltip>
 
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Slider
                 value={currentTime}
+                min={0}
                 max={duration || 100}
+                step={0.01}
                 onChange={handleSeek}
-                disabled={!hasActiveAudio}
+                disabled={!isPlayerReady || isBuffering || !isFinite(duration)}
                 aria-label="Seek"
                 sx={{
                   color: 'primary.main',
@@ -865,14 +871,11 @@ function GlobalPlayerInner({
                   '& .MuiSlider-thumb': {
                     width: 12,
                     height: 12,
-                    transition: 'all 0.2s ease',
                     '&:hover, &.Mui-focusVisible': {
                       boxShadow: '0 0 0 8px rgba(124, 58, 237, 0.16)',
                     },
                   },
-                  '& .MuiSlider-rail': {
-                    opacity: 0.3,
-                  },
+                  '& .MuiSlider-rail': { opacity: 0.3 },
                 }}
               />
             </Box>
@@ -889,6 +892,7 @@ function GlobalPlayerInner({
               {formatTime(currentTime)} / {formatTime(duration)}
             </Typography>
 
+            {/* Volume control – hidden on mobile */}
             <Box
               sx={{
                 display: { xs: 'none', sm: 'flex' },
@@ -904,9 +908,7 @@ function GlobalPlayerInner({
                   aria-label={isMuted ? 'Unmute' : 'Mute'}
                   sx={{
                     color: 'text.secondary',
-                    '&:hover': {
-                      color: 'text.primary',
-                    },
+                    '&:hover': { color: 'text.primary' },
                   }}
                 >
                   {isMuted ? (
@@ -926,15 +928,13 @@ function GlobalPlayerInner({
                 sx={{
                   color: 'primary.main',
                   flex: 1,
-                  '& .MuiSlider-thumb': {
-                    width: 10,
-                    height: 10,
-                  },
+                  '& .MuiSlider-thumb': { width: 10, height: 10 },
                 }}
               />
             </Box>
           </Stack>
 
+          {/* Stem mixer – only in separated mode */}
           {playbackSource === 'separated' && availableStems.length > 0 && (
             <Stack spacing={1}>
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
@@ -960,7 +960,7 @@ function GlobalPlayerInner({
                   size="small"
                   variant="outlined"
                   onClick={() => setPreset('instrumental')}
-                  disabled={!availableStems.some((stem) => stem !== 'vocals')}
+                  disabled={!availableStems.some((s) => s !== 'vocals')}
                 >
                   Instrumental
                 </Button>
@@ -987,3 +987,6 @@ function GlobalPlayerInner({
     </Card>
   );
 }
+
+
+
