@@ -475,9 +475,40 @@ function GlobalPlayerInner({
   // ── Auto-play when raw URL first becomes available ───────────────────────
 
   const hasAutoPlayedRef = useRef(false);
+
+  // Reset auto-play flag when song changes
   useEffect(() => {
     hasAutoPlayedRef.current = false;
   }, [song.id]);
+
+  // Reset player when playback status becomes 'loading'
+  // This handles replaying the same song (same song.id but clicked again)
+  useEffect(() => {
+    if (playbackStatus === 'loading') {
+      // Cancel any pending play attempts
+      playingAttemptRef.current++;
+      
+      // Stop and reset all audio elements
+      audioMapRef.current.forEach((a) => {
+        a.pause();
+        a.currentTime = 0;
+      });
+      
+      // Reset state
+      setIsPlaying(false);
+      isPlayingRef.current = false;
+      setCurrentTime(0);
+      hasAutoPlayedRef.current = false;
+      
+      // If audio elements and URL already exist, start playback immediately
+      // This handles replaying the same song (rawUrl doesn't change so the
+      // auto-play effect below won't re-trigger)
+      if (rawUrl && audioMapRef.current.size > 0) {
+        hasAutoPlayedRef.current = true;
+        void prepareAt(0, true);
+      }
+    }
+  }, [playbackStatus, rawUrl, prepareAt]);
 
   useEffect(() => {
     if (!rawUrl || hasAutoPlayedRef.current) return;
