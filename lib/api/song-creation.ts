@@ -41,20 +41,27 @@ export class InvalidFileError extends Error {
 
 export class FileSizeExceededError extends InvalidFileError {
   constructor(fileName: string, sizeMB: number) {
-    super(
-      `File "${fileName}" exceeds maximum size of ${MAX_FILE_SIZE_MB}MB (current: ${sizeMB.toFixed(1)}MB)`,
-    );
+    // Message is an i18n key relative to the Validation namespace
+    super('file.sizeTooLarge');
     this.name = 'FileSizeExceededError';
+    // Expose raw values for callers that need them (e.g. logging)
+    this.fileName = fileName;
+    this.sizeMB = sizeMB;
   }
+
+  readonly fileName: string;
+  readonly sizeMB: number;
 }
 
 export class InvalidFileTypeError extends InvalidFileError {
   constructor(fileName: string) {
-    super(
-      `File "${fileName}" has unsupported format. Supported formats: MP3, WAV, OGG, WebM, MP4, MOV, FLAC.`,
-    );
+    // Message is an i18n key relative to the Validation namespace
+    super('file.invalidType');
     this.name = 'InvalidFileTypeError';
+    this.fileName = fileName;
   }
+
+  readonly fileName: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +142,7 @@ export async function createSong(
  *
  * @param title - Song title (will be trimmed).
  * @param author - Song author (will be trimmed).
- * @returns Validation errors or null if valid.
+ * @returns Validation errors (i18n keys in `Validation` namespace), or null if valid.
  */
 export function validateSongMetadata(
   title: string,
@@ -147,15 +154,15 @@ export function validateSongMetadata(
   const trimmedAuthor = author.trim();
 
   if (!trimmedTitle) {
-    errors.title = 'Song title is required';
+    errors.title = 'songTitle.required';
   } else if (trimmedTitle.length > 255) {
-    errors.title = 'Song title must be 255 characters or less';
+    errors.title = 'songTitle.tooLong';
   }
 
   if (!trimmedAuthor) {
-    errors.author = 'Artist/Author name is required';
+    errors.author = 'songAuthor.required';
   } else if (trimmedAuthor.length > 255) {
-    errors.author = 'Artist/Author name must be 255 characters or less';
+    errors.author = 'songAuthor.tooLong';
   }
 
   return Object.keys(errors).length > 0 ? errors : null;
