@@ -14,7 +14,7 @@ import {
   Alert,
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
-import { useState, useRef } from 'react';
+import { useRef, useState } from 'react';
 import jsmediatags from 'jsmediatags';
 
 import {
@@ -71,7 +71,6 @@ export function SongCreateDialog({
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const titleInputRef = useRef<HTMLInputElement>(null);
 
   // -------------------------------------------------------------------------
   // Event handlers
@@ -429,7 +428,6 @@ export function SongCreateDialog({
 
           {/* Title field */}
           <TextField
-            inputRef={titleInputRef}
             label="Song Title"
             value={title}
             onChange={(e) => {
