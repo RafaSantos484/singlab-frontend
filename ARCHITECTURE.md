@@ -182,10 +182,9 @@ GlobalPlayer (component)
     ├─→ Unified Multi-Track Audio Engine
     │       ├─→ All tracks (raw + stems) always play simultaneously
     │       ├─→ Stem selection only changes volume (0 for deselected, current volume for selected)
-    │       ├─→ Barrier-based synchronization before play/seek:
-    │       │   └─→ prepareAt(time, autoResume) seeks all tracks and waits until all reach HAVE_FUTURE_DATA
-    │       ├─→ Periodic drift correction every 250ms (tolerance: 60ms)
-    │       └─→ Automatic rebuffering on stall events (waiting/stalled)
+    │       ├─→ Simplified synchronization before play/seek:
+    │       │   └─→ prepareAt(time, autoResume) pauses, seeks all tracks, syncs them, then plays all
+    │       └─→ Manual sync on source switch (raw ↔ separated)
     │
     └─→ Event handlers
             └─→ dispatch({ type: 'PLAYER_SET_STATUS', ... })
@@ -194,24 +193,28 @@ GlobalPlayer (component)
 ### Key Components
 
 - **`GlobalPlayer` (`components/features/GlobalPlayer.tsx`)** — Single audio
-  player component that manages barrier-based multi-track synchronization for
-  seamless playback of raw audio and separated stems.
+  player component that manages multi-track synchronization for seamless playback
+  of raw audio and separated stems.
   
   **Design Principles:**
   1. **All tracks always play simultaneously** — Selecting/deselecting stems only
      changes volume (0 = muted, current volume = audible), eliminating cold-start
      issues and guaranteeing perfect sync.
-  2. **Barrier before every play/seek** — `prepareAt(time, autoResume)` seeks all
-     tracks to `time` and waits until they all reach `HAVE_FUTURE_DATA`, then
-     calls `.play()` in a coordinated burst. This prevents the "some tracks ready,
-     others buffering" race condition.
-  3. **Periodic drift correction** — While playing, a 250ms interval checks for
-     drift > 60ms and resyncs with silent `currentTime` snaps.
-  4. **Automatic rebuffering on stall** — If any track fires `waiting` or `stalled`
-     during playback, the player pauses, re-runs the barrier, then resumes.
+  2. **Simplified synchronization before play** — `prepareAt(time, autoResume)`
+     pauses all tracks, seeks to `time`, syncs current times, waits 50ms for
+     readiness (especially on mobile/cached audio), then calls `.play()` on all
+     tracks in a coordinated burst. Prevents race conditions where some tracks
+     remain paused while others play.
+  3. **Play attempt tracking** — Cancels stale play attempts if a user quickly
+     switches songs or clicks play/pause multiple times, preventing state
+     desynchronization.
+  4. **Manual sync on source switch** — Explicitly syncs all tracks and reapplies
+     volume when switching between raw and separated sources (50ms delay for
+     mobile readiness).
   
   Supports playback source selection (raw vs. separated), dynamic stem selection
   with preset mixes (vocals-only, instrumental, all stems), and volume control.
+  All controls are disabled during loading/buffering for better UX.
 
 - **Song Cards (`SongCardItem`)** — Display song metadata, play/edit/delete buttons,
   and separation status panel. The separation panel shows:

@@ -5,14 +5,18 @@ All notable changes to the SingLab Frontend will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- **Simplified GlobalPlayer architecture**: Removed complex barrier-based
+  synchronization with ticket system, eliminated periodic drift-correction
+  intervals, and removed automatic rebuffering logic. Now uses simpler
+  pre-play synchronization with play attempt tracking.
+- **Improved controls UX**: All player controls (play, pause, stop, seek, volume,
+  source toggle, stem selection) are disabled during loading/buffering phase,
+  preventing user interactions during initialization.
+- **Stabilized multi-track playback**: Fixed race condition on mobile devices
+  where cached audio would start playing silently. Now uses 50ms readiness delay
+  and dual synchronization when switching between raw and separated sources.
 - **Refactored to single global player architecture**: Replaced per-card audio
   players with a unified `GlobalPlayer` component at the bottom of the dashboard.
-  Song cards now dispatch actions to load songs into the global player instead of
-  embedding individual audio elements. The currently playing song is pinned to
-  the top of the list with a "Now Playing" indicator and remains visible
-  regardless of filters or sorting.
-- Updated global state to include `currentSongId` and `playbackStatus` for
-  centralized playback control.
 
 ### Removed
 - **Legacy per-card player components**: `SongPlayer` and `CustomAudioPlayer`

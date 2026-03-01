@@ -121,11 +121,17 @@ interface GlobalPlayerInnerProps {
  *    only changes its volume (0 = muted), ensuring perfect sync without
  *    complex restart logic.
  *
- * 2. **Simple prepare-and-play.** `prepareAt(time, autoResume)` pauses all
- *    tracks, seeks to `time`, then resumes playback in one action.
+ * 2. **Synchronized playback start.** `prepareAt(time, autoResume)` pauses all
+ *    tracks, seeks to `time`, syncs current times, waits 50ms for readiness
+ *    (mobile/cached audio), then plays all tracks in a coordinated burst.
+ *    Uses play attempt tracking to cancel stale operations.
  *
- * 3. **Volume-based stem mixing.** Switch between raw and separated sources
- *    by toggling track volumes, not by restarting playback.
+ * 3. **Manual sync on source switch.** Switching between raw and separated
+ *    sources explicitly syncs tracks and reapplies volume with 50ms delay
+ *    for mobile readiness.
+ *
+ * 4. **Disabled controls during loading.** All controls are disabled during
+ *    loading/buffering phase, preventing premature user interactions.
  *
  * @component
  */
@@ -135,8 +141,11 @@ function GlobalPlayerInner({
   const dispatch = useGlobalStateDispatch();
   const { playbackStatus } = useGlobalState();
 
-  const { url: rawUrl, isRefreshing: isRawRefreshing, error: rawError } =
-    useSongRawUrl(song);
+  const {
+    url: rawUrl,
+    isRefreshing: isRawRefreshing,
+    error: rawError,
+  } = useSongRawUrl(song);
   const separation = useMemo(
     () => normalizeSeparationInfo(song.separatedSongInfo),
     [song.separatedSongInfo],
@@ -228,18 +237,28 @@ function GlobalPlayerInner({
   const audibleTrackIdsRef = useRef(audibleTrackIds);
   const masterIdRef = useRef(masterId);
 
-  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
-  useEffect(() => { volumeRef.current = volume; }, [volume]);
-  useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
-  useEffect(() => { audibleTrackIdsRef.current = audibleTrackIds; }, [audibleTrackIds]);
-  useEffect(() => { masterIdRef.current = masterId; }, [masterId]);
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+  useEffect(() => {
+    volumeRef.current = volume;
+  }, [volume]);
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+  }, [isMuted]);
+  useEffect(() => {
+    audibleTrackIdsRef.current = audibleTrackIds;
+  }, [audibleTrackIds]);
+  useEffect(() => {
+    masterIdRef.current = masterId;
+  }, [masterId]);
 
   // Stable ref so audio-element event handlers always call latest prepareAt
-  const prepareAtRef = useRef<(time: number, autoResume: boolean) => Promise<void>>(
-    async () => { /* noop until wired */ },
-  );
-
-
+  const prepareAtRef = useRef<
+    (time: number, autoResume: boolean) => Promise<void>
+  >(async () => {
+    /* noop until wired */
+  });
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -282,7 +301,9 @@ function GlobalPlayerInner({
       audioMapRef.current.forEach((a) => {
         a.pause();
         try {
-          const media = a as HTMLMediaElement & { fastSeek?: (t: number) => void };
+          const media = a as HTMLMediaElement & {
+            fastSeek?: (t: number) => void;
+          };
           if (typeof media.fastSeek === 'function') media.fastSeek(time);
           else a.currentTime = time;
         } catch {
@@ -305,22 +326,26 @@ function GlobalPlayerInner({
           if (playingAttemptRef.current !== playAttempt) return;
 
           const allAudios = Array.from(audioMapRef.current.values());
-          
+
           // Ensure all tracks are synced before play
           syncAudioTracks();
-          
+
           // Try to play all tracks
           const playResults = await Promise.allSettled(
-            allAudios.map((a) => a.play().catch((e) => {
-              console.error('[GlobalPlayer] Play failed:', e);
-              throw e;
-            })),
+            allAudios.map((a) =>
+              a.play().catch((e) => {
+                console.error('[GlobalPlayer] Play failed:', e);
+                throw e;
+              }),
+            ),
           );
 
           // Check if this attempt is still valid
           if (playingAttemptRef.current !== playAttempt) return;
 
-          const allSucceeded = playResults.every((r) => r.status === 'fulfilled');
+          const allSucceeded = playResults.every(
+            (r) => r.status === 'fulfilled',
+          );
           if (allSucceeded) {
             applyVolumes();
             setIsPlaying(true);
@@ -343,7 +368,9 @@ function GlobalPlayerInner({
     [applyVolumes, dispatch, getMaster, syncAudioTracks],
   );
 
-  useEffect(() => { prepareAtRef.current = prepareAt; }, [prepareAt]);
+  useEffect(() => {
+    prepareAtRef.current = prepareAt;
+  }, [prepareAt]);
 
   // ── Reset player when song changes ───────────────────────────────────────
   // Ensures previous song's audio doesn't interfere with new playback
@@ -369,7 +396,10 @@ function GlobalPlayerInner({
 
   useEffect(() => {
     const prev = audioMapRef.current;
-    prev.forEach((a) => { a.pause(); a.src = ''; });
+    prev.forEach((a) => {
+      a.pause();
+      a.src = '';
+    });
     prev.clear();
     setIsPlaying(false);
     isPlayingRef.current = false;
@@ -380,7 +410,8 @@ function GlobalPlayerInner({
     if (tracks.length === 0) return;
 
     const map = new Map<TrackId, HTMLAudioElement>();
-    const masterTrackId = tracks.find((t) => t.id === 'raw')?.id ?? tracks[0]?.id;
+    const masterTrackId =
+      tracks.find((t) => t.id === 'raw')?.id ?? tracks[0]?.id;
 
     tracks.forEach((track) => {
       const el = document.createElement('audio');
@@ -412,7 +443,10 @@ function GlobalPlayerInner({
     audioMapRef.current = map;
 
     return () => {
-      map.forEach((a) => { a.pause(); a.src = ''; });
+      map.forEach((a) => {
+        a.pause();
+        a.src = '';
+      });
     };
     // trackKey is a stable string – only changes when track ids/srcs change
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -438,7 +472,9 @@ function GlobalPlayerInner({
   // ── Auto-play when raw URL first becomes available ───────────────────────
 
   const hasAutoPlayedRef = useRef(false);
-  useEffect(() => { hasAutoPlayedRef.current = false; }, [song.id]);
+  useEffect(() => {
+    hasAutoPlayedRef.current = false;
+  }, [song.id]);
 
   useEffect(() => {
     if (!rawUrl || hasAutoPlayedRef.current) return;
@@ -526,7 +562,9 @@ function GlobalPlayerInner({
     (preset: 'vocals' | 'instrumental' | 'all'): void => {
       if (preset === 'vocals') {
         setSelectedStems(
-          availableStems.includes('vocals') ? ['vocals'] : effectiveSelectedStems,
+          availableStems.includes('vocals')
+            ? ['vocals']
+            : effectiveSelectedStems,
         );
       } else if (preset === 'instrumental') {
         const stems = availableStems.filter((s) => s !== 'vocals');
@@ -604,7 +642,11 @@ function GlobalPlayerInner({
 
             {(isLoading || isBuffering) && (
               <Tooltip
-                title={isBuffering ? 'Buffering – waiting for all tracks…' : undefined}
+                title={
+                  isBuffering
+                    ? 'Buffering – waiting for all tracks…'
+                    : undefined
+                }
               >
                 <CircularProgress size={20} sx={{ color: 'primary.main' }} />
               </Tooltip>
@@ -643,11 +685,7 @@ function GlobalPlayerInner({
           )}
 
           {/* Transport controls */}
-          <Stack
-            direction="row"
-            alignItems="center"
-            spacing={{ xs: 1, sm: 2 }}
-          >
+          <Stack direction="row" alignItems="center" spacing={{ xs: 1, sm: 2 }}>
             <Tooltip
               title={isBuffering ? 'Buffering…' : isPlaying ? 'Pause' : 'Play'}
             >
@@ -698,7 +736,12 @@ function GlobalPlayerInner({
                 max={duration || 100}
                 step={0.01}
                 onChange={handleSeek}
-                disabled={!isPlayerReady || isLoading || isBuffering || !isFinite(duration)}
+                disabled={
+                  !isPlayerReady ||
+                  isLoading ||
+                  isBuffering ||
+                  !isFinite(duration)
+                }
                 aria-label="Seek"
                 sx={{
                   color: 'primary.main',
@@ -799,7 +842,9 @@ function GlobalPlayerInner({
                   size="small"
                   variant="outlined"
                   onClick={() => setPreset('instrumental')}
-                  disabled={isLoading || !availableStems.some((s) => s !== 'vocals')}
+                  disabled={
+                    isLoading || !availableStems.some((s) => s !== 'vocals')
+                  }
                 >
                   Instrumental
                 </Button>
@@ -827,6 +872,3 @@ function GlobalPlayerInner({
     </Card>
   );
 }
-
-
-

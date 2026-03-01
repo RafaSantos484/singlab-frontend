@@ -438,8 +438,8 @@ function SongCardItem({
 
   const availableStems = isFinished
     ? Object.entries(stemUrls)
-      .filter(([, url]) => Boolean(url))
-      .map(([key]) => key as SeparationStemName)
+        .filter(([, url]) => Boolean(url))
+        .map(([key]) => key as SeparationStemName)
     : [];
 
   return (
