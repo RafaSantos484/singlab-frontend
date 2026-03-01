@@ -20,7 +20,6 @@ import {
   InputLabel,
   Chip,
   Button,
-  LinearProgress,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -564,17 +563,8 @@ function SongCardItem({
           {song.separatedSongInfo && isProcessing && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                {tSep('processing', { progress: separation?.progress ?? 0 })}
+                {tSep('processing')}
               </Typography>
-              <LinearProgress
-                variant={
-                  typeof separation?.progress === 'number'
-                    ? 'determinate'
-                    : 'indeterminate'
-                }
-                value={separation?.progress ?? undefined}
-                sx={{ height: 6, borderRadius: 1 }}
-              />
               <Button
                 size="small"
                 variant="outlined"
