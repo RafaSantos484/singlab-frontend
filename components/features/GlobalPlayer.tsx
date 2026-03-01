@@ -25,6 +25,8 @@ import StopIcon from '@mui/icons-material/Stop';
 import VolumeOffIcon from '@mui/icons-material/VolumeOff';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 
+import { useTranslations } from 'next-intl';
+
 import { useGlobalState } from '@/lib/store';
 import { useGlobalStateDispatch } from '@/lib/store/GlobalStateContext';
 import { useSongRawUrl } from '@/lib/hooks/useSongRawUrl';
@@ -138,6 +140,7 @@ interface GlobalPlayerInnerProps {
 function GlobalPlayerInner({
   song,
 }: GlobalPlayerInnerProps): React.ReactElement {
+  const t = useTranslations('Player');
   const dispatch = useGlobalStateDispatch();
   const { playbackStatus } = useGlobalState();
 
@@ -676,11 +679,7 @@ function GlobalPlayerInner({
 
             {(isLoading || isBuffering) && (
               <Tooltip
-                title={
-                  isBuffering
-                    ? 'Buffering – waiting for all tracks…'
-                    : undefined
-                }
+                title={isBuffering ? t('bufferingTooltip') : undefined}
               >
                 <CircularProgress size={20} sx={{ color: 'primary.main' }} />
               </Tooltip>
@@ -703,7 +702,7 @@ function GlobalPlayerInner({
                   sx={{ color: 'primary.main' }}
                 />
                 <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                  Audio source
+                  {t('audioSource')}
                 </Typography>
               </Stack>
               <ToggleButtonGroup
@@ -712,8 +711,8 @@ function GlobalPlayerInner({
                 exclusive
                 onChange={handleSelectSource}
               >
-                <ToggleButton value="raw">Raw</ToggleButton>
-                <ToggleButton value="separated">Separated</ToggleButton>
+                <ToggleButton value="raw">{t('rawLabel')}</ToggleButton>
+                <ToggleButton value="separated">{t('separatedLabel')}</ToggleButton>
               </ToggleButtonGroup>
             </Box>
           )}
@@ -721,13 +720,19 @@ function GlobalPlayerInner({
           {/* Transport controls */}
           <Stack direction="row" alignItems="center" spacing={{ xs: 1, sm: 2 }}>
             <Tooltip
-              title={isBuffering ? 'Buffering…' : isPlaying ? 'Pause' : 'Play'}
+              title={
+                isBuffering
+                  ? t('playTooltipBuffering')
+                  : isPlaying
+                    ? t('playTooltipPause')
+                    : t('playTooltipPlay')
+              }
             >
               <span>
                 <IconButton
                   onClick={togglePlay}
                   disabled={!isPlayerReady || isLoading || isBuffering}
-                  aria-label={isPlaying ? 'Pause' : 'Play'}
+                  aria-label={isPlaying ? t('pauseAriaLabel') : t('playAriaLabel')}
                   sx={{
                     color: 'primary.main',
                     bgcolor: 'rgba(124, 58, 237, 0.1)',
@@ -743,12 +748,12 @@ function GlobalPlayerInner({
               </span>
             </Tooltip>
 
-            <Tooltip title="Stop">
+            <Tooltip title={t('stopTooltip')}>
               <span>
                 <IconButton
                   onClick={handleStop}
                   disabled={!isPlayerReady || isLoading || isBuffering}
-                  aria-label="Stop"
+                  aria-label={t('stopAriaLabel')}
                   size="small"
                   sx={{
                     color: 'text.secondary',
@@ -776,7 +781,7 @@ function GlobalPlayerInner({
                   isBuffering ||
                   !isFinite(duration)
                 }
-                aria-label="Seek"
+                aria-label={t('seekAriaLabel')}
                 sx={{
                   color: 'primary.main',
                   height: 4,
@@ -813,13 +818,13 @@ function GlobalPlayerInner({
                 minWidth: '120px',
               }}
             >
-              <Tooltip title={isMuted ? 'Unmute' : 'Mute'}>
+              <Tooltip title={isMuted ? t('unmuteTooltip') : t('muteTooltip')}>
                 <span>
                   <IconButton
                     onClick={toggleMute}
                     disabled={isLoading}
                     size="small"
-                    aria-label={isMuted ? 'Unmute' : 'Mute'}
+                    aria-label={isMuted ? t('unmuteAriaLabel') : t('muteAriaLabel')}
                     sx={{
                       color: 'text.secondary',
                       '&:hover': { color: 'text.primary' },
@@ -840,7 +845,7 @@ function GlobalPlayerInner({
                 step={0.01}
                 onChange={handleVolumeChange}
                 disabled={isLoading}
-                aria-label="Volume"
+                aria-label={t('volumeAriaLabel')}
                 sx={{
                   color: 'primary.main',
                   flex: 1,
@@ -854,7 +859,7 @@ function GlobalPlayerInner({
           {playbackSource === 'separated' && availableStems.length > 0 && (
             <Stack spacing={1}>
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                Toggle stems to create your mix.
+                {t('toggleStemsLabel')}
               </Typography>
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                 {availableStems.map((stem) => {
@@ -862,7 +867,7 @@ function GlobalPlayerInner({
                   return (
                     <Chip
                       key={stem}
-                      label={STEM_LABELS[stem]}
+                      label={t(('stems.' + stem) as Parameters<typeof t>[0])}
                       color={selected ? 'primary' : 'default'}
                       variant={selected ? 'filled' : 'outlined'}
                       onClick={() => toggleStem(stem)}
@@ -880,7 +885,7 @@ function GlobalPlayerInner({
                     isLoading || !availableStems.some((s) => s !== 'vocals')
                   }
                 >
-                  Instrumental
+                  {t('presets.instrumental')}
                 </Button>
                 <Button
                   size="small"
@@ -888,7 +893,7 @@ function GlobalPlayerInner({
                   onClick={() => setPreset('vocals')}
                   disabled={isLoading || !availableStems.includes('vocals')}
                 >
-                  Vocals only
+                  {t('presets.vocalsOnly')}
                 </Button>
                 <Button
                   size="small"
@@ -896,7 +901,7 @@ function GlobalPlayerInner({
                   onClick={() => setPreset('all')}
                   disabled={isLoading}
                 >
-                  All stems
+                  {t('presets.allStems')}
                 </Button>
               </Stack>
             </Stack>

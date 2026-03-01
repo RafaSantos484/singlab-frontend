@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
+import { useTranslations } from 'next-intl';
 import {
   IconButton,
   Dialog,
@@ -61,6 +62,8 @@ export function SongDeleteButton({
   size = 'medium',
   onDeleted,
 }: SongDeleteButtonProps): React.ReactElement {
+  const t = useTranslations('SongDelete');
+
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [snackbar, setSnackbar] = useState<{
@@ -109,7 +112,7 @@ export function SongDeleteButton({
       setIsDialogOpen(false);
       setSnackbar({
         open: true,
-        message: `"${songTitle}" deleted successfully`,
+        message: t('successMessage', { title: songTitle }),
         severity: 'success',
       });
 
@@ -119,19 +122,18 @@ export function SongDeleteButton({
       }
     } catch (error: unknown) {
       // Error handling based on status code
-      let errorMessage = 'Failed to delete song. Please try again.';
+      let errorMessage = t('errors.default');
 
       // Type guard for ApiError with statusCode property
       if (error && typeof error === 'object' && 'statusCode' in error) {
         const statusCode = (error as { statusCode: number }).statusCode;
 
         if (statusCode === 401) {
-          errorMessage =
-            'Authentication expired. Please sign in again and retry.';
+          errorMessage = t('errors.authExpired');
         } else if (statusCode === 403) {
-          errorMessage = 'You do not have permission to delete this song.';
+          errorMessage = t('errors.forbidden');
         } else if (statusCode === 404) {
-          errorMessage = 'This song no longer exists.';
+          errorMessage = t('errors.notFound');
         }
       }
 
@@ -150,7 +152,7 @@ export function SongDeleteButton({
     <>
       {/* Delete IconButton */}
       <IconButton
-        aria-label="Delete"
+        aria-label={t('ariaLabel')}
         size={size}
         onClick={handleOpenDialog}
         sx={{
@@ -173,20 +175,12 @@ export function SongDeleteButton({
         aria-labelledby={dialogTitleId}
         aria-describedby={dialogDescId}
       >
-        <DialogTitle id={dialogTitleId}>Delete song?</DialogTitle>
+        <DialogTitle id={dialogTitleId}>{t('dialogTitle')}</DialogTitle>
 
         <DialogContent>
           <Box id={dialogDescId}>
             <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-              Are you sure you want to delete{' '}
-              <Typography
-                component="span"
-                variant="body2"
-                sx={{ fontWeight: 600, color: 'text.primary' }}
-              >
-                &ldquo;{songTitle}&rdquo;
-              </Typography>
-              ? This action cannot be undone.
+              {t('dialogDescription', { title: songTitle })}
             </Typography>
           </Box>
         </DialogContent>
@@ -198,7 +192,7 @@ export function SongDeleteButton({
             disabled={isDeleting}
             autoFocus
           >
-            Cancel
+            {t('cancelButton')}
           </Button>
           <Button
             onClick={handleConfirmDelete}
@@ -207,7 +201,7 @@ export function SongDeleteButton({
             color="error"
             startIcon={isDeleting ? <CircularProgress size={16} /> : undefined}
           >
-            Delete
+            {t('deleteButton')}
           </Button>
         </DialogActions>
       </Dialog>
