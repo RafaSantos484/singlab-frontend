@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef } from 'react';
 
 import type { Song } from '@/lib/api/types';
 import { getStorageDownloadUrl } from '@/lib/storage/getStorageDownloadUrl';
@@ -18,6 +18,38 @@ export interface UseSongRawUrlResult {
   error: string | null;
 }
 
+interface State {
+  url: string | null;
+  isRefreshing: boolean;
+  error: string | null;
+}
+
+type Action =
+  | { type: 'START_FETCH' }
+  | { type: 'SUCCESS'; payload: string }
+  | { type: 'ERROR' };
+
+// ---------------------------------------------------------------------------
+// Reducer
+// ---------------------------------------------------------------------------
+
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case 'START_FETCH':
+      return { ...state, isRefreshing: true, error: null };
+    case 'SUCCESS':
+      return { url: action.payload, isRefreshing: false, error: null };
+    case 'ERROR':
+      return {
+        ...state,
+        isRefreshing: false,
+        error: 'Failed to resolve audio URL. Playback may not be available.',
+      };
+    default:
+      return state;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Hook
 // ---------------------------------------------------------------------------
@@ -26,9 +58,11 @@ export interface UseSongRawUrlResult {
  * Returns a valid signed URL for the song's raw audio file.
  */
 export function useSongRawUrl(song: Song): UseSongRawUrlResult {
-  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [state, dispatch] = useReducer(reducer, {
+    url: null,
+    isRefreshing: false,
+    error: null,
+  });
 
   // Prevent duplicate in-flight requests for the same song.
   const refreshingRef = useRef(false);
@@ -40,19 +74,17 @@ export function useSongRawUrl(song: Song): UseSongRawUrlResult {
     if (refreshingRef.current) return;
 
     refreshingRef.current = true;
-    setIsRefreshing(true);
-    setError(null);
+    dispatch({ type: 'START_FETCH' });
 
     getStorageDownloadUrl(song.rawSongInfo.path)
       .then((value) => {
-        setResolvedUrl(value);
+        dispatch({ type: 'SUCCESS', payload: value });
       })
       .catch(() => {
-        setError('Failed to resolve audio URL. Playback may not be available.');
+        dispatch({ type: 'ERROR' });
       })
       .finally(() => {
         refreshingRef.current = false;
-        setIsRefreshing(false);
       });
 
     // Clean up: if the effect re-runs before the request settles, reset the
@@ -63,9 +95,5 @@ export function useSongRawUrl(song: Song): UseSongRawUrlResult {
     // Re-run when the song or its storage path changes.
   }, [song.id, song.rawSongInfo?.path]);
 
-  return {
-    url: resolvedUrl,
-    isRefreshing,
-    error,
-  };
+  return state;
 }
