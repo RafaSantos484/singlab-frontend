@@ -48,6 +48,7 @@ function docToSong(snap: QueryDocumentSnapshot<DocumentData>): Song {
     author: d['author'] as string,
     rawSongInfo: d['rawSongInfo'] as RawSongInfo,
     separatedSongInfo: (d['separatedSongInfo'] as SeparatedSongInfo) ?? null,
+    createdAt: snap.createTime?.toDate().toISOString() ?? null,
   };
 }
 
