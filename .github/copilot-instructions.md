@@ -17,6 +17,7 @@ applyTo: "**"
 10. **MUI-first for components** — Prefer Material-UI components over custom HTML elements
 11. **Tailwind + MUI hybrid** — Use Tailwind for page layouts, MUI for UI components (forms, buttons, dialogs, cards, etc.)
 12. **No agent logs in markdown** — Do NOT create `.md` files containing logs, summaries, or outputs from tools/agents. Markdown files are for actual project documentation only
+13. **i18n mandatory** — Every new feature, component, screen, or feedback must use the i18n system (`next-intl`). Never write literal user-visible text directly in UI — all strings must live in `messages/en-US.json` and `messages/pt-BR.json`
 
 ## Project Context
 
@@ -25,7 +26,7 @@ singing practice app. The corresponding backend is `singlab-api` (NestJS +
 Firebase Functions).
 
 **Stack**: Next.js 16, React 19, TypeScript 5, Tailwind CSS 4, Jest + React
-Testing Library, Firebase Auth (client SDK), ESLint + Prettier
+Testing Library, Firebase Auth (client SDK), ESLint + Prettier, **next-intl 4** (i18n)
 
 **Key Concepts**:
 - Users upload audio (file or URL) → backend processes it asynchronously
@@ -41,6 +42,82 @@ Testing Library, Firebase Auth (client SDK), ESLint + Prettier
 
 **Related Repo**: `singlab-api` — NestJS backend; authentication uses Firebase
 ID tokens passed as `Authorization: Bearer <token>` headers.
+
+## Code Style Rules
+
+## Internationalization (i18n)
+
+This project uses **next-intl v4** for internationalization. Supported locales:
+`en-US` (default) and `pt-BR`. URL-segment based routing (`/en-US/dashboard`).
+
+### Mandatory Rules
+
+- **No literal UI strings** — every user-visible text must come from a
+  translation key. This includes labels, placeholders, tooltips, error
+  messages, ARIA labels, button text, and helper text.
+- **Both locales required** — every new key added to `messages/en-US.json`
+  must also be added to `messages/pt-BR.json` with a proper translation.
+- **Namespace by feature** — add new keys under the appropriate namespace
+  (e.g., `SongCreate`, `Dashboard`, `Player`). Create a new namespace for
+  entirely new features.
+- **Never use hardcoded strings as fallbacks** — if a key is missing, fix the
+  translation files; never write `|| 'Fallback text'` in UI.
+
+### Key Architecture
+
+| File | Purpose |
+|------|---------|
+| `lib/i18n/routing.ts` | Locales and default locale |
+| `lib/i18n/navigation.ts` | Locale-aware `Link`, `useRouter`, `usePathname` |
+| `lib/i18n/request.ts` | Server-side message loading |
+| `lib/i18n/types.d.ts` | TypeScript types for translation keys |
+| `messages/en-US.json` | English translations |
+| `messages/pt-BR.json` | Brazilian Portuguese translations |
+
+### Usage Pattern
+
+```tsx
+// In a client component:
+import { useTranslations } from 'next-intl';
+
+export function MyComponent(): React.ReactElement {
+  const t = useTranslations('MyNamespace');
+  return <Button>{t('submitButton')}</Button>;
+}
+
+// In a server component:
+import { getTranslations } from 'next-intl/server';
+
+export async function MyPage() {
+  const t = await getTranslations('MyNamespace');
+  return <h1>{t('pageTitle')}</h1>;
+}
+```
+
+### Translating Validation Errors (Zod + next-intl)
+
+Zod schemas return **i18n keys** as error messages (relative to the
+`Validation` namespace). Components translate them using:
+
+```tsx
+const tV = useTranslations('Validation');
+// ...
+helperText={fieldErrors.email
+  ? tV(fieldErrors.email as Parameters<typeof tV>[0])
+  : undefined
+}
+```
+
+### Navigation
+
+Always use locale-aware navigation from `@/lib/i18n/navigation` — never from
+`next/navigation` or `next/link` directly:
+
+```tsx
+import { Link, useRouter, usePathname } from '@/lib/i18n/navigation';
+```
+
+---
 
 ## Code Style Rules
 
