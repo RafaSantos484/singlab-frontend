@@ -30,17 +30,18 @@ import { useGlobalStateDispatch } from '@/lib/store/GlobalStateContext';
 import { useSongRawUrl } from '@/lib/hooks/useSongRawUrl';
 import type {
   NormalizedSeparationInfo,
-  SeparationStemOutputs,
+  SeparationStemName,
   Song,
 } from '@/lib/api/types';
 import { normalizeSeparationInfo } from '@/lib/separations';
+import { useStorageDownloadUrls } from '@/lib/hooks/useStorageDownloadUrls';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 type PlaybackSource = 'raw' | 'separated';
-type StemKey = keyof SeparationStemOutputs;
+type StemKey = SeparationStemName;
 
 const STEM_ORDER: StemKey[] = [
   'vocals',
@@ -79,9 +80,10 @@ function formatTime(seconds: number): string {
  */
 function extractAvailableStems(
   separation: NormalizedSeparationInfo | null,
+  stemUrls: Partial<Record<StemKey, string>>,
 ): StemKey[] {
   if (!separation || separation.status !== 'finished') return [];
-  return STEM_ORDER.filter((stem) => Boolean(separation.stems[stem]));
+  return STEM_ORDER.filter((stem) => Boolean(stemUrls[stem]));
 }
 
 /**
@@ -146,22 +148,29 @@ interface GlobalPlayerInnerProps {
  *
  * @component
  */
-function GlobalPlayerInner({ song }: GlobalPlayerInnerProps): React.ReactElement {
+function GlobalPlayerInner({
+  song,
+}: GlobalPlayerInnerProps): React.ReactElement {
   const { playbackStatus } = useGlobalState();
   const dispatch = useGlobalStateDispatch();
 
-  const { url: rawUrl, isRefreshing: isRawRefreshing, error: rawError } =
-    useSongRawUrl(song);
+  const {
+    url: rawUrl,
+    isRefreshing: isRawRefreshing,
+    error: rawError,
+  } = useSongRawUrl(song);
   const separation = useMemo(
     () => normalizeSeparationInfo(song.separatedSongInfo),
     [song.separatedSongInfo],
   );
+  const { urls: stemUrls, isLoading: areStemUrlsLoading } =
+    useStorageDownloadUrls(separation?.stems?.paths ?? null);
 
   const [playbackSource, setPlaybackSource] = useState<PlaybackSource>('raw');
   const [selectedStems, setSelectedStems] = useState<StemKey[]>([]);
   const availableStems = useMemo(
-    () => extractAvailableStems(separation),
-    [separation],
+    () => extractAvailableStems(separation, stemUrls),
+    [separation, stemUrls],
   );
 
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -173,18 +182,34 @@ function GlobalPlayerInner({ song }: GlobalPlayerInnerProps): React.ReactElement
   const [isMuted, setIsMuted] = useState(false);
   const shouldAutoPlayRef = useRef<boolean>(true);
 
-  const hasSeparatedAudio = separation?.status === 'finished';
+  const hasSeparatedAudio =
+    separation?.status === 'finished' &&
+    !areStemUrlsLoading &&
+    availableStems.length > 0;
 
   const effectiveSelectedStems = useMemo(() => {
-    const filtered = selectedStems.filter((stem) => availableStems.includes(stem));
+    const filtered = selectedStems.filter((stem) =>
+      availableStems.includes(stem),
+    );
     if (filtered.length > 0) return filtered;
-    if (availableStems.length > 0) return buildDefaultStemSelection(availableStems);
+    if (availableStems.length > 0)
+      return buildDefaultStemSelection(availableStems);
     return [];
   }, [availableStems, selectedStems]);
 
   // Create audio elements for stems when separation data is ready
   // Each stem gets its own <audio> element; we sync their playheads manually
   useEffect(() => {
+    // Cleanup previous stem audios
+    const previousStems = stemAudioRefs.current;
+    Object.values(previousStems).forEach((audio) => {
+      if (audio) {
+        audio.pause();
+        audio.src = '';
+        audio.load();
+      }
+    });
+
     if (!separation || separation.status !== 'finished') {
       stemAudioRefs.current = {};
       return;
@@ -192,14 +217,26 @@ function GlobalPlayerInner({ song }: GlobalPlayerInnerProps): React.ReactElement
 
     const map: Partial<Record<StemKey, HTMLAudioElement>> = {};
     STEM_ORDER.forEach((stem) => {
-      const src = separation.stems[stem];
+      const src = stemUrls[stem];
       if (!src) return;
       const audio = new Audio(src);
       audio.preload = 'auto';
       map[stem] = audio;
     });
     stemAudioRefs.current = map;
-  }, [separation]);
+
+    return () => {
+      // Cleanup on unmount: use captured `map` instead of ref to ensure
+      // cleanup accesses the correct audio elements even if ref changes
+      Object.values(map).forEach((audio) => {
+        if (audio) {
+          audio.pause();
+          audio.src = '';
+          audio.load();
+        }
+      });
+    };
+  }, [separation, stemUrls]);
 
   const masterStemKey = effectiveSelectedStems[0] ?? availableStems[0];
 
@@ -209,10 +246,19 @@ function GlobalPlayerInner({ song }: GlobalPlayerInnerProps): React.ReactElement
     }
     if (playbackSource === 'separated') {
       if (!hasSeparatedAudio || !masterStemKey) return false;
-      return effectiveSelectedStems.length > 0 && Boolean(separation?.stems[masterStemKey]);
+      return (
+        effectiveSelectedStems.length > 0 && Boolean(stemUrls[masterStemKey])
+      );
     }
     return false;
-  }, [effectiveSelectedStems, hasSeparatedAudio, masterStemKey, playbackSource, rawUrl, separation]);
+  }, [
+    effectiveSelectedStems,
+    hasSeparatedAudio,
+    masterStemKey,
+    playbackSource,
+    rawUrl,
+    stemUrls,
+  ]);
 
   const getActiveAudio = useCallback((): HTMLAudioElement | null => {
     if (playbackSource === 'raw') {
@@ -222,9 +268,15 @@ function GlobalPlayerInner({ song }: GlobalPlayerInnerProps): React.ReactElement
     return stemAudioRefs.current[masterStemKey] ?? null;
   }, [masterStemKey, playbackSource]);
 
-  const syncStemsToTime = useCallback(
+  const syncAllAudio = useCallback(
     (time: number): void => {
-      if (playbackSource !== 'separated') return;
+      // Sync raw audio
+      const rawAudio = audioRef.current;
+      if (rawAudio && Math.abs(rawAudio.currentTime - time) > 0.15) {
+        rawAudio.currentTime = time;
+      }
+
+      // Sync all stems
       STEM_ORDER.forEach((stem) => {
         const audio = stemAudioRefs.current[stem];
         if (audio && Math.abs(audio.currentTime - time) > 0.15) {
@@ -232,50 +284,147 @@ function GlobalPlayerInner({ song }: GlobalPlayerInnerProps): React.ReactElement
         }
       });
     },
-    [playbackSource],
+    [],
   );
 
-  const pauseAllStems = useCallback((): void => {
-    if (playbackSource !== 'separated') return;
+  const pauseAllAudio = useCallback((): void => {
+    // Pause raw audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    // Pause all stems
     STEM_ORDER.forEach((stem) => {
       const audio = stemAudioRefs.current[stem];
       if (audio) {
         audio.pause();
       }
     });
-  }, [playbackSource]);
+  }, []);
 
-  const playAllStems = useCallback(async (): Promise<void> => {
-    if (playbackSource !== 'separated') return;
-    const audios = STEM_ORDER.map((stem) => stemAudioRefs.current[stem]).filter(
-      (audio): audio is HTMLAudioElement => Boolean(audio),
-    );
-    if (audios.length === 0) return;
-
+  const playAllAudio = useCallback(async (): Promise<void> => {
+    const allAudios: HTMLAudioElement[] = [];
     const targetTime = getActiveAudio()?.currentTime ?? 0;
-    audios.forEach((audio) => {
+
+    // Add raw audio if available
+    if (audioRef.current && rawUrl) {
+      if (Math.abs(audioRef.current.currentTime - targetTime) > 0.05) {
+        audioRef.current.currentTime = targetTime;
+      }
+      allAudios.push(audioRef.current);
+    }
+
+    // Add all stem audios
+    STEM_ORDER.forEach((stem) => {
+      const audio = stemAudioRefs.current[stem];
+      if (audio) {
+        if (Math.abs(audio.currentTime - targetTime) > 0.05) {
+          audio.currentTime = targetTime;
+        }
+        allAudios.push(audio);
+      }
+    });
+
+    if (allAudios.length === 0) {
+      throw new Error('No audio sources available');
+    }
+
+    // Filter audios based on current source - only wait for relevant ones
+    const relevantAudios =
+      playbackSource === 'raw'
+        ? allAudios.filter((audio) => audio === audioRef.current)
+        : allAudios.filter((audio) => audio !== audioRef.current);
+
+    // If no relevant audios for separated mode, throw error
+    if (relevantAudios.length === 0 && playbackSource === 'separated') {
+      throw new Error('Stems not ready yet');
+    }
+
+    // Wait for relevant audios to be ready before playing
+    // HAVE_FUTURE_DATA (3) = enough data to play
+    await Promise.all(
+      relevantAudios.map(
+        (audio) =>
+          new Promise<void>((resolve, reject) => {
+            if (audio.readyState >= 3) {
+              resolve();
+              return;
+            }
+
+            // Timeout to prevent waiting indefinitely
+            const timeout = setTimeout(() => {
+              audio.removeEventListener('canplay', handleCanPlay);
+              audio.removeEventListener('error', handleError);
+              // If timeout, try to play anyway (may work or fail)
+              if (audio.readyState >= 1) {
+                resolve();
+              } else {
+                reject(new Error('Audio loading timeout'));
+              }
+            }, 3000);
+
+            const handleCanPlay = (): void => {
+              clearTimeout(timeout);
+              audio.removeEventListener('canplay', handleCanPlay);
+              audio.removeEventListener('error', handleError);
+              resolve();
+            };
+
+            const handleError = (): void => {
+              clearTimeout(timeout);
+              audio.removeEventListener('canplay', handleCanPlay);
+              audio.removeEventListener('error', handleError);
+              reject(new Error('Audio loading error'));
+            };
+
+            audio.addEventListener('canplay', handleCanPlay);
+            audio.addEventListener('error', handleError);
+
+            // Trigger load if needed
+            if (audio.readyState === 0) {
+              audio.load();
+            }
+          }),
+      ),
+    );
+
+    // Sync all audios one final time before playing
+    allAudios.forEach((audio) => {
       if (Math.abs(audio.currentTime - targetTime) > 0.05) {
         audio.currentTime = targetTime;
       }
     });
 
+    // Play all audio sources simultaneously
     await Promise.all(
-      audios.map((audio) =>
+      allAudios.map((audio) =>
         audio.play().catch(() => {
           return undefined;
         }),
       ),
     );
-  }, [getActiveAudio, playbackSource]);
+  }, [getActiveAudio, playbackSource, rawUrl]);
 
-  const applyStemVolumes = useCallback(
+  const applyAllVolumes = useCallback(
     (nextVolume: number): void => {
-      if (playbackSource !== 'separated') return;
+      // Control raw audio volume
+      if (audioRef.current) {
+        const rawVolume =
+          playbackSource === 'raw' && !isMuted ? nextVolume : 0;
+        audioRef.current.volume = rawVolume;
+      }
+
+      // Control stem volumes
       STEM_ORDER.forEach((stem) => {
         const audio = stemAudioRefs.current[stem];
         if (!audio) return;
-        const desiredVolume = effectiveSelectedStems.includes(stem) ? nextVolume : 0;
-        audio.volume = isMuted ? 0 : desiredVolume;
+
+        let desiredVolume = 0;
+        if (playbackSource === 'separated' && !isMuted) {
+          desiredVolume = effectiveSelectedStems.includes(stem)
+            ? nextVolume
+            : 0;
+        }
+        audio.volume = desiredVolume;
       });
     },
     [effectiveSelectedStems, isMuted, playbackSource],
@@ -290,74 +439,81 @@ function GlobalPlayerInner({ song }: GlobalPlayerInnerProps): React.ReactElement
     shouldAutoPlayRef.current = true;
   }, [song.id]);
 
+  // Cleanup all audio when component unmounts (song change)
+  // Capture refs at effect time so cleanup accesses the correct values
+  // even if refs change between effect creation and cleanup execution
+  useEffect(() => {
+    const rawAudio = audioRef.current;
+    const allStemAudios = stemAudioRefs.current;
+
+    return () => {
+      // Stop and cleanup raw audio using captured ref value
+      if (rawAudio) {
+        rawAudio.pause();
+        rawAudio.currentTime = 0;
+      }
+
+      // Stop and cleanup all stem audios
+      Object.values(allStemAudios).forEach((audio) => {
+        if (audio) {
+          audio.pause();
+          audio.currentTime = 0;
+        }
+      });
+    };
+  }, []);
+
   // Toggle play/pause
   const togglePlay = useCallback(async (): Promise<void> => {
     disableAutoPlay();
 
-    if (playbackSource === 'raw') {
-      const audio = audioRef.current;
-      if (!audio || !rawUrl) return;
-
-      if (playbackStatus === 'playing') {
-        audio.pause();
-      } else {
-        try {
-          await audio.play();
-          dispatch({ type: 'PLAYER_SET_STATUS', payload: 'playing' });
-        } catch (err) {
-          console.error('Failed to play audio:', err);
-        }
-      }
-      return;
-    }
-
-    const targetAudio = getActiveAudio();
-
-    if (!targetAudio || availableStems.length === 0) return;
+    if (!hasActiveAudio) return;
 
     if (playbackStatus === 'playing') {
-      pauseAllStems();
+      pauseAllAudio();
       dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
       return;
     }
 
     try {
-      await playAllStems();
-      applyStemVolumes(volume);
+      await playAllAudio();
+      applyAllVolumes(volume);
       dispatch({ type: 'PLAYER_SET_STATUS', payload: 'playing' });
     } catch (err) {
-      console.error('Failed to play stems:', err);
+      console.error('Failed to play audio:', err);
+      dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
     }
   }, [
-    applyStemVolumes,
-    availableStems.length,
+    applyAllVolumes,
     dispatch,
-    getActiveAudio,
-    pauseAllStems,
-    playAllStems,
-    playbackSource,
+    hasActiveAudio,
+    pauseAllAudio,
+    playAllAudio,
     playbackStatus,
-    rawUrl,
     volume,
     disableAutoPlay,
   ]);
 
   const handleStop = useCallback((): void => {
+    pauseAllAudio();
+
+    // Reset raw audio position
     if (audioRef.current) {
-      audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
-    pauseAllStems();
+
+    // Reset all stem positions
     STEM_ORDER.forEach((stem) => {
       const audio = stemAudioRefs.current[stem];
       if (audio) {
         audio.currentTime = 0;
       }
     });
+
     dispatch({ type: 'PLAYER_STOP' });
     setCurrentTime(0);
     disableAutoPlay();
-  }, [disableAutoPlay, dispatch, pauseAllStems]);
+  }, [disableAutoPlay, dispatch, pauseAllAudio]);
 
   const handleSeek = useCallback(
     (_event: Event, value: number | number[]): void => {
@@ -369,96 +525,82 @@ function GlobalPlayerInner({ song }: GlobalPlayerInnerProps): React.ReactElement
         targetAudio.currentTime = newTime;
       }
 
-      syncStemsToTime(newTime);
+      syncAllAudio(newTime);
       setCurrentTime(newTime);
     },
-    [getActiveAudio, syncStemsToTime],
+    [getActiveAudio, syncAllAudio],
   );
 
   const toggleMute = useCallback((): void => {
     if (isMuted) {
-      if (playbackSource === 'raw' && audioRef.current) {
-        audioRef.current.volume = volume;
-      }
-      applyStemVolumes(volume);
+      applyAllVolumes(volume);
       setIsMuted(false);
     } else {
-      if (audioRef.current) {
-        audioRef.current.volume = 0;
-      }
-      applyStemVolumes(0);
+      applyAllVolumes(0);
       setIsMuted(true);
     }
-  }, [applyStemVolumes, isMuted, playbackSource, volume]);
+  }, [applyAllVolumes, isMuted, volume]);
 
   const handleVolumeChange = useCallback(
     (_event: Event, value: number | number[]): void => {
       const newVolume = Array.isArray(value) ? value[0] : value;
-      if (audioRef.current) {
-        audioRef.current.volume = newVolume;
-      }
-      applyStemVolumes(newVolume);
+      applyAllVolumes(newVolume);
       setVolume(newVolume);
       if (newVolume > 0 && isMuted) {
         setIsMuted(false);
       }
     },
-    [applyStemVolumes, isMuted],
+    [applyAllVolumes, isMuted],
   );
 
   const handleSelectSource = useCallback(
-    (_event: React.MouseEvent<HTMLElement>, value: PlaybackSource | null): void => {
-      if (!value) return;
+    (
+      _event: React.MouseEvent<HTMLElement>,
+      value: PlaybackSource | null,
+    ): void => {
+      if (!value || value === playbackSource) return;
 
-      if (value === 'separated') {
-        const rawAudio = audioRef.current;
-        const current = rawAudio?.currentTime ?? getActiveAudio()?.currentTime ?? 0;
-        if (rawAudio) rawAudio.pause();
-        STEM_ORDER.forEach((stem) => {
-          const audio = stemAudioRefs.current[stem];
-          if (audio) {
-            audio.currentTime = current;
-          }
-        });
-        applyStemVolumes(volume);
-        setPlaybackSource('separated');
-        if (playbackStatus === 'playing') {
-          void playAllStems();
-        }
-        disableAutoPlay();
-        return;
+      const wasPlaying = playbackStatus === 'playing';
+
+      // Switch source and adjust volumes accordingly
+      setPlaybackSource(value);
+
+      // If was playing, restart playback with new source
+      if (wasPlaying) {
+        // Pause everything first
+        pauseAllAudio();
+
+        // Small delay to allow source switch and state updates
+        setTimeout(() => {
+          void playAllAudio()
+            .then(() => {
+              applyAllVolumes(volume);
+              dispatch({ type: 'PLAYER_SET_STATUS', payload: 'playing' });
+            })
+            .catch((err) => {
+              console.error('Failed to resume playback after source switch:', err);
+              applyAllVolumes(volume);
+              dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
+            });
+        }, 150);
+      } else {
+        applyAllVolumes(volume);
       }
 
-      // value === 'raw'
-      const rawAudio = audioRef.current;
-      const current = getActiveAudio()?.currentTime ?? rawAudio?.currentTime ?? 0;
-      pauseAllStems();
-      if (rawAudio) {
-        rawAudio.currentTime = current;
-        if (playbackStatus === 'playing') {
-          void rawAudio.play().catch((err) => {
-            console.error('Failed to resume raw playback:', err);
-          });
-        }
-      }
-      setPlaybackSource('raw');
       disableAutoPlay();
     },
-    [applyStemVolumes, disableAutoPlay, getActiveAudio, pauseAllStems, playAllStems, playbackStatus, volume],
+    [applyAllVolumes, disableAutoPlay, dispatch, pauseAllAudio, playAllAudio, playbackSource, playbackStatus, volume],
   );
 
-  const toggleStem = useCallback(
-    (stem: StemKey): void => {
-      setSelectedStems((prev) => {
-        if (prev.includes(stem)) {
-          if (prev.length === 1) return prev;
-          return prev.filter((s) => s !== stem);
-        }
-        return [...prev, stem];
-      });
-    },
-    [],
-  );
+  const toggleStem = useCallback((stem: StemKey): void => {
+    setSelectedStems((prev) => {
+      if (prev.includes(stem)) {
+        if (prev.length === 1) return prev;
+        return prev.filter((s) => s !== stem);
+      }
+      return [...prev, stem];
+    });
+  }, []);
 
   const setPreset = useCallback(
     (preset: 'vocals' | 'instrumental' | 'all'): void => {
@@ -496,7 +638,7 @@ function GlobalPlayerInner({ song }: GlobalPlayerInnerProps): React.ReactElement
 
     const handleTimeUpdate = (): void => {
       setCurrentTime(audio.currentTime);
-      syncStemsToTime(audio.currentTime);
+      syncAllAudio(audio.currentTime);
     };
 
     const handleLoadedMetadata = (): void => {
@@ -506,7 +648,7 @@ function GlobalPlayerInner({ song }: GlobalPlayerInnerProps): React.ReactElement
     const handleEnded = (): void => {
       dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
       audio.currentTime = 0;
-      syncStemsToTime(0);
+      syncAllAudio(0);
       setCurrentTime(0);
     };
 
@@ -523,33 +665,7 @@ function GlobalPlayerInner({ song }: GlobalPlayerInnerProps): React.ReactElement
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
       audio.removeEventListener('ended', handleEnded);
     };
-  }, [dispatch, getActiveAudio, syncStemsToTime]);
-
-  // Keep stems aligned with playback status
-  useEffect(() => {
-    if (playbackSource !== 'separated') return;
-    if (playbackStatus === 'playing') {
-      void playAllStems();
-      applyStemVolumes(volume);
-    } else {
-      pauseAllStems();
-    }
-  }, [applyStemVolumes, pauseAllStems, playAllStems, playbackSource, playbackStatus, volume]);
-
-  // Keep raw audio aligned with playback status when selected
-  useEffect(() => {
-    if (playbackSource !== 'raw') return;
-    const audio = audioRef.current;
-    if (!audio || !rawUrl) return;
-
-    if (playbackStatus === 'playing') {
-      void audio.play().catch((err) => {
-        console.error('Failed to resume raw playback:', err);
-      });
-    } else if (playbackStatus === 'paused') {
-      audio.pause();
-    }
-  }, [playbackSource, playbackStatus, rawUrl]);
+  }, [dispatch, getActiveAudio, syncAllAudio]);
 
   // Auto-play when raw URL becomes ready for loading state
   useEffect(() => {
@@ -560,26 +676,22 @@ function GlobalPlayerInner({ song }: GlobalPlayerInnerProps): React.ReactElement
     audio.src = rawUrl;
 
     const handleCanPlay = (): void => {
-      const playPromise = audio.play();
-      if (playPromise !== undefined) {
-        playPromise
-          .then(() => {
-            dispatch({ type: 'PLAYER_SET_STATUS', payload: 'playing' });
-          })
-          .catch((err: unknown) => {
-            if ((err as Error).name === 'AbortError') {
-              dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
-              return;
-            }
-            console.error('Failed to auto-play:', err);
+      void playAllAudio()
+        .then(() => {
+          applyAllVolumes(volume);
+          dispatch({ type: 'PLAYER_SET_STATUS', payload: 'playing' });
+        })
+        .catch((err: unknown) => {
+          if ((err as Error).name === 'AbortError') {
             dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
-          })
-          .finally(() => {
-            disableAutoPlay();
-          });
-      } else {
-        disableAutoPlay();
-      }
+            return;
+          }
+          console.error('Failed to auto-play:', err);
+          dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
+        })
+        .finally(() => {
+          disableAutoPlay();
+        });
     };
 
     audio.addEventListener('canplay', handleCanPlay, { once: true });
@@ -587,12 +699,12 @@ function GlobalPlayerInner({ song }: GlobalPlayerInnerProps): React.ReactElement
     return () => {
       audio.removeEventListener('canplay', handleCanPlay);
     };
-  }, [disableAutoPlay, dispatch, rawUrl, song.id]);
+  }, [applyAllVolumes, disableAutoPlay, dispatch, playAllAudio, rawUrl, song.id, volume]);
 
-  // Apply stem volumes when selection changes
+  // Apply volumes when selection or playback source changes
   useEffect(() => {
-    applyStemVolumes(volume);
-  }, [applyStemVolumes, effectiveSelectedStems, volume]);
+    applyAllVolumes(volume);
+  }, [applyAllVolumes, effectiveSelectedStems, playbackSource, volume]);
 
   return (
     <Card
@@ -669,7 +781,10 @@ function GlobalPlayerInner({ song }: GlobalPlayerInnerProps): React.ReactElement
               }}
             >
               <Stack direction="row" spacing={1} alignItems="center">
-                <GraphicEqIcon fontSize="small" sx={{ color: 'primary.main' }} />
+                <GraphicEqIcon
+                  fontSize="small"
+                  sx={{ color: 'primary.main' }}
+                />
                 <Typography variant="body2" sx={{ color: 'text.secondary' }}>
                   Audio source
                 </Typography>
@@ -695,7 +810,8 @@ function GlobalPlayerInner({ song }: GlobalPlayerInnerProps): React.ReactElement
                   onClick={togglePlay}
                   disabled={
                     (playbackSource === 'raw' && !rawUrl) ||
-                    (playbackSource === 'separated' && effectiveSelectedStems.length === 0)
+                    (playbackSource === 'separated' &&
+                      effectiveSelectedStems.length === 0)
                   }
                   aria-label={playbackStatus === 'playing' ? 'Pause' : 'Play'}
                   sx={{
@@ -710,7 +826,11 @@ function GlobalPlayerInner({ song }: GlobalPlayerInnerProps): React.ReactElement
                     },
                   }}
                 >
-                  {playbackStatus === 'playing' ? <PauseIcon /> : <PlayArrowIcon />}
+                  {playbackStatus === 'playing' ? (
+                    <PauseIcon />
+                  ) : (
+                    <PlayArrowIcon />
+                  )}
                 </IconButton>
               </span>
             </Tooltip>
