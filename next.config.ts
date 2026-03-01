@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   /* config options here */
+  allowedDevOrigins: ['192.168.1.4', 'localhost', '127.0.0.1'],
   turbopack: {
     resolveAlias: {
       // jsmediatags has optional React Native dependencies that are unavailable
