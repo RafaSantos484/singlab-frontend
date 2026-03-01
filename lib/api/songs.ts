@@ -1,10 +1,8 @@
 import { type ApiClient } from './client';
 import {
-  type ApiListSuccessResponse,
   type ApiMessageSuccessResponse,
   type ApiSuccessResponse,
   type Song,
-  type SongRawUrl,
   type UploadSongResult,
 } from './types';
 
@@ -12,12 +10,6 @@ import {
 export interface UploadSongInput {
   title: string;
   author: string;
-}
-
-/** Paginated list result for `listSongs`. */
-export interface SongList {
-  songs: Song[];
-  total: number;
 }
 
 /**
@@ -57,55 +49,6 @@ export class SongsApi {
 
     return res.data;
   }
-
-  // -------------------------------------------------------------------------
-  // GET /songs
-  // -------------------------------------------------------------------------
-
-  /**
-   * Returns the authenticated user's song library.
-   */
-  async listSongs(): Promise<SongList> {
-    const res = await this.client.get<ApiListSuccessResponse<Song>>('/songs');
-
-    return { songs: res.data, total: res.total };
-  }
-
-  // -------------------------------------------------------------------------
-  // GET /songs/:songId
-  // -------------------------------------------------------------------------
-
-  /**
-   * Returns a single song by ID.
-   *
-   * @throws {ApiError} With status 404 when the song does not exist.
-   */
-  async getSong(songId: string): Promise<Song> {
-    const res = await this.client.get<ApiSuccessResponse<Song>>(
-      `/songs/${songId}`,
-    );
-
-    return res.data;
-  }
-
-  // -------------------------------------------------------------------------
-  // GET /songs/:songId/raw/url
-  // -------------------------------------------------------------------------
-
-  /**
-   * Returns a valid signed URL for the raw audio file.
-   * The backend automatically refreshes the URL if it is about to expire.
-   *
-   * @throws {ApiError} With status 404 when the song does not exist.
-   */
-  async getSongRawUrl(songId: string): Promise<SongRawUrl> {
-    const res = await this.client.get<ApiSuccessResponse<SongRawUrl>>(
-      `/songs/${songId}/raw/url`,
-    );
-
-    return res.data;
-  }
-
   // -------------------------------------------------------------------------
   // PATCH /songs/:songId
   // -------------------------------------------------------------------------
