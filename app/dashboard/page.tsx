@@ -1,131 +1,679 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import {
+  Box,
+  Typography,
+  Card,
+  CardContent,
+  Alert,
+  CircularProgress,
+  Fab,
+  Stack,
+  IconButton,
+  Tooltip,
+  TextField,
+  Select,
+  MenuItem,
+  InputAdornment,
+  FormControl,
+  InputLabel,
+  Chip,
+  Button,
+  LinearProgress,
+} from '@mui/material';
+import AddIcon from '@mui/icons-material/Add';
+import EditIcon from '@mui/icons-material/Edit';
+import SearchIcon from '@mui/icons-material/Search';
+import PlayCircleIcon from '@mui/icons-material/PlayCircle';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import GraphicEqIcon from '@mui/icons-material/GraphicEq';
+import RefreshIcon from '@mui/icons-material/Refresh';
 
-import { SongPlayer } from '@/components/features/SongPlayer';
+import { SongCreateDialog } from '@/components/features/SongCreateDialog';
+import { SongEditDialog } from '@/components/features/SongEditDialog';
+import { SongDeleteButton } from '@/components/features/SongDeleteButton';
+// useAuthGuard ensures user is authenticated before rendering the page
 import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
+// useGlobalState provides access to user profile and songs list via Firestore
 import { useGlobalState } from '@/lib/store';
-import { signOut } from '@/lib/firebase';
+import { useGlobalStateDispatch } from '@/lib/store/GlobalStateContext';
+import { DashboardLayout } from '@/components/layout';
+import type { SeparationStemName, Song } from '@/lib/api/types';
+import { useSeparationStatus } from '@/lib/hooks/useSeparationStatus';
+import { GlobalPlayer } from '@/components/features/GlobalPlayer';
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
 
 export default function DashboardPage(): React.ReactElement | null {
   const isLoading = useAuthGuard('private');
-  const { userProfile, songs, songsStatus } = useGlobalState();
-  const [signingOut, setSigningOut] = useState(false);
+  const { userProfile, songs, songsStatus, currentSongId } = useGlobalState();
+  const dispatch = useGlobalStateDispatch();
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [editingSong, setEditingSong] = useState<Song | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
+  const [mounted, setMounted] = useState(false);
 
-  async function handleSignOut(): Promise<void> {
-    setSigningOut(true);
-    try {
-      await signOut();
-    } finally {
-      setSigningOut(false);
+  // Prevent hydration mismatch by only rendering after client mount
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
+
+  // Client-side filtering and sorting
+  // This memo computes the final list of songs to display, with three steps:
+  // 1. Filter by search query (title/author) but always keep the currently playing song
+  // 2. Sort by upload date (newest or oldest first)
+  // 3. Pin the currently playing song to the top of the list for visibility
+  const filteredAndSortedSongs = useMemo(() => {
+    // Don't process until mounted to prevent hydration mismatch
+    if (!mounted) return [];
+
+    // Normalize search query for better matching
+    const normalizedQuery = searchQuery.toLowerCase().trim();
+
+    // Filter by title or author (always keep currently playing song)
+    let filtered = songs;
+    if (normalizedQuery) {
+      filtered = songs.filter((song) => {
+        // Always keep the currently playing song visible, even if it doesn't
+        // match the search query. This ensures users can always see and control
+        // what's playing regardless of active filters.
+        if (song.id === currentSongId) return true;
+
+        // Regular filter: match against title or author
+        const titleMatch = song.title.toLowerCase().includes(normalizedQuery);
+        const authorMatch = song.author.toLowerCase().includes(normalizedQuery);
+        return titleMatch || authorMatch;
+      });
     }
-  }
 
-  if (isLoading) {
+    // Sort by document creation date (Firestore server timestamp if available)
+    const sorted = [...filtered].sort((a, b) => {
+      const dateA = new Date(a.rawSongInfo.uploadedAt).getTime();
+      const dateB = new Date(b.rawSongInfo.uploadedAt).getTime();
+      return sortOrder === 'newest' ? dateB - dateA : dateA - dateB;
+    });
+
+    // Pin currently playing song to the top of the sorted list
+    // This provides a consistent "Now Playing" location at the top of the page.
+    // Only move it if it's not already at index 0 (no-op if already first).
+    if (currentSongId) {
+      const playingIndex = sorted.findIndex(
+        (song) => song.id === currentSongId,
+      );
+      if (playingIndex > 0) {
+        const [playingSong] = sorted.splice(playingIndex, 1);
+        sorted.unshift(playingSong);
+      }
+    }
+
+    return sorted;
+  }, [songs, searchQuery, sortOrder, currentSongId, mounted]);
+
+  // Show loading state until component mounts on client (prevents hydration mismatch)
+  if (!mounted || isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-950">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-600 border-t-white" />
-      </div>
+      <Box
+        sx={{
+          display: 'flex',
+          minHeight: '100vh',
+          alignItems: 'center',
+          justifyContent: 'center',
+          bgcolor: 'background.default',
+        }}
+      >
+        <CircularProgress size={32} />
+      </Box>
     );
   }
 
   const user = userProfile;
+  const displayName = user?.displayName ?? user?.email ?? 'User';
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white">
-      {/* Top bar */}
-      <header className="border-b border-zinc-800 px-6 py-4">
-        <div className="mx-auto flex max-w-5xl items-center justify-between">
-          <h1 className="text-lg font-bold tracking-tight">SingLab</h1>
+    <DashboardLayout>
+      {/* Welcome card */}
+      <Card
+        sx={{
+          mb: { xs: 4, sm: 5, lg: 6 },
+          background:
+            'linear-gradient(135deg, rgba(19, 10, 53, 0.6) 0%, rgba(13, 7, 38, 0.4) 100%)',
+          border: '1px solid rgba(45, 26, 110, 0.4)',
+          backdropFilter: 'blur(8px)',
+        }}
+      >
+        <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
+          <Typography
+            variant="body2"
+            sx={{
+              color: 'text.secondary',
+              mb: 1,
+            }}
+          >
+            Welcome back,
+          </Typography>
+          <Typography
+            variant="h1"
+            sx={{
+              fontSize: { xs: '1.875rem', sm: '2.25rem', lg: '2.5rem' },
+              fontWeight: 700,
+              letterSpacing: '-0.02em',
+              background: 'linear-gradient(to right, #ededed, #818cf8)',
+              backgroundClip: 'text',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+            }}
+          >
+            {displayName}
+          </Typography>
+        </CardContent>
+      </Card>
 
-          <div className="flex items-center gap-4">
-            {/* Avatar / email */}
-            <div className="flex items-center gap-2">
-              {user?.photoURL ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={user.photoURL}
-                  alt={user.displayName ?? 'User avatar'}
-                  className="h-8 w-8 rounded-full object-cover"
-                />
-              ) : (
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-700 text-xs font-semibold uppercase text-zinc-300">
-                  {(user?.displayName ?? user?.email ?? 'U')[0]}
-                </div>
-              )}
-              <span className="hidden text-sm text-zinc-400 sm:block">
-                {user?.displayName ?? user?.email}
-              </span>
-            </div>
+      {/* Songs section */}
+      <Box component="section">
+        {/* Section header */}
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            mb: 3,
+          }}
+        >
+          <Typography
+            variant="h5"
+            sx={{
+              fontWeight: 600,
+              color: 'text.primary',
+            }}
+          >
+            Your songs
+          </Typography>
+          <Typography
+            variant="body2"
+            sx={{
+              fontWeight: 500,
+              color: 'text.disabled',
+            }}
+          >
+            {songs.length} track{songs.length !== 1 ? 's' : ''}
+          </Typography>
+        </Box>
 
-            {/* Sign out */}
-            <button
-              onClick={handleSignOut}
-              disabled={signingOut}
-              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 transition hover:border-zinc-500 hover:text-white disabled:opacity-50"
+        {/* Search and sorting controls */}
+        {songs.length > 0 && (
+          <Box
+            sx={{
+              display: 'flex',
+              flexDirection: { xs: 'column', sm: 'row' },
+              gap: 2,
+              mb: 3,
+            }}
+          >
+            {/* Search input */}
+            <TextField
+              placeholder="Search by title or author..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              fullWidth
+              sx={{
+                flex: 1,
+              }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon sx={{ color: 'text.disabled' }} />
+                  </InputAdornment>
+                ),
+              }}
+            />
+
+            {/* Sort select */}
+            <FormControl
+              sx={{
+                minWidth: { xs: '100%', sm: '200px' },
+              }}
             >
-              {signingOut ? 'Signing out…' : 'Sign out'}
-            </button>
-          </div>
-        </div>
-      </header>
+              <InputLabel id="sort-order-label">Sort by</InputLabel>
+              <Select
+                labelId="sort-order-label"
+                label="Sort by"
+                value={sortOrder}
+                onChange={(e) =>
+                  setSortOrder(e.target.value as 'newest' | 'oldest')
+                }
+              >
+                <MenuItem value="newest">Newest first</MenuItem>
+                <MenuItem value="oldest">Oldest first</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
+        )}
 
-      {/* Main content */}
-      <main className="mx-auto max-w-5xl px-6 py-10">
-        {/* Welcome card */}
-        <div className="mb-8 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-          <p className="text-sm text-zinc-400">Welcome back,</p>
-          <h2 className="mt-1 text-2xl font-bold">
-            {user?.displayName ?? user?.email ?? 'User'}
-          </h2>
-        </div>
-
-        {/* Songs section */}
-        <section>
-          <h3 className="mb-4 text-lg font-semibold">Your songs</h3>
-
-          {songsStatus === 'loading' && (
-            <div className="flex items-center gap-2 text-sm text-zinc-400">
-              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-300" />
+        {/* Loading state */}
+        {songsStatus === 'loading' && (
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 2,
+              p: 2,
+              borderRadius: 2,
+              border: '1px solid rgba(45, 26, 110, 0.3)',
+              bgcolor: 'rgba(10, 5, 32, 0.2)',
+            }}
+          >
+            <CircularProgress size={16} />
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
               Loading songs…
-            </div>
+            </Typography>
+          </Box>
+        )}
+
+        {/* Error state */}
+        {songsStatus === 'error' && (
+          <Alert severity="error">
+            Failed to load songs. Please refresh the page.
+          </Alert>
+        )}
+
+        {/* Empty state */}
+        {(songsStatus === 'ready' || songsStatus === 'idle') &&
+          songs.length === 0 && (
+            <Box
+              sx={{
+                p: 5,
+                textAlign: 'center',
+                borderRadius: 3,
+                border: '2px dashed rgba(45, 26, 110, 0.3)',
+                bgcolor: 'rgba(10, 5, 32, 0.2)',
+              }}
+            >
+              <Typography variant="body2" sx={{ color: 'text.disabled' }}>
+                No songs yet. Upload your first track to get started.
+              </Typography>
+            </Box>
           )}
 
-          {songsStatus === 'error' && (
-            <p className="text-sm text-red-400">
-              Failed to load songs. Please refresh the page.
-            </p>
+        {/* No search results */}
+        {(songsStatus === 'ready' || songsStatus === 'idle') &&
+          songs.length > 0 &&
+          filteredAndSortedSongs.length === 0 && (
+            <Box
+              sx={{
+                p: 5,
+                textAlign: 'center',
+                borderRadius: 3,
+                border: '2px dashed rgba(45, 26, 110, 0.3)',
+                bgcolor: 'rgba(10, 5, 32, 0.2)',
+              }}
+            >
+              <Typography variant="body2" sx={{ color: 'text.disabled' }}>
+                No songs found matching &quot;{searchQuery}&quot;
+              </Typography>
+            </Box>
           )}
 
-          {(songsStatus === 'ready' || songsStatus === 'idle') &&
-            songs.length === 0 && (
-              <div className="rounded-xl border border-dashed border-zinc-700 p-10 text-center">
-                <p className="text-sm text-zinc-500">
-                  No songs yet. Upload your first track to get started.
-                </p>
-              </div>
+        {/* Songs grid */}
+        {filteredAndSortedSongs.length > 0 && (
+          <Stack spacing={{ xs: 2, md: 3 }}>
+            {filteredAndSortedSongs.map((song) => (
+              <SongCardItem
+                key={song.id}
+                song={song}
+                isCurrent={song.id === currentSongId}
+                onPlay={() =>
+                  dispatch({ type: 'PLAYER_LOAD_SONG', payload: song.id })
+                }
+                onEdit={() => setEditingSong(song)}
+              />
+            ))}
+          </Stack>
+        )}
+      </Box>
+
+      {/* FAB button to create new song */}
+      <Fab
+        color="primary"
+        aria-label="add song"
+        onClick={() => setIsCreateDialogOpen(true)}
+        sx={{
+          position: 'fixed',
+          bottom: { xs: 24, sm: 32 },
+          right: { xs: 24, sm: 32 },
+          background: 'linear-gradient(135deg, #a78bfa 0%, #c4b5fd 100%)',
+          color: '#1a0e2e',
+          '&:hover': {
+            background: 'linear-gradient(135deg, #b8a3e0 0%, #d4c4ff 100%)',
+            boxShadow: '0 8px 24px rgba(168, 85, 247, 0.4)',
+          },
+          '&:active': {
+            boxShadow: '0 4px 12px rgba(168, 85, 247, 0.3)',
+          },
+          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        }}
+      >
+        <AddIcon sx={{ fontSize: '1.75rem', fontWeight: 600 }} />
+      </Fab>
+
+      {/* Song creation modal */}
+      <SongCreateDialog
+        open={isCreateDialogOpen}
+        onClose={() => setIsCreateDialogOpen(false)}
+      />
+
+      {/* Song edit modal */}
+      {editingSong && (
+        <SongEditDialog
+          open={!!editingSong}
+          onClose={() => setEditingSong(null)}
+          song={editingSong}
+        />
+      )}
+
+      {/* Global audio player */}
+      <GlobalPlayer />
+    </DashboardLayout>
+  );
+}
+
+/**
+ * Props for the `SongCardItem` component.
+ *
+ * @property song - The song to display
+ * @property isCurrent - Whether this song is currently playing in the global player
+ * @property onPlay - Callback when the play button is clicked
+ * @property onEdit - Callback when the edit button is clicked
+ */
+interface SongCardItemProps {
+  song: Song;
+  isCurrent: boolean;
+  onPlay: () => void;
+  onEdit: () => void;
+}
+
+/**
+ * Individual song card component with metadata, playback controls, and separation status.
+ *
+ * Displays:
+ * - Song title and author with truncation
+ * - "Now Playing" badge (when `isCurrent`)
+ * - Play, edit, and delete action buttons
+ * - Stem separation status panel:
+ *   - Not started: button to initiate separation
+ *   - Processing: progress bar with current progress % and refresh status button
+ *   - Finished: available stems with provider/task info
+ *   - Failed: error message with retry button (initiates new separation request)
+ *
+ * Uses the `useSeparationStatus` hook to manage the separation lifecycle,
+ * including automatic polling during processing. Firestore real-time
+ * listener updates `song.separatedSongInfo` which triggers re-render.
+ *
+ * Note: The retry button on failure calls `requestSeparation` to start a new
+ * separation attempt, while the refresh button during processing calls
+ * `refreshStatus` to poll the current task status.
+ *
+ * @component
+ */
+function SongCardItem({
+  song,
+  isCurrent,
+  onPlay,
+  onEdit,
+}: SongCardItemProps): React.ReactElement {
+  const {
+    separation,
+    isRequesting,
+    isRefreshing,
+    error: separationError,
+    stemUrls,
+    stemUrlError,
+    requestSeparation,
+    refreshStatus,
+  } = useSeparationStatus(song);
+
+  const isProcessing = separation?.status === 'processing';
+  const isFinished = separation?.status === 'finished';
+  const isFailed = separation?.status === 'failed';
+
+  const availableStems = isFinished
+    ? Object.entries(stemUrls)
+        .filter(([, url]) => Boolean(url))
+        .map(([key]) => key as SeparationStemName)
+    : [];
+
+  return (
+    <Card
+      sx={{
+        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+        '&:hover': {
+          borderColor: 'rgba(124, 58, 237, 0.6)',
+          bgcolor: 'rgba(19, 10, 53, 0.7)',
+        },
+      }}
+    >
+      <CardContent sx={{ p: { xs: 2.5, sm: 3 } }}>
+        <Box
+          sx={{
+            mb: 2,
+            display: 'flex',
+            flexDirection: { xs: 'column', sm: 'row' },
+            alignItems: { xs: 'flex-start', sm: 'center' },
+            justifyContent: 'space-between',
+            gap: 1,
+          }}
+        >
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            {isCurrent && (
+              <Chip
+                icon={<PlayCircleIcon />}
+                label="Now Playing"
+                size="small"
+                sx={{
+                  mb: 1,
+                  height: '24px',
+                  bgcolor: 'rgba(124, 58, 237, 0.15)',
+                  color: 'rgba(168, 85, 247, 1)',
+                  borderColor: 'rgba(124, 58, 237, 0.4)',
+                  border: '1px solid',
+                  '& .MuiChip-icon': {
+                    color: 'rgba(168, 85, 247, 1)',
+                  },
+                }}
+              />
             )}
+            <Typography
+              variant="body1"
+              sx={{
+                fontWeight: 600,
+                color: 'text.primary',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {song.title}
+            </Typography>
+            <Typography
+              variant="body2"
+              sx={{
+                color: 'text.secondary',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {song.author}
+            </Typography>
+          </Box>
 
-          {songs.length > 0 && (
-            <ul className="flex flex-col gap-3">
-              {songs.map((song) => (
-                <li
-                  key={song.id}
-                  className="rounded-xl border border-zinc-800 bg-zinc-900 px-5 py-4"
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">{song.title}</p>
-                      <p className="text-sm text-zinc-400">{song.author}</p>
-                    </div>
-                  </div>
-                  <SongPlayer song={song} />
-                </li>
-              ))}
-            </ul>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Tooltip title="Play song">
+              <IconButton
+                onClick={onPlay}
+                size="small"
+                sx={{
+                  color: 'rgba(124, 58, 237, 0.8)',
+                  bgcolor: 'rgba(124, 58, 237, 0.1)',
+                  '&:hover': {
+                    color: 'rgba(168, 85, 247, 1)',
+                    bgcolor: 'rgba(124, 58, 237, 0.2)',
+                  },
+                }}
+              >
+                <PlayArrowIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title="Edit song">
+              <IconButton
+                onClick={onEdit}
+                size="small"
+                sx={{
+                  color: 'rgba(168, 85, 247, 0.8)',
+                  '&:hover': {
+                    color: 'rgba(168, 85, 247, 1)',
+                    bgcolor: 'rgba(168, 85, 247, 0.1)',
+                  },
+                }}
+              >
+                <EditIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+
+            <SongDeleteButton songId={song.id} songTitle={song.title} />
+          </Box>
+        </Box>
+
+        {/* Separation status */}
+        <Box
+          sx={{
+            mt: 1,
+            p: 2,
+            borderRadius: 2,
+            border: '1px solid rgba(124, 58, 237, 0.2)',
+            bgcolor: 'rgba(124, 58, 237, 0.05)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 1.5,
+          }}
+        >
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+            }}
+          >
+            <GraphicEqIcon fontSize="small" sx={{ color: 'primary.main' }} />
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              Stem separation
+            </Typography>
+          </Box>
+
+          {separationError && (
+            <Alert severity="error" sx={{ mb: 1 }}>
+              {separationError}
+            </Alert>
           )}
-        </section>
-      </main>
-    </div>
+
+          {stemUrlError && (
+            <Alert severity="error" sx={{ mb: 1 }}>
+              {stemUrlError}
+            </Alert>
+          )}
+
+          {!song.separatedSongInfo && (
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 2,
+              }}
+            >
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                No separation requested yet.
+              </Typography>
+              <Button
+                variant="contained"
+                onClick={() => requestSeparation('poyo')}
+                disabled={isRequesting}
+              >
+                {isRequesting ? 'Starting…' : 'Start stem separation'}
+              </Button>
+            </Box>
+          )}
+
+          {song.separatedSongInfo && isProcessing && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Separating audio… {separation?.progress ?? 0}%
+              </Typography>
+              <LinearProgress
+                variant={
+                  typeof separation?.progress === 'number'
+                    ? 'determinate'
+                    : 'indeterminate'
+                }
+                value={separation?.progress ?? undefined}
+                sx={{ height: 6, borderRadius: 1 }}
+              />
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<RefreshIcon fontSize="small" />}
+                onClick={refreshStatus}
+                disabled={isRefreshing}
+                sx={{ alignSelf: 'flex-start' }}
+              >
+                {isRefreshing ? 'Refreshing…' : 'Refresh status'}
+              </Button>
+            </Box>
+          )}
+
+          {song.separatedSongInfo && isFinished && separation && (
+            <Stack spacing={1}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Chip label={`Provider: ${separation.provider}`} size="small" />
+                {separation.taskId && (
+                  <Chip label={`Task ${separation.taskId}`} size="small" />
+                )}
+              </Box>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                Stems ready. Select them in the player below.
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                {availableStems.map((stem) => (
+                  <Chip key={stem} label={stem} size="small" />
+                ))}
+              </Box>
+            </Stack>
+          )}
+
+          {song.separatedSongInfo && isFailed && separation && (
+            <Stack spacing={1.5}>
+              <Alert severity="error" sx={{ mb: 0 }}>
+                Separation failed: {separation.errorMessage ?? 'Unknown error'}
+              </Alert>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<RefreshIcon fontSize="small" />}
+                onClick={() => requestSeparation('poyo')}
+                disabled={isRequesting}
+                sx={{ alignSelf: 'flex-start' }}
+              >
+                {isRequesting ? 'Trying again…' : 'Try again'}
+              </Button>
+            </Stack>
+          )}
+        </Box>
+      </CardContent>
+    </Card>
   );
 }

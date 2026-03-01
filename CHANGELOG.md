@@ -4,7 +4,66 @@ All notable changes to the SingLab Frontend will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **Simplified GlobalPlayer architecture**: Removed complex barrier-based
+  synchronization with ticket system, eliminated periodic drift-correction
+  intervals, and removed automatic rebuffering logic. Now uses simpler
+  pre-play synchronization with play attempt tracking.
+- **Improved controls UX**: All player controls (play, pause, stop, seek, volume,
+  source toggle, stem selection) are disabled during loading/buffering phase,
+  preventing user interactions during initialization.
+- **Stabilized multi-track playback**: Fixed race condition on mobile devices
+  where cached audio would start playing silently. Now uses 50ms readiness delay
+  and dual synchronization when switching between raw and separated sources.
+- **Refactored to single global player architecture**: Replaced per-card audio
+  players with a unified `GlobalPlayer` component at the bottom of the dashboard.
+
+### Removed
+- **Legacy per-card player components**: `SongPlayer` and `CustomAudioPlayer`
+  components removed in favor of the single global player.
+- **AudioManager singleton**: No longer needed with single audio element approach.
+- **useAudioState hook**: Replaced with simpler event listeners in `GlobalPlayer`.
+
 ### Added
+
+#### Stem Separation Feature
+- **Stem separation API client** (`lib/api/separations.ts`) — Typed API wrapper
+  for separation operations (`requestSeparation`, `refreshSeparationStatus`).
+- **`useSeparationStatus` hook** — Manages the complete separation lifecycle:
+  submission, automatic polling (5s intervals), status normalization, and error
+  handling. Integrates with Firestore real-time updates for separation status.
+- **Separation adapter pattern** (`lib/separations/`) — Provider-agnostic
+  normalization layer for separation task data. Includes `PoyoSeparationAdapter`
+  for normalizing PoYo provider responses into a unified schema. Extensible for
+  additional providers.
+- **`SongCardItem` component** — Extracted song card UI with separation status
+  panel showing: request button (not started), progress bar with refresh (processing),
+  available stems (finished), or error message with retry (failed).
+- **GlobalPlayer separation support** — Player now supports both raw and separated
+  audio playback:
+  - Playback source toggle (Raw vs. Separated)
+  - Multiple synced `<audio>` elements for separated stems
+  - Stem selection UI with toggleable chips
+  - Preset mixes: Instrumental (all stems except vocals), Vocals only, All stems
+  - Synchronized playhead and volume control across all stems
+- **Song type updates** — Added `separatedSongInfo` field to `Song` type to store
+  provider-specific separation task data. Updated Firestore synchronization to
+  include separation status in real-time listener.
+
+#### Other Additions
+- **GlobalPlayer component** (`components/features/GlobalPlayer.tsx`) — Single
+  persistent audio player with play/pause/stop controls, progress bar with seek,
+  volume control, and responsive design. Displays currently playing song metadata.
+- **Player actions in global state**: `PLAYER_LOAD_SONG`, `PLAYER_SET_STATUS`,
+  and `PLAYER_STOP` actions for controlling global playback.
+- **useGlobalStateDispatch hook** — Allows components to dispatch actions to
+  global state.
+- **"Now Playing" indicator** — Song cards show a visual badge when playing and
+  are pinned to the top of the filtered list.
+- **SongDeleteButton component** — Reusable button for deleting songs with
+  confirmation dialog, loading state, and comprehensive error handling (401, 403,
+  404, network failures). Includes full accessibility features.
+- Added `@mui/lab` dependency for additional Material-UI components.
 - Design token palette (`brand-*`, `accent-*`) defined via Tailwind v4 `@theme`
   block in `app/globals.css`, replacing the former neutral `zinc` colors. Tokens
   are available as utility classes project-wide.
@@ -17,11 +76,8 @@ All notable changes to the SingLab Frontend will be documented in this file.
   and proactively refreshes the signed URL via `GET /songs/:songId/raw/url` when
   within 5 minutes of expiry. Caches the refreshed URL locally for immediate
   playback; subsequent Firestore-pushed updates are picked up automatically.
-- `components/features/SongPlayer` — inline `<audio controls>` player for a
-  single song. Delegates signed URL management to `useSongRawUrl`; shows a
-  spinner while refreshing and an error message on failure.
-- Dashboard: each song card now renders an inline `SongPlayer` for direct
-  playback without leaving the page.
+- Dashboard: Play buttons on song cards trigger global player playback.
+- Dashboard: each song card now includes a delete button for removing songs.
 
 ## [0.1.0] - 2026-02-27
 

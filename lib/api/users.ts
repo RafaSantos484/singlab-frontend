@@ -1,5 +1,9 @@
 import { Env } from '@/lib/env';
-import { ApiError, type ApiErrorResponse, type ApiSuccessResponse } from './types';
+import {
+  ApiError,
+  type ApiErrorResponse,
+  type ApiSuccessResponse,
+} from './types';
 import type { CreateUserInput, CreateUserResult } from './types';
 
 /**

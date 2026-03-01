@@ -4,19 +4,14 @@ import { z } from 'zod';
  * Regex allowing only printable ASCII characters for passwords.
  * Blocks control characters and whitespace while permitting
  * letters, digits, and all common special characters.
- * Mirrors backend validation.
  */
 const VALID_PASSWORD_CHARS = /^[\x21-\x7E]+$/;
 
 /**
- * Zod validation schema for user creation.
- * Mirrors the backend CreateUserSchema to ensure consistency.
+ * Zod validation schema for sign in.
+ * Validates email format and password constraints.
  */
-export const CreateUserSchema = z.object({
-  name: z
-    .string()
-    .min(3, 'Name must be at least 3 characters')
-    .max(255, 'Name must be at most 255 characters'),
+export const SignInSchema = z.object({
   email: z
     .string()
     .email('Invalid email format')
@@ -31,18 +26,18 @@ export const CreateUserSchema = z.object({
     ),
 });
 
-export type CreateUserDto = z.infer<typeof CreateUserSchema>;
+export type SignInDto = z.infer<typeof SignInSchema>;
 
 /**
- * Validates a user creation payload against the schema.
+ * Validates sign in credentials against the schema.
  * Returns an object with `success` and either `data` or `errors`.
  */
-export function validateCreateUser(
+export function validateSignIn(
   data: unknown,
 ):
-  | { success: true; data: CreateUserDto }
+  | { success: true; data: SignInDto }
   | { success: false; errors: Record<string, string> } {
-  const result = CreateUserSchema.safeParse(data);
+  const result = SignInSchema.safeParse(data);
 
   if (result.success) {
     return { success: true, data: result.data };

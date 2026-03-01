@@ -1,10 +1,8 @@
 import { type ApiClient } from './client';
 import {
-  type ApiListSuccessResponse,
   type ApiMessageSuccessResponse,
   type ApiSuccessResponse,
   type Song,
-  type SongRawUrl,
   type UploadSongResult,
 } from './types';
 
@@ -12,12 +10,6 @@ import {
 export interface UploadSongInput {
   title: string;
   author: string;
-}
-
-/** Paginated list result for `listSongs`. */
-export interface SongList {
-  songs: Song[];
-  total: number;
 }
 
 /**
@@ -57,50 +49,26 @@ export class SongsApi {
 
     return res.data;
   }
-
   // -------------------------------------------------------------------------
-  // GET /songs
-  // -------------------------------------------------------------------------
-
-  /**
-   * Returns the authenticated user's song library.
-   */
-  async listSongs(): Promise<SongList> {
-    const res = await this.client.get<ApiListSuccessResponse<Song>>('/songs');
-
-    return { songs: res.data, total: res.total };
-  }
-
-  // -------------------------------------------------------------------------
-  // GET /songs/:songId
+  // PATCH /songs/:songId
   // -------------------------------------------------------------------------
 
   /**
-   * Returns a single song by ID.
+   * Updates a song's metadata (title and/or author).
+   * Only the provided fields are updated.
    *
+   * @param songId - Song document ID.
+   * @param updates - Partial song metadata with title and/or author.
+   * @returns Updated song with id, title, and author.
    * @throws {ApiError} With status 404 when the song does not exist.
    */
-  async getSong(songId: string): Promise<Song> {
-    const res = await this.client.get<ApiSuccessResponse<Song>>(
+  async updateSong(
+    songId: string,
+    updates: Partial<UploadSongInput>,
+  ): Promise<Song> {
+    const res = await this.client.patch<ApiSuccessResponse<Song>>(
       `/songs/${songId}`,
-    );
-
-    return res.data;
-  }
-
-  // -------------------------------------------------------------------------
-  // GET /songs/:songId/raw/url
-  // -------------------------------------------------------------------------
-
-  /**
-   * Returns a valid signed URL for the raw audio file.
-   * The backend automatically refreshes the URL if it is about to expire.
-   *
-   * @throws {ApiError} With status 404 when the song does not exist.
-   */
-  async getSongRawUrl(songId: string): Promise<SongRawUrl> {
-    const res = await this.client.get<ApiSuccessResponse<SongRawUrl>>(
-      `/songs/${songId}/raw/url`,
+      updates,
     );
 
     return res.data;

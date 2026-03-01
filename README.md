@@ -11,11 +11,16 @@ back the original, vocal-only, and instrumental tracks for karaoke practice.
 
 - Next.js 16 with App Router and TypeScript
 - Firebase Authentication for user sign-in
-- Song submission (file upload or approved link)
-- Async job tracking for AI processing pipeline
+- Song submission with automatic metadata extraction from audio files
+  - Detects title and artist from ID3/audio tags
+  - Auto-fills form fields (user can override)
+- Async job tracking for AI processing pipeline (vocal separation, lyrics transcription)
 - Karaoke playback with vocal / instrumental stem toggle
+- Event-driven audio player state synchronization (responds to media keys)
+- Song deletion with confirmation dialog
 - Lyrics display synchronized with playback (planned)
-- Tailwind CSS for styling
+- Material UI (MUI) for component primitives (forms, dialogs, cards, alerts)
+- Tailwind CSS for page-level layout utilities and decorative styling
 - Jest + React Testing Library for unit tests
 
 ## Related Repositories
@@ -76,13 +81,19 @@ npm run type-check      # TypeScript check (no emit)
 ├── app/                    # Next.js App Router pages and layouts
 │   ├── layout.tsx
 │   ├── page.tsx
-│   └── (routes)/
-├── components/             # Reusable UI components (planned)
-│   ├── ui/                 # Primitive components
-│   └── features/           # Feature-specific components
-├── lib/                    # Shared utilities, hooks, API clients (planned)
+│   ├── login/
+│   ├── register/
+│   └── dashboard/
+├── components/             # Reusable UI components
+│   ├── layout/             # Shared route layouts (auth, dashboard)
+│   ├── ui/                 # Visual primitives/brand decorations
+│   └── features/           # Feature-specific components (player, dialogs)
+├── lib/                    # Shared utilities, hooks, API clients
 │   ├── api/                # API client for singlab-api
+│   │   └── song-creation.ts # Song upload validation/service layer
 │   ├── firebase/           # Firebase client initialization
+│   ├── theme/              # Central MUI theme configuration
+│   ├── validation/         # Zod validation schemas (sign-in, user creation)
 │   └── hooks/              # Custom React hooks
 ├── public/                 # Static assets
 ├── .env.local              # Local environment variables (not committed)

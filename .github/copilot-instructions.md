@@ -14,6 +14,9 @@ applyTo: "**"
 7. **Environment variables** — Use `NEXT_PUBLIC_` prefix for client-side vars; never access `process.env` directly — use a typed `env.ts` helper
 8. **Atomic commits** — Prefer multiple small commits over single large commits
 9. **Documentation sync** — Update related docs when modifying code
+10. **MUI-first for components** — Prefer Material-UI components over custom HTML elements
+11. **Tailwind + MUI hybrid** — Use Tailwind for page layouts, MUI for UI components (forms, buttons, dialogs, cards, etc.)
+12. **No agent logs in markdown** — Do NOT create `.md` files containing logs, summaries, or outputs from tools/agents. Markdown files are for actual project documentation only
 
 ## Project Context
 
@@ -81,98 +84,118 @@ ID tokens passed as `Authorization: Bearer <token>` headers.
 
 ## UI & Design System
 
-### Color Palette
-- **Always** use the project's design tokens — never raw Tailwind colors (e.g.
-  `purple-500`, `indigo-600`) or arbitrary hex values
-- `brand-*` scale — primary purple spectrum (backgrounds, borders, text)
-- `accent-*` scale — electric indigo/blue (CTAs, highlights, focus rings)
-- Semantic aliases defined in `globals.css` (use when appropriate):
-  - `bg-surface` / `bg-surface-raised` for card/panel backgrounds
-  - `border-border` / `border-border-subtle` for dividers and outlines
+### Tailwind + MUI Hybrid Approach
 
-### Background & Surface Hierarchy
-- Page background: `bg-brand-950`
-- Card/panel: `bg-brand-900` or `bg-brand-900/75` (with backdrop blur)
-- Elevated surface: `bg-brand-800`
-- Borders: `border-brand-500/40` (subtle) → `border-brand-300` (focused)
+**Use MUI for:** Form inputs, buttons, dialogs, cards, layouts (Container, Stack, Grid, Box), navigation, notifications, loading states
 
-### Text & Contrast
-- Body text on dark bg: `text-brand-100` or `text-white`
-- Secondary/muted text: minimum `text-brand-100/70` — avoid going below `/50`
-  as it fails readability on dark surfaces
-- Decorative/disabled text allowed as low as `/40`
-- Headings: prefer `bg-gradient-to-r … bg-clip-text text-transparent` for
-  brand gradient treatment
+**Use Tailwind for:** Page-level layouts (`flex`, `grid`, `max-w-`, `px-`, `py-`), responsive spacing (`md:`, `lg:` prefixes), decorative backgrounds
 
-### Interactive Elements (Buttons & Links)
-- All clickable elements must have `cursor-pointer`
-- Disabled states: `disabled:cursor-not-allowed disabled:opacity-50`
-- Always provide focus-visible styles:
-  `focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300/60`
-- Hover states should have a visible, non-jarring color shift (e.g. +1 shade
-  on gradient stops, or subtle bg tint)
-
-### Accessibility
-- Decorative SVGs must have `aria-hidden="true"`
-- Interactive elements must have accessible labels (`aria-label` or visible
-  text)
-- Error messages should use `role="alert"`
-- Maintain WCAG AA contrast ratio (≥ 4.5:1) for body text on backgrounds
-
-## Responsive Design & Device Compatibility
-
-### Mobile-First Approach
-- **Always design mobile-first** — start with mobile layouts and progressively
-  enhance for larger screens
-- Use Tailwind's responsive prefixes (`sm:`, `md:`, `lg:`, `xl:`, `2xl:`) to
-  adapt layouts across breakpoints
-- Test on actual devices or emulators, not just browser resize tools
-
-### Tailwind Breakpoints
-- `sm` — 640px (landscape phones)
-- `md` — 768px (tablets)
-- `lg` — 1024px (desktop)
-- `xl` — 1280px (large desktop)
-- `2xl` — 1536px (ultra-wide)
-
-### Key Practices
-- **Typography scaling** — Use smaller text on mobile (`text-sm`, `text-base`),
-  increase on tablets/desktop (`md:text-lg`, `lg:text-xl`)
-- **Spacing & padding** — Apply smaller gaps on mobile (`px-4`, `py-3`),
-  expand on larger screens (`md:px-6`, `lg:px-8`)
-- **Grid & flexbox layouts** — Use single column on mobile, multi-column on
-  larger screens (e.g., `grid-cols-1 md:grid-cols-2 lg:grid-cols-3`)
-- **Images & media** — Always use `max-w-full` or responsive sizing to prevent
-  overflow; include `width` and `height` attributes for Next.js `<Image>`
-- **Touch targets** — Minimum 44px × 44px touch area on mobile for buttons and
-  interactive elements
-- **Viewport meta** — Already configured in layout; ensure no manual viewport
-  overrides in components
-- **Test landscape mode** — Verify layouts work correctly in both portrait and
-  landscape orientations on phones/tablets
-- **Font scaling** — Avoid fixed font sizes (px); use relative units that
-  scale with responsive prefixes
-
-### Common Patterns
+**Never mix:** Don't combine Tailwind classes with MUI component styling. Use `sx` prop for MUI components:
 ```tsx
-/* Single column on mobile, two columns on tablet+ */
-<div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-  <Card />
-  <Card />
-</div>
+// ✅ CORRECT
+<Button sx={{ px: 2, py: 1 }}>Click</Button>
 
-/* Responsive padding & text size */
-<h1 className="text-2xl md:text-3xl lg:text-4xl px-4 md:px-6 py-4 md:py-6">
-  Title
-</h1>
-
-/* Hide/show content conditionally */
-<div className="hidden md:block">
-  {/* Only visible on tablet+ */}
-</div>
+// ❌ WRONG
+<Button className="px-4 py-2">Click</Button>
 ```
 
-## Development Guidelines
+### Theme & Colors
+
+All colors/spacing come from `lib/theme/muiTheme.ts`:
+- **Primary**: `#7c3aed` (brand purple) — use on `variant="contained"` buttons
+- **Secondary**: `#818cf8` (accent indigo) — use on `variant="outlined"` buttons
+- **Background**: `#0a0520` (brand-950) — use `color="textPrimary"` for text on dark
+- **Paper**: `#1e1b4b` (brand-900) — use for cards/dialogs
+
+### Core Components
+
+**TextField** — Always for form inputs, never `<input>`:
+```tsx
+<TextField
+  label="Email"
+  type="email"
+  error={!!error}
+  helperText={error}
+  fullWidth
+/>
+```
+
+**Button** — Use variants explicitly:
+```tsx
+<Button variant="contained" onClick={submit}>Save</Button>
+<Button variant="outlined" onClick={cancel}>Cancel</Button>
+```
+
+**Dialog** — For modals:
+```tsx
+<Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+  <DialogTitle>Title</DialogTitle>
+  <DialogContent><Stack spacing={2}>...</Stack></DialogContent>
+  <DialogActions><Button onClick={close}>Cancel</Button></DialogActions>
+</Dialog>
+```
+
+**Stack/Grid** — For layouts:
+```tsx
+<Stack spacing={2}><TextField /><Button>Submit</Button></Stack>
+<Grid container spacing={2}>
+  <Grid item xs={12} sm={6} md={4}>Content</Grid>
+</Grid>
+```
+
+**Card** — For content containers:
+```tsx
+<Card>
+  <CardHeader title="Title" />
+  <CardContent>Content</CardContent>
+</Card>
+```
+
+**Snackbar + Alert** — For notifications (not custom Toast):
+```tsx
+<Snackbar open={open} onClose={close}>
+  <Alert severity="error">{message}</Alert>
+</Snackbar>
+```
+
+**Typography** — For all text (never raw `<h1>`, `<p>`):
+```tsx
+<Typography variant="h2">Heading</Typography>
+<Typography variant="body1">Body text</Typography>
+```
+
+### Responsive Design
+
+**MUI breakpoints** in `sx` prop:
+- `xs`: 0px (mobile)
+- `md`: 900px (tablet)
+- `lg`: 1200px (desktop)
+
+**Patterns:**
+```tsx
+// Array syntax (mobile, tablet, desktop)
+<Box sx={{ p: [2, 3, 4] }}>Content</Box>
+
+// Breakpoint syntax
+<Box sx={{
+  display: 'grid',
+  gridTemplateColumns: '1fr',
+  [theme.breakpoints.up('md')]: { gridTemplateColumns: '1fr 1fr' }
+}}>Content</Box>
+```
+
+**Spacing scale:** `p: 1` = 8px, `p: 2` = 16px, `p: 3` = 24px, `p: 4` = 32px
+
+### Accessibility
+
+- **Use semantic HTML**: `Typography`, `Button`, not custom divs
+- **Keyboard navigation**: All interactive elements must be Tab/Enter/Space accessible
+- **TextField errors**: Use `error` + `helperText` props (auto-announced)
+- **IconButton**: Always include `aria-label`
+- **Decorative elements**: Use `aria-hidden="true"`
+- **Links**: Use `<a>` or Next.js `Link`, not `<button>`
+- **Color contrast**: MUI default theme meets WCAG AA; maintain 4.5:1 ratio for custom colors
+- **Touch targets**: Minimum 44px (MUI Button default)
 
 ### Environment Configuration
 - Client-side env vars must be prefixed with `NEXT_PUBLIC_`
@@ -195,12 +218,125 @@ ID tokens passed as `Authorization: Bearer <token>` headers.
 - Prefer React built-ins (useState, useContext, useReducer)
 - Use a data-fetching library (React Query / SWR) for server state
 
+## Form & Component Patterns
+
+**Form with validation:**
+```tsx
+const [email, setEmail] = useState('');
+const [error, setError] = useState<string | null>(null);
+
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!email.includes('@')) {
+    setError('Invalid email');
+    return;
+  }
+  // API call
+};
+
+return (
+  <Stack component="form" onSubmit={handleSubmit} spacing={2}>
+    {error && <Alert severity="error">{error}</Alert>}
+    <TextField
+      label="Email"
+      value={email}
+      onChange={(e) => setEmail(e.target.value)}
+      error={!!error}
+      helperText={error}
+      fullWidth
+    />
+    <Button type="submit" variant="contained" fullWidth>Submit</Button>
+  </Stack>
+);
+```
+
+**Controlled Dialog:**
+```tsx
+const [open, setOpen] = useState(false);
+const [title, setTitle] = useState('');
+const handleSubmit = async () => { /* API call */ setOpen(false); };
+
+return (
+  <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
+    <DialogTitle>Create</DialogTitle>
+    <DialogContent sx={{ pt: 2 }}>
+      <TextField autoFocus label="Title" value={title} onChange={(e) => setTitle(e.target.value)} fullWidth />
+    </DialogContent>
+    <DialogActions>
+      <Button onClick={() => setOpen(false)}>Cancel</Button>
+      <Button variant="contained" onClick={handleSubmit}>Create</Button>
+    </DialogActions>
+  </Dialog>
+);
+```
+
+**File Input (hidden trigger):**
+```tsx
+const inputRef = useRef<HTMLInputElement>(null);
+return (
+  <Box>
+    <input ref={inputRef} type="file" accept="audio/*" style={{ display: 'none' }} />
+    <Button onClick={() => inputRef.current?.click()} fullWidth>Choose File</Button>
+  </Box>
+);
+```
+
 ## Testing Patterns
 
 ### Unit Tests (`.spec.tsx` / `.test.tsx`)
 - Test single component or function in isolation
 - Mock external dependencies (API calls, Firebase, router)
 - Use Jest + React Testing Library
+- For MUI components: Mocks handled in `jest.setup.ts` (ThemeProvider, etc.)
+
+### MUI Component Testing
+
+**MUI components automatically include:**
+- Focus management
+- Keyboard navigation (Tab, Enter, Space)
+- ARIA labels and roles
+- Disabled state handling
+
+**Test MUI components like normal React components:**
+
+```tsx
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { myComponent } from '../myComponent';
+import { Button } from '@mui/material';
+
+describe('MyComponent', () => {
+  it('renders MUI button', () => {
+    render(<Button>Click me</Button>);
+    expect(screen.getByRole('button', { name: /click me/i })).toBeInTheDocument();
+  });
+
+  it('calls onClick when button is clicked', async () => {
+    const user = userEvent.setup();
+    const handleClick = jest.fn();
+    render(<Button onClick={handleClick}>Click</Button>);
+    await user.click(screen.getByRole('button'));
+    expect(handleClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows error state on TextField', () => {
+    render(<TextField error helperText="This field is required" />);
+    expect(screen.getByText('This field is required')).toBeInTheDocument();
+  });
+
+  it('handles Dialog interactions', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<Dialog open={false} />);
+    
+    rerender(<Dialog open={true} />);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    
+    await user.keyboard('{Escape}');
+    rerender(<Dialog open={false} />);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+```
 
 ### Test Structure Template
 ```tsx
@@ -224,10 +360,119 @@ describe('MyComponent', () => {
 });
 ```
 
+### MUI Testing Setup (jest.setup.ts)
+
+Ensure `jest.setup.ts` includes:
+
+```typescript
+// Material-UI theme and context mocks
+import { createTheme, ThemeProvider } from '@mui/material/styles';
+import '@testing-library/jest-dom';
+
+const theme = createTheme({
+  palette: {
+    primary: { main: '#7c3aed' },
+    background: { default: '#0a0520', paper: '#1e1b4b' },
+  },
+});
+
+// Global wrapper for all tests (if needed):
+// jest.mock('@mui/material/styles', () => ({
+//   ...jest.requireActual('@mui/material/styles'),
+//   ThemeProvider: ({ children }) => children,
+// }));
+```
+
 ### Running Tests
 - `npm test` — Run all tests
 - `npm run test:watch` — Watch mode
 - `npm run test:coverage` — Coverage report
+
+### Accessibility Testing
+- Use `screen.getByRole()` instead of `getByTestId()` when possible
+- This ensures components are accessible (proper roles, labels, etc.)
+- Test keyboard navigation (Tab, Enter, Escape) for dialogs and menus
+- Verify error announcements in form fields work correctly
+
+## MUI Quick Reference & Best Practices
+
+### Component Usage At-a-Glance
+
+| Component | Use For | Variant/Key Props |
+|-----------|---------|------------------|
+| **TextField** | Form inputs, search | `label`, `type`, `error`, `helperText`, `fullWidth` |
+| **Button** | Primary actions | `variant="contained"`, `onClick` |
+| **Button** | Secondary actions | `variant="outlined"` |
+| **LoadingButton** | Async actions | `loading={bool}`, auto-spinner |
+| **Dialog** | Modal overlays | `open={bool}`, `onClose` |
+| **Card** | Content containers | Single wrapper for related content |
+| **Stack** | Spacing layouts | `spacing={2}`, `direction="row"` |
+| **Grid** | Responsive layouts | `container`, `item`, `xs={12} sm={6} md={4}` |
+| **Box** | Styling wrapper | `sx={{ ... }}` for custom styles |
+| **Snackbar** | Notifications | `open`, `autoHideDuration`, `anchorOrigin` |
+| **Alert** | Error/success messages | Inside Snackbar, `severity="error"` |
+| **Typography** | All text | `variant="h2"`, `variant="body1"`, etc. |
+| **CircularProgress** | Loading spinners | Use with `Box` for centering |
+| **Skeleton** | Content placeholders | `variant="text"`, `variant="rectangular"` |
+| **Avatar** | User avatars | `src={url}`, `alt`, or initials |
+| **IconButton** | Icon-only buttons | `aria-label` required, `size="small"` |
+| **AppBar** | Top navigation | `position="static"` with Toolbar |
+| **Menu** | Dropdown menus | `anchorEl`, `open`, `onClose` |
+
+### Common Patterns Summary
+
+```tsx
+// Form with validation
+<TextField error={!!error} helperText={error} />
+
+// Async button with spinner
+<LoadingButton loading={isLoading} onClick={handleSubmit}>
+  Submit
+</LoadingButton>
+
+// Dialog with form
+<Dialog open={open} onClose={handleClose}>
+  <DialogTitle>Title</DialogTitle>
+  <DialogContent><Stack spacing={2}>...</Stack></DialogContent>
+  <DialogActions><Button /><Button /></DialogActions>
+</Dialog>
+
+// Responsive grid
+<Grid container spacing={2}>
+  <Grid item xs={12} sm={6} md={4}>Content</Grid>
+</Grid>
+
+// Notification
+<Snackbar open={open} onClose={handleClose}>
+  <Alert severity="error">{message}</Alert>
+</Snackbar>
+```
+
+### Common Pitfalls to Avoid
+
+1. ❌ **Mixing MUI + Tailwind on same component**
+   - ✅ Use either `sx` prop (MUI) or className (Tailwind), never both
+
+2. ❌ **Adding Tailwind classes to MUI components**
+   - ✅ `<Button sx={{ px: 2, py: 1 }}>` not `<Button className="px-4 py-2">`
+
+3. ❌ **Using HTML input instead of TextField**
+   - ✅ Always use `<TextField>` for form fields
+
+4. ❌ **Manual styling instead of spacing system**
+   - ✅ Use `spacing={2}` in Stack/Box instead of calculating px values
+
+5. ❌ **Forgetting `aria-label` on IconButton**
+   - ✅ `<IconButton aria-label="delete">` — accessibility required
+
+6. ❌ **Using hardcoded colors instead of theme palette**
+   - ✅ Use `color="primary"` or `sx={{ color: 'primary.main' }}`
+
+7. ❌ **Forgetting `fullWidth` on modals**
+   - ✅ `<Dialog fullWidth maxWidth="sm">` for proper sizing
+
+8. ❌ **Multiple Snackbars stacked visually**
+   - ✅ One Snackbar with conditional content is sufficient
 
 ## Git Workflow & Commits
 

@@ -1,50 +1,10 @@
-import { validateCreateUser, CreateUserSchema } from '../create-user';
+import { validateSignIn, SignInSchema } from '../sign-in';
 
-describe('CreateUserSchema', () => {
-  // --- Name validation ------------------------------------------------------
-
-  it('accepts valid names', () => {
-    const result = CreateUserSchema.safeParse({
-      name: 'Jane Doe',
-      email: 'jane@example.com',
-      password: 'SecurePass123!',
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('rejects names shorter than 3 characters', () => {
-    const result = CreateUserSchema.safeParse({
-      name: 'ab',
-      email: 'jane@example.com',
-      password: 'SecurePass123!',
-    });
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.some((i) => i.path.includes('name'))).toBe(
-        true,
-      );
-    }
-  });
-
-  it('rejects names longer than 255 characters', () => {
-    const result = CreateUserSchema.safeParse({
-      name: 'a'.repeat(256),
-      email: 'jane@example.com',
-      password: 'SecurePass123!',
-    });
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.some((i) => i.path.includes('name'))).toBe(
-        true,
-      );
-    }
-  });
-
+describe('SignInSchema', () => {
   // --- Email validation -----------------------------------------------------
 
   it('accepts valid emails', () => {
-    const result = CreateUserSchema.safeParse({
-      name: 'Jane Doe',
+    const result = SignInSchema.safeParse({
       email: 'jane@example.com',
       password: 'SecurePass123!',
     });
@@ -52,8 +12,7 @@ describe('CreateUserSchema', () => {
   });
 
   it('rejects invalid email formats', () => {
-    const result = CreateUserSchema.safeParse({
-      name: 'Jane Doe',
+    const result = SignInSchema.safeParse({
       email: 'not-an-email',
       password: 'SecurePass123!',
     });
@@ -66,8 +25,7 @@ describe('CreateUserSchema', () => {
   });
 
   it('rejects emails longer than 255 characters', () => {
-    const result = CreateUserSchema.safeParse({
-      name: 'Jane Doe',
+    const result = SignInSchema.safeParse({
       email: `${'a'.repeat(246)}@example.com`,
       password: 'SecurePass123!',
     });
@@ -82,8 +40,7 @@ describe('CreateUserSchema', () => {
   // --- Password validation --------------------------------------------------
 
   it('accepts valid passwords', () => {
-    const result = CreateUserSchema.safeParse({
-      name: 'Jane Doe',
+    const result = SignInSchema.safeParse({
       email: 'jane@example.com',
       password: 'SecurePass123!',
     });
@@ -91,8 +48,7 @@ describe('CreateUserSchema', () => {
   });
 
   it('rejects passwords shorter than 6 characters', () => {
-    const result = CreateUserSchema.safeParse({
-      name: 'Jane Doe',
+    const result = SignInSchema.safeParse({
       email: 'jane@example.com',
       password: 'Pass1',
     });
@@ -105,8 +61,7 @@ describe('CreateUserSchema', () => {
   });
 
   it('rejects passwords longer than 255 characters', () => {
-    const result = CreateUserSchema.safeParse({
-      name: 'Jane Doe',
+    const result = SignInSchema.safeParse({
       email: 'jane@example.com',
       password: 'P' + 'a'.repeat(255),
     });
@@ -119,8 +74,7 @@ describe('CreateUserSchema', () => {
   });
 
   it('rejects passwords with spaces', () => {
-    const result = CreateUserSchema.safeParse({
-      name: 'Jane Doe',
+    const result = SignInSchema.safeParse({
       email: 'jane@example.com',
       password: 'Pass word123!',
     });
@@ -133,8 +87,7 @@ describe('CreateUserSchema', () => {
   });
 
   it('rejects passwords with control characters', () => {
-    const result = CreateUserSchema.safeParse({
-      name: 'Jane Doe',
+    const result = SignInSchema.safeParse({
       email: 'jane@example.com',
       password: 'Pass\x00word123!',
     });
@@ -147,8 +100,7 @@ describe('CreateUserSchema', () => {
   });
 
   it('accepts passwords with special characters', () => {
-    const result = CreateUserSchema.safeParse({
-      name: 'Jane Doe',
+    const result = SignInSchema.safeParse({
       email: 'jane@example.com',
       password: 'P@$$w0rd!#%&*',
     });
@@ -156,17 +108,15 @@ describe('CreateUserSchema', () => {
   });
 });
 
-describe('validateCreateUser', () => {
+describe('validateSignIn', () => {
   it('returns success with valid data', () => {
-    const result = validateCreateUser({
-      name: 'Jane Doe',
+    const result = validateSignIn({
       email: 'jane@example.com',
       password: 'SecurePass123!',
     });
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data).toEqual({
-        name: 'Jane Doe',
         email: 'jane@example.com',
         password: 'SecurePass123!',
       });
@@ -174,28 +124,25 @@ describe('validateCreateUser', () => {
   });
 
   it('returns errors object for invalid data', () => {
-    const result = validateCreateUser({
-      name: 'ab',
+    const result = validateSignIn({
       email: 'invalid-email',
       password: 'short',
     });
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.errors.name).toBeDefined();
       expect(result.errors.email).toBeDefined();
       expect(result.errors.password).toBeDefined();
     }
   });
 
   it('returns specific error messages', () => {
-    const result = validateCreateUser({
-      name: 'ab',
-      email: 'jane@example.com',
+    const result = validateSignIn({
+      email: 'invalid-email',
       password: 'SecurePass123!',
     });
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.errors.name).toBe('Name must be at least 3 characters');
+      expect(result.errors.email).toBe('Invalid email format');
     }
   });
 });

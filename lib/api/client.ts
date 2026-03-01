@@ -57,6 +57,11 @@ export class ApiClient {
     return this.request<T>('POST', path, formData);
   }
 
+  /** Performs a PATCH request with a JSON body and returns the full response body. */
+  async patch<T>(path: string, body: unknown): Promise<T> {
+    return this.request<T>('PATCH', path, body);
+  }
+
   /** Performs a DELETE request and returns the full response body. */
   async delete<T>(path: string): Promise<T> {
     return this.request<T>('DELETE', path);

@@ -7,7 +7,7 @@
  * ```ts
  * import { songsApi } from '@/lib/api';
  *
- * const list = await songsApi.listSongs();
+ * const created = await songsApi.uploadSong(file, { title, author });
  * ```
  *
  * The underlying `ApiClient` automatically:
@@ -20,6 +20,7 @@ import { getCurrentUserIdToken } from '@/lib/firebase/auth';
 import { ApiClient } from './client';
 import { SongsApi } from './songs';
 import { UsersApi } from './users';
+import { SeparationsApi } from './separations';
 
 // ---------------------------------------------------------------------------
 // Shared client instance
@@ -32,6 +33,7 @@ const apiClient = new ApiClient(getCurrentUserIdToken);
 // ---------------------------------------------------------------------------
 
 export const songsApi = new SongsApi(apiClient);
+export const separationsApi = new SeparationsApi(apiClient);
 
 /** Public API instance — user creation does not require authentication. */
 export const usersApi = new UsersApi();
@@ -44,17 +46,25 @@ export { ApiClient } from './client';
 export type { TokenProvider } from './client';
 
 export { SongsApi } from './songs';
-export type { UploadSongInput, SongList } from './songs';
+export type { UploadSongInput } from './songs';
 
 export { UsersApi } from './users';
+export { SeparationsApi } from './separations';
 
 export { ApiError } from './types';
 export type {
   Song,
-  SongRawUrl,
   UploadSongResult,
   RawSongInfo,
-  RawSongUrlInfo,
+  SeparatedSongInfo,
+  NormalizedSeparationInfo,
+  SeparationJobStatus,
+  SeparationProviderName,
+  SeparationStemName,
+  SeparationStems,
+  PoyoSeparationTaskDetails,
+  PoyoSeparationStatus,
+  PoyoSeparatedSongInfo,
   CreateUserInput,
   CreateUserResult,
   ApiSuccessResponse,

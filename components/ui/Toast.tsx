@@ -31,8 +31,7 @@ const variantStyles: Record<
   { container: string; icon: React.ReactElement }
 > = {
   info: {
-    container:
-      'border-accent-500/40 bg-accent-500/10 text-accent-200',
+    container: 'border-accent-500/40 bg-accent-500/10 text-accent-200',
     icon: (
       <svg
         viewBox="0 0 20 20"

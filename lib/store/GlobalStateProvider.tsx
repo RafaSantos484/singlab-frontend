@@ -15,9 +15,12 @@ import { useEffect, useReducer } from 'react';
 
 import { getFirebaseAuth } from '@/lib/firebase/auth';
 import { getFirebaseFirestore } from '@/lib/firebase/firestore';
-import type { RawSongInfo } from '@/lib/api/types';
+import type { RawSongInfo, SeparatedSongInfo } from '@/lib/api/types';
 
-import { GlobalStateContext } from './GlobalStateContext';
+import {
+  GlobalStateContext,
+  GlobalStateDispatchContext,
+} from './GlobalStateContext';
 import { globalStateReducer, initialState } from './reducer';
 import type { AuthUser, Song } from './types';
 
@@ -44,6 +47,7 @@ function docToSong(snap: QueryDocumentSnapshot<DocumentData>): Song {
     title: d['title'] as string,
     author: d['author'] as string,
     rawSongInfo: d['rawSongInfo'] as RawSongInfo,
+    separatedSongInfo: (d['separatedSongInfo'] as SeparatedSongInfo) ?? null,
   };
 }
 
@@ -136,7 +140,9 @@ export function GlobalStateProvider({ children }: GlobalStateProviderProps) {
 
   return (
     <GlobalStateContext.Provider value={state}>
-      {children}
+      <GlobalStateDispatchContext.Provider value={dispatch}>
+        {children}
+      </GlobalStateDispatchContext.Provider>
     </GlobalStateContext.Provider>
   );
 }
