@@ -9,20 +9,21 @@ const VALID_PASSWORD_CHARS = /^[\x21-\x7E]+$/;
 
 /**
  * Zod validation schema for sign in.
- * Validates email format and password constraints.
+ * Error messages are i18n translation keys (relative to the `Validation`
+ * namespace) so that UI components can pass them to `useTranslations`.
  */
 export const SignInSchema = z.object({
   email: z
     .string()
-    .email('Invalid email format')
-    .max(255, 'Email must be at most 255 characters'),
+    .email('email.invalid')
+    .max(255, 'email.tooLong'),
   password: z
     .string()
-    .min(6, 'Password must be at least 6 characters')
-    .max(255, 'Password must be at most 255 characters')
+    .min(6, 'password.tooShort')
+    .max(255, 'password.tooLong')
     .regex(
       VALID_PASSWORD_CHARS,
-      'Password must contain only printable characters (no spaces or control characters)',
+      'password.invalidChars',
     ),
 });
 
@@ -31,6 +32,7 @@ export type SignInDto = z.infer<typeof SignInSchema>;
 /**
  * Validates sign in credentials against the schema.
  * Returns an object with `success` and either `data` or `errors`.
+ * Error values are i18n keys in the `Validation` namespace.
  */
 export function validateSignIn(
   data: unknown,
