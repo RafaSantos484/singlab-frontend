@@ -7,9 +7,11 @@ import {
   Avatar,
   Typography,
 } from '@mui/material';
+import { useTranslations } from 'next-intl';
 import { signOut } from '@/lib/firebase';
 import { useGlobalState } from '@/lib/store';
 import { useState } from 'react';
+import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -19,14 +21,16 @@ interface DashboardLayoutProps {
  * Layout wrapper for authenticated pages (dashboard, etc.).
  *
  * Features:
- * - AppBar with branding, user avatar, and sign out button
+ * - AppBar with branding, language switcher, user avatar, and sign out button
  * - Container with responsive padding
  * - Consistent max-width and spacing
  * - Accessible navigation structure
+ * - Fully translated via the i18n system
  */
 export function DashboardLayout({
   children,
 }: DashboardLayoutProps): React.ReactElement {
+  const t = useTranslations('Navigation');
   const { userProfile } = useGlobalState();
   const [signingOut, setSigningOut] = useState(false);
 
@@ -77,11 +81,14 @@ export function DashboardLayout({
               fontSize: { xs: '1.25rem', sm: '1.5rem' },
             }}
           >
-            SingLab
+            {t('brand')}
           </Typography>
 
-          {/* User info + Sign out */}
+          {/* Right side: language switcher + user info + sign out */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            {/* Language switcher */}
+            <LanguageSwitcher />
+
             {/* Avatar + name */}
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               {user?.photoURL ? (
@@ -132,7 +139,7 @@ export function DashboardLayout({
                 fontSize: '0.875rem',
               }}
             >
-              {signingOut ? 'Signing out…' : 'Sign out'}
+              {signingOut ? t('signingOut') : t('signOut')}
             </Button>
           </Box>
         </Toolbar>
