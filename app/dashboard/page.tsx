@@ -405,13 +405,17 @@ interface SongCardItemProps {
  * - Play, edit, and delete action buttons
  * - Stem separation status panel:
  *   - Not started: button to initiate separation
- *   - Processing: progress bar with current progress % and refresh button
+ *   - Processing: progress bar with current progress % and refresh status button
  *   - Finished: available stems with provider/task info
- *   - Failed: error message with retry button
+ *   - Failed: error message with retry button (initiates new separation request)
  *
  * Uses the `useSeparationStatus` hook to manage the separation lifecycle,
  * including automatic polling during processing. Firestore real-time
  * listener updates `song.separatedSongInfo` which triggers re-render.
+ *
+ * Note: The retry button on failure calls `requestSeparation` to start a new
+ * separation attempt, while the refresh button during processing calls
+ * `refreshStatus` to poll the current task status.
  *
  * @component
  */
@@ -660,11 +664,11 @@ function SongCardItem({
                 size="small"
                 variant="outlined"
                 startIcon={<RefreshIcon fontSize="small" />}
-                onClick={refreshStatus}
-                disabled={isRefreshing}
+                onClick={() => requestSeparation('poyo')}
+                disabled={isRequesting}
                 sx={{ alignSelf: 'flex-start' }}
               >
-                {isRefreshing ? 'Retrying…' : 'Retry separation status'}
+                {isRequesting ? 'Trying again…' : 'Try again'}
               </Button>
             </Stack>
           )}
