@@ -6,12 +6,14 @@ import { separationsApi } from '@/lib/api';
 import type {
   NormalizedSeparationInfo,
   SeparationProviderName,
+  SeparationStemName,
   Song,
 } from '@/lib/api/types';
 import {
   normalizeSeparationInfo,
   shouldPollSeparation,
 } from '@/lib/separations';
+import { useStorageDownloadUrls } from './useStorageDownloadUrls';
 
 const POLL_INTERVAL_MS = 1000 * 60; // 1 minute
 
@@ -20,6 +22,9 @@ interface UseSeparationStatusResult {
   isRequesting: boolean;
   isRefreshing: boolean;
   error: string | null;
+  stemUrls: Partial<Record<SeparationStemName, string>>;
+  isResolvingStemUrls: boolean;
+  stemUrlError: string | null;
   requestSeparation: (provider?: SeparationProviderName) => Promise<void>;
   refreshStatus: () => Promise<void>;
 }
@@ -56,6 +61,12 @@ export function useSeparationStatus(song: Song): UseSeparationStatusResult {
   const [isRequesting, setIsRequesting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const {
+    urls: stemUrls,
+    isLoading: isResolvingStemUrls,
+    error: stemUrlError,
+  } = useStorageDownloadUrls(separation?.stems?.paths ?? null);
 
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -124,6 +135,9 @@ export function useSeparationStatus(song: Song): UseSeparationStatusResult {
     isRequesting,
     isRefreshing,
     error,
+    stemUrls,
+    isResolvingStemUrls,
+    stemUrlError,
     requestSeparation,
     refreshStatus,
   };
