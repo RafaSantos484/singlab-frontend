@@ -429,7 +429,10 @@ function GlobalPlayerInner({
           if (isFinite(el.duration)) setDuration(el.duration);
         });
         el.addEventListener('ended', () => {
-          audioMapRef.current.forEach((a) => a.pause());
+          audioMapRef.current.forEach((a) => {
+            a.pause();
+            a.currentTime = 0;
+          });
           setIsPlaying(false);
           isPlayingRef.current = false;
           setCurrentTime(0);
