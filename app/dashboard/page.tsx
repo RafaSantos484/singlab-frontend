@@ -39,7 +39,7 @@ import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
 import { useGlobalState } from '@/lib/store';
 import { useGlobalStateDispatch } from '@/lib/store/GlobalStateContext';
 import { DashboardLayout } from '@/components/layout';
-import type { Song } from '@/lib/api/types';
+import type { SeparationStemName, Song } from '@/lib/api/types';
 import { useSeparationStatus } from '@/lib/hooks/useSeparationStatus';
 import { GlobalPlayer } from '@/components/features/GlobalPlayer';
 
@@ -91,7 +91,7 @@ export default function DashboardPage(): React.ReactElement | null {
       });
     }
 
-    // Sort by creation date (uploadedAt timestamp)
+    // Sort by document creation date (Firestore server timestamp if available)
     const sorted = [...filtered].sort((a, b) => {
       const dateA = new Date(a.rawSongInfo.uploadedAt).getTime();
       const dateB = new Date(b.rawSongInfo.uploadedAt).getTime();
@@ -426,6 +426,8 @@ function SongCardItem({
     isRequesting,
     isRefreshing,
     error: separationError,
+    stemUrls,
+    stemUrlError,
     requestSeparation,
     refreshStatus,
   } = useSeparationStatus(song);
@@ -435,9 +437,9 @@ function SongCardItem({
   const isFailed = separation?.status === 'failed';
 
   const availableStems = isFinished
-    ? (Object.entries(separation.stems)
+    ? Object.entries(stemUrls)
       .filter(([, url]) => Boolean(url))
-      .map(([key]) => key) as Array<keyof typeof separation.stems>)
+      .map(([key]) => key as SeparationStemName)
     : [];
 
   return (
@@ -572,6 +574,12 @@ function SongCardItem({
           {separationError && (
             <Alert severity="error" sx={{ mb: 1 }}>
               {separationError}
+            </Alert>
+          )}
+
+          {stemUrlError && (
+            <Alert severity="error" sx={{ mb: 1 }}>
+              {stemUrlError}
             </Alert>
           )}
 
