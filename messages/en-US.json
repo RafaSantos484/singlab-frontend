@@ -1,0 +1,214 @@
+{
+  "Common": {
+    "or": "or",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "loading": "Loading..."
+  },
+  "Meta": {
+    "title": "SingLab — Karaoke & Singing Practice",
+    "description": "Upload a track and practice singing with AI-separated vocal and instrumental layers."
+  },
+  "Navigation": {
+    "brand": "SingLab",
+    "signOut": "Sign out",
+    "signingOut": "Signing out…"
+  },
+  "Language": {
+    "label": "Language",
+    "switcherAriaLabel": "Switch language",
+    "enUS": "English",
+    "ptBR": "Português (Brasil)"
+  },
+  "Auth": {
+    "signIn": {
+      "subtitle": "Sign in to your account",
+      "emailLabel": "Email",
+      "emailPlaceholder": "you@example.com",
+      "emailAriaLabel": "Email address",
+      "passwordLabel": "Password",
+      "passwordPlaceholder": "••••••••",
+      "passwordAriaLabel": "Password",
+      "forgotPassword": "Forgot password?",
+      "submitButton": "Sign in",
+      "submittingButton": "Signing in…",
+      "createAccount": "Create new account",
+      "emailVerifiedSuccess": "Account created! Check your inbox and verify your email address before signing in.",
+      "errors": {
+        "emailNotVerified": "Please verify your email before signing in. Check your inbox for the verification link.",
+        "invalidCredentials": "Invalid email or password.",
+        "accountDisabled": "This account has been disabled.",
+        "tooManyRequests": "Too many failed attempts. Please try again later.",
+        "networkError": "Network error. Check your connection and try again.",
+        "unexpected": "An unexpected error occurred. Please try again."
+      }
+    },
+    "register": {
+      "subtitle": "Create your account",
+      "nameLabel": "Full Name",
+      "namePlaceholder": "Jane Doe",
+      "nameAriaLabel": "Full name",
+      "emailLabel": "Email",
+      "emailPlaceholder": "you@example.com",
+      "emailAriaLabel": "Email address",
+      "passwordLabel": "Password",
+      "passwordPlaceholder": "••••••••",
+      "passwordAriaLabel": "Password",
+      "confirmPasswordLabel": "Confirm Password",
+      "confirmPasswordPlaceholder": "••••••••",
+      "confirmPasswordAriaLabel": "Confirm password",
+      "passwordMismatch": "Passwords do not match.",
+      "submitButton": "Create account",
+      "submittingButton": "Creating account…",
+      "backToSignIn": "Already have an account? Sign in",
+      "errors": {
+        "emailAlreadyInUse": "This email address is already in use.",
+        "unexpected": "An unexpected error occurred. Please try again."
+      }
+    }
+  },
+  "Dashboard": {
+    "welcomeBack": "Welcome back,",
+    "yourSongs": "Your songs",
+    "trackCount": "{count, plural, =0 {no tracks} =1 {1 track} other {# tracks}}",
+    "searchPlaceholder": "Search by title or author...",
+    "sortByLabel": "Sort by",
+    "sortNewest": "Newest first",
+    "sortOldest": "Oldest first",
+    "loadingSongs": "Loading songs…",
+    "loadError": "Failed to load songs. Please refresh the page.",
+    "emptyState": "No songs yet. Upload your first track to get started.",
+    "noSearchResults": "No songs found matching \"{query}\"",
+    "addSongAriaLabel": "add song",
+    "nowPlaying": "Now Playing",
+    "tooltips": {
+      "playSong": "Play song",
+      "editSong": "Edit song"
+    }
+  },
+  "Separation": {
+    "title": "Stem separation",
+    "noSeparationYet": "No separation requested yet.",
+    "startButton": "Start stem separation",
+    "startingButton": "Starting…",
+    "processing": "Separating audio… {progress}%",
+    "refreshStatus": "Refresh status",
+    "refreshingStatus": "Refreshing…",
+    "stemsReady": "Stems ready. Select them in the player below.",
+    "provider": "Provider:",
+    "task": "Task",
+    "failed": "Separation failed: {errorMessage}",
+    "tryAgain": "Try again",
+    "tryingAgain": "Trying again…"
+  },
+  "SongCreate": {
+    "title": "Upload New Song",
+    "infoMessage": "Attach the file first, then fill in Title and Author. We'll auto-detect metadata when possible.",
+    "chooseFileButton": "Choose Audio File",
+    "extractingMetadata": "Extracting metadata...",
+    "supportedFormats": "Supported: MP3, WAV, OGG, WebM, MP4, MOV, FLAC (max 100 MB)",
+    "detectingMetadata": "Detecting metadata...",
+    "titleLabel": "Song Title",
+    "titlePlaceholder": "e.g., Bohemian Rhapsody",
+    "authorLabel": "Artist / Author",
+    "authorPlaceholder": "e.g., Queen",
+    "cancelButton": "Cancel",
+    "uploadButton": "Upload Song",
+    "uploadingButton": "Uploading...",
+    "errors": {
+      "unexpected": "An unexpected error occurred. Please try again.",
+      "uploadFailed": "Upload failed: {message} ({statusCode}). Please try again."
+    }
+  },
+  "SongEdit": {
+    "title": "Edit Song",
+    "infoMessage": "Update the song's title and author. The audio file cannot be changed.",
+    "titleLabel": "Song Title",
+    "titlePlaceholder": "e.g., Bohemian Rhapsody",
+    "authorLabel": "Artist / Author",
+    "authorPlaceholder": "e.g., Queen",
+    "cancelButton": "Cancel",
+    "saveButton": "Update Song",
+    "savingButton": "Updating...",
+    "errors": {
+      "unexpected": "An unexpected error occurred. Please try again.",
+      "updateFailed": "Update failed: {message} ({statusCode}). Please try again."
+    }
+  },
+  "SongDelete": {
+    "ariaLabel": "Delete song",
+    "dialogTitle": "Delete song?",
+    "dialogDescription": "Are you sure you want to delete \"{title}\"? This action cannot be undone.",
+    "cancelButton": "Cancel",
+    "deleteButton": "Delete",
+    "successMessage": "\"{title}\" deleted successfully",
+    "errors": {
+      "default": "Failed to delete song. Please try again.",
+      "authExpired": "Authentication expired. Please sign in again and retry.",
+      "forbidden": "You do not have permission to delete this song.",
+      "notFound": "This song no longer exists."
+    }
+  },
+  "Player": {
+    "audioSource": "Audio source",
+    "rawLabel": "Raw",
+    "separatedLabel": "Separated",
+    "bufferingTooltip": "Buffering – waiting for all tracks…",
+    "playTooltipBuffering": "Buffering…",
+    "playTooltipPause": "Pause",
+    "playTooltipPlay": "Play",
+    "playAriaLabel": "Play",
+    "pauseAriaLabel": "Pause",
+    "stopTooltip": "Stop",
+    "stopAriaLabel": "Stop",
+    "seekAriaLabel": "Seek",
+    "muteTooltip": "Mute",
+    "unmuteTooltip": "Unmute",
+    "muteAriaLabel": "Mute",
+    "unmuteAriaLabel": "Unmute",
+    "volumeAriaLabel": "Volume",
+    "toggleStemsLabel": "Toggle stems to create your mix.",
+    "presets": {
+      "instrumental": "Instrumental",
+      "vocalsOnly": "Vocals only",
+      "allStems": "All stems"
+    },
+    "stems": {
+      "vocals": "Vocals",
+      "bass": "Bass",
+      "drums": "Drums",
+      "piano": "Piano",
+      "guitar": "Guitar",
+      "other": "Other"
+    }
+  },
+  "Validation": {
+    "email": {
+      "invalid": "Invalid email format",
+      "tooLong": "Email must be at most 255 characters"
+    },
+    "password": {
+      "tooShort": "Password must be at least 6 characters",
+      "tooLong": "Password must be at most 255 characters",
+      "invalidChars": "Password must contain only printable characters (no spaces or control characters)"
+    },
+    "name": {
+      "tooShort": "Name must be at least 3 characters",
+      "tooLong": "Name must be at most 255 characters"
+    },
+    "file": {
+      "invalidType": "Unsupported format. Supported: MP3, WAV, OGG, WebM, MP4, MOV, FLAC.",
+      "sizeTooLarge": "File exceeds the maximum size of 100 MB.",
+      "required": "Please select an audio file",
+      "invalid": "Invalid file"
+    },
+    "songTitle": {
+      "required": "Song title is required",
+      "tooLong": "Song title must be 255 characters or less"
+    },
+    "songAuthor": {
+      "required": "Artist/Author name is required",
+      "tooLong": "Artist/Author name must be 255 characters or less"
+    }
+  }
+}

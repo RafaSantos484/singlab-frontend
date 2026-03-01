@@ -1,0 +1,214 @@
+{
+  "Common": {
+    "or": "ou",
+    "cancel": "Cancelar",
+    "delete": "Excluir",
+    "loading": "Carregando..."
+  },
+  "Meta": {
+    "title": "SingLab — Karaokê & Prática de Canto",
+    "description": "Faça upload de uma faixa e pratique canto com camadas vocais e instrumentais separadas por IA."
+  },
+  "Navigation": {
+    "brand": "SingLab",
+    "signOut": "Sair",
+    "signingOut": "Saindo…"
+  },
+  "Language": {
+    "label": "Idioma",
+    "switcherAriaLabel": "Trocar idioma",
+    "enUS": "English",
+    "ptBR": "Português (Brasil)"
+  },
+  "Auth": {
+    "signIn": {
+      "subtitle": "Entre na sua conta",
+      "emailLabel": "E-mail",
+      "emailPlaceholder": "voce@exemplo.com",
+      "emailAriaLabel": "Endereço de e-mail",
+      "passwordLabel": "Senha",
+      "passwordPlaceholder": "••••••••",
+      "passwordAriaLabel": "Senha",
+      "forgotPassword": "Esqueceu a senha?",
+      "submitButton": "Entrar",
+      "submittingButton": "Entrando…",
+      "createAccount": "Criar nova conta",
+      "emailVerifiedSuccess": "Conta criada! Verifique sua caixa de entrada e confirme seu e-mail antes de entrar.",
+      "errors": {
+        "emailNotVerified": "Por favor, verifique seu e-mail antes de entrar. Confira sua caixa de entrada pelo link de verificação.",
+        "invalidCredentials": "E-mail ou senha inválidos.",
+        "accountDisabled": "Esta conta foi desativada.",
+        "tooManyRequests": "Muitas tentativas com falha. Tente novamente mais tarde.",
+        "networkError": "Erro de rede. Verifique sua conexão e tente novamente.",
+        "unexpected": "Ocorreu um erro inesperado. Por favor, tente novamente."
+      }
+    },
+    "register": {
+      "subtitle": "Crie sua conta",
+      "nameLabel": "Nome completo",
+      "namePlaceholder": "Maria Silva",
+      "nameAriaLabel": "Nome completo",
+      "emailLabel": "E-mail",
+      "emailPlaceholder": "voce@exemplo.com",
+      "emailAriaLabel": "Endereço de e-mail",
+      "passwordLabel": "Senha",
+      "passwordPlaceholder": "••••••••",
+      "passwordAriaLabel": "Senha",
+      "confirmPasswordLabel": "Confirmar senha",
+      "confirmPasswordPlaceholder": "••••••••",
+      "confirmPasswordAriaLabel": "Confirmar senha",
+      "passwordMismatch": "As senhas não coincidem.",
+      "submitButton": "Criar conta",
+      "submittingButton": "Criando conta…",
+      "backToSignIn": "Já tem uma conta? Entrar",
+      "errors": {
+        "emailAlreadyInUse": "Este endereço de e-mail já está em uso.",
+        "unexpected": "Ocorreu um erro inesperado. Por favor, tente novamente."
+      }
+    }
+  },
+  "Dashboard": {
+    "welcomeBack": "Bem-vindo(a),",
+    "yourSongs": "Suas músicas",
+    "trackCount": "{count, plural, =0 {nenhuma faixa} =1 {1 faixa} other {# faixas}}",
+    "searchPlaceholder": "Buscar por título ou artista...",
+    "sortByLabel": "Ordenar por",
+    "sortNewest": "Mais recentes",
+    "sortOldest": "Mais antigas",
+    "loadingSongs": "Carregando músicas…",
+    "loadError": "Falha ao carregar músicas. Atualize a página.",
+    "emptyState": "Nenhuma música ainda. Faça upload da sua primeira faixa para começar.",
+    "noSearchResults": "Nenhuma música encontrada para \"{query}\"",
+    "addSongAriaLabel": "adicionar música",
+    "nowPlaying": "Tocando agora",
+    "tooltips": {
+      "playSong": "Tocar música",
+      "editSong": "Editar música"
+    }
+  },
+  "Separation": {
+    "title": "Separação de faixas",
+    "noSeparationYet": "Nenhuma separação solicitada ainda.",
+    "startButton": "Iniciar separação de faixas",
+    "startingButton": "Iniciando…",
+    "processing": "Separando áudio… {progress}%",
+    "refreshStatus": "Atualizar status",
+    "refreshingStatus": "Atualizando…",
+    "stemsReady": "Faixas prontas. Selecione-as no player abaixo.",
+    "provider": "Provedor:",
+    "task": "Tarefa",
+    "failed": "Falha na separação: {errorMessage}",
+    "tryAgain": "Tentar novamente",
+    "tryingAgain": "Tentando novamente…"
+  },
+  "SongCreate": {
+    "title": "Enviar Nova Música",
+    "infoMessage": "Selecione o arquivo primeiro, depois preencha Título e Artista. Tentaremos detectar os metadados automaticamente.",
+    "chooseFileButton": "Escolher Arquivo de Áudio",
+    "extractingMetadata": "Extraindo metadados...",
+    "supportedFormats": "Suportados: MP3, WAV, OGG, WebM, MP4, MOV, FLAC (máx. 100 MB)",
+    "detectingMetadata": "Detectando metadados...",
+    "titleLabel": "Título da Música",
+    "titlePlaceholder": "ex.: Bohemian Rhapsody",
+    "authorLabel": "Artista / Autor",
+    "authorPlaceholder": "ex.: Queen",
+    "cancelButton": "Cancelar",
+    "uploadButton": "Enviar Música",
+    "uploadingButton": "Enviando...",
+    "errors": {
+      "unexpected": "Ocorreu um erro inesperado. Por favor, tente novamente.",
+      "uploadFailed": "Falha no envio: {message} ({statusCode}). Por favor, tente novamente."
+    }
+  },
+  "SongEdit": {
+    "title": "Editar Música",
+    "infoMessage": "Atualize o título e o artista da música. O arquivo de áudio não pode ser alterado.",
+    "titleLabel": "Título da Música",
+    "titlePlaceholder": "ex.: Bohemian Rhapsody",
+    "authorLabel": "Artista / Autor",
+    "authorPlaceholder": "ex.: Queen",
+    "cancelButton": "Cancelar",
+    "saveButton": "Atualizar Música",
+    "savingButton": "Atualizando...",
+    "errors": {
+      "unexpected": "Ocorreu um erro inesperado. Por favor, tente novamente.",
+      "updateFailed": "Falha na atualização: {message} ({statusCode}). Por favor, tente novamente."
+    }
+  },
+  "SongDelete": {
+    "ariaLabel": "Excluir música",
+    "dialogTitle": "Excluir música?",
+    "dialogDescription": "Tem certeza que deseja excluir \"{title}\"? Esta ação não pode ser desfeita.",
+    "cancelButton": "Cancelar",
+    "deleteButton": "Excluir",
+    "successMessage": "\"{title}\" excluída com sucesso",
+    "errors": {
+      "default": "Falha ao excluir música. Por favor, tente novamente.",
+      "authExpired": "Autenticação expirada. Faça login novamente e tente de novo.",
+      "forbidden": "Você não tem permissão para excluir esta música.",
+      "notFound": "Esta música não existe mais."
+    }
+  },
+  "Player": {
+    "audioSource": "Fonte de áudio",
+    "rawLabel": "Original",
+    "separatedLabel": "Separado",
+    "bufferingTooltip": "Carregando – aguardando todas as faixas…",
+    "playTooltipBuffering": "Carregando…",
+    "playTooltipPause": "Pausar",
+    "playTooltipPlay": "Tocar",
+    "playAriaLabel": "Tocar",
+    "pauseAriaLabel": "Pausar",
+    "stopTooltip": "Parar",
+    "stopAriaLabel": "Parar",
+    "seekAriaLabel": "Avançar/Recuar",
+    "muteTooltip": "Silenciar",
+    "unmuteTooltip": "Reativar som",
+    "muteAriaLabel": "Silenciar",
+    "unmuteAriaLabel": "Reativar som",
+    "volumeAriaLabel": "Volume",
+    "toggleStemsLabel": "Ative ou desative faixas para criar seu mix.",
+    "presets": {
+      "instrumental": "Instrumental",
+      "vocalsOnly": "Apenas vocal",
+      "allStems": "Todas as faixas"
+    },
+    "stems": {
+      "vocals": "Vocal",
+      "bass": "Baixo",
+      "drums": "Bateria",
+      "piano": "Piano",
+      "guitar": "Guitarra",
+      "other": "Outros"
+    }
+  },
+  "Validation": {
+    "email": {
+      "invalid": "Formato de e-mail inválido",
+      "tooLong": "O e-mail deve ter no máximo 255 caracteres"
+    },
+    "password": {
+      "tooShort": "A senha deve ter pelo menos 6 caracteres",
+      "tooLong": "A senha deve ter no máximo 255 caracteres",
+      "invalidChars": "A senha deve conter apenas caracteres imprimíveis (sem espaços ou caracteres de controle)"
+    },
+    "name": {
+      "tooShort": "O nome deve ter pelo menos 3 caracteres",
+      "tooLong": "O nome deve ter no máximo 255 caracteres"
+    },
+    "file": {
+      "invalidType": "Formato não suportado. Suportados: MP3, WAV, OGG, WebM, MP4, MOV, FLAC.",
+      "sizeTooLarge": "O arquivo excede o tamanho máximo de 100 MB.",
+      "required": "Por favor, selecione um arquivo de áudio",
+      "invalid": "Arquivo inválido"
+    },
+    "songTitle": {
+      "required": "O título da música é obrigatório",
+      "tooLong": "O título deve ter no máximo 255 caracteres"
+    },
+    "songAuthor": {
+      "required": "O nome do artista/autor é obrigatório",
+      "tooLong": "O nome do artista/autor deve ter no máximo 255 caracteres"
+    }
+  }
+}
