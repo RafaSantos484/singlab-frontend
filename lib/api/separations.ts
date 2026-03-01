@@ -24,10 +24,9 @@ export class SeparationsApi {
     provider?: SeparationProviderName,
   ): Promise<PoyoSeparationTaskDetails | null> {
     const query = provider ? `?provider=${provider}` : '';
-    const res = await this.client.post<ApiSuccessResponse<PoyoSeparationTaskDetails | null>>(
-      `/songs/${songId}/separations${query}`,
-      {},
-    );
+    const res = await this.client.post<
+      ApiSuccessResponse<PoyoSeparationTaskDetails | null>
+    >(`/songs/${songId}/separations${query}`, {});
 
     return res.data;
   }
@@ -45,9 +44,9 @@ export class SeparationsApi {
     provider?: SeparationProviderName,
   ): Promise<PoyoSeparationTaskDetails | null> {
     const query = provider ? `?provider=${provider}` : '';
-    const res = await this.client.get<ApiSuccessResponse<PoyoSeparationTaskDetails | null>>(
-      `/songs/${songId}/separations/status${query}`,
-    );
+    const res = await this.client.get<
+      ApiSuccessResponse<PoyoSeparationTaskDetails | null>
+    >(`/songs/${songId}/separations/status${query}`);
 
     return res.data;
   }
