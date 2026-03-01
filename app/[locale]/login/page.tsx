@@ -1,7 +1,6 @@
 'use client';
 
 import { type FormEvent, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Box,
@@ -13,34 +12,36 @@ import {
   CircularProgress,
   Typography,
 } from '@mui/material';
+import { useTranslations } from 'next-intl';
 import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
 import { signIn, EmailNotVerifiedError } from '@/lib/firebase';
 import { type FirebaseError } from 'firebase/app';
 import { AuthLayout } from '@/components/layout';
 import { validateSignIn } from '@/lib/validation/sign-in';
+import { useRouter } from '@/lib/i18n/navigation';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function getErrorMessage(error: unknown): string {
+function getErrorKey(error: unknown): string {
   if (error instanceof EmailNotVerifiedError) {
-    return 'Please verify your email before signing in. Check your inbox for the verification link.';
+    return 'errors.emailNotVerified';
   }
   const firebaseError = error as FirebaseError;
   switch (firebaseError.code) {
     case 'auth/invalid-credential':
     case 'auth/user-not-found':
     case 'auth/wrong-password':
-      return 'Invalid email or password.';
+      return 'errors.invalidCredentials';
     case 'auth/user-disabled':
-      return 'This account has been disabled.';
+      return 'errors.accountDisabled';
     case 'auth/too-many-requests':
-      return 'Too many failed attempts. Please try again later.';
+      return 'errors.tooManyRequests';
     case 'auth/network-request-failed':
-      return 'Network error. Check your connection and try again.';
+      return 'errors.networkError';
     default:
-      return 'An unexpected error occurred. Please try again.';
+      return 'errors.unexpected';
   }
 }
 
@@ -49,6 +50,8 @@ function getErrorMessage(error: unknown): string {
 // ---------------------------------------------------------------------------
 
 export default function LoginPage(): React.ReactElement | null {
+  const t = useTranslations('Auth.signIn');
+  const tV = useTranslations('Validation');
   const isLoading = useAuthGuard('public');
   const router = useRouter();
 
@@ -65,7 +68,6 @@ export default function LoginPage(): React.ReactElement | null {
     Object.keys(fieldErrors).length === 0;
 
   // Read the registration flag after mount to avoid SSR/hydration mismatches
-  // and to be immune to auth-state timing issues.
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const flag = sessionStorage.getItem('emailVerificationSent');
@@ -79,11 +81,9 @@ export default function LoginPage(): React.ReactElement | null {
   async function handleSubmit(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
 
-    // Clear previous errors
     setError(null);
     setFieldErrors({});
 
-    // Validate form data
     const validation = validateSignIn({ email, password });
 
     if (!validation.success) {
@@ -99,7 +99,7 @@ export default function LoginPage(): React.ReactElement | null {
       await signIn(email, password);
       router.replace('/dashboard');
     } catch (err) {
-      setError(getErrorMessage(err));
+      setError(getErrorKey(err));
     } finally {
       setSubmitting(false);
     }
@@ -122,7 +122,7 @@ export default function LoginPage(): React.ReactElement | null {
   }
 
   return (
-    <AuthLayout title="SingLab" subtitle="Sign in to your account">
+    <AuthLayout title="SingLab" subtitle={t('subtitle')}>
       {/* Registration success snackbar */}
       <Snackbar
         open={showRegisteredToast}
@@ -136,8 +136,7 @@ export default function LoginPage(): React.ReactElement | null {
           variant="filled"
           sx={{ width: '100%' }}
         >
-          Account created! Check your inbox and verify your email address before
-          signing in.
+          {t('emailVerifiedSuccess')}
         </Alert>
       </Snackbar>
 
@@ -147,7 +146,7 @@ export default function LoginPage(): React.ReactElement | null {
           {/* Email */}
           <TextField
             id="email"
-            label="Email"
+            label={t('emailLabel')}
             type="email"
             autoComplete="email"
             required
@@ -155,7 +154,6 @@ export default function LoginPage(): React.ReactElement | null {
             value={email}
             onChange={(e) => {
               setEmail(e.target.value);
-              // Clear field error when user starts typing
               if (fieldErrors.email) {
                 setFieldErrors((prev) => {
                   const next = { ...prev };
@@ -165,11 +163,13 @@ export default function LoginPage(): React.ReactElement | null {
               }
             }}
             disabled={submitting}
-            placeholder="you@example.com"
+            placeholder={t('emailPlaceholder')}
             error={!!fieldErrors.email}
-            helperText={fieldErrors.email}
+            helperText={
+              fieldErrors.email ? tV(fieldErrors.email as Parameters<typeof tV>[0]) : undefined
+            }
             inputProps={{
-              'aria-label': 'Email address',
+              'aria-label': t('emailAriaLabel'),
             }}
           />
 
@@ -192,7 +192,7 @@ export default function LoginPage(): React.ReactElement | null {
                   color: 'text.primary',
                 }}
               >
-                Password
+                {t('passwordLabel')}
               </Typography>
               <Button
                 component="button"
@@ -213,7 +213,7 @@ export default function LoginPage(): React.ReactElement | null {
                   },
                 }}
               >
-                Forgot password?
+                {t('forgotPassword')}
               </Button>
             </Box>
             <TextField
@@ -225,7 +225,6 @@ export default function LoginPage(): React.ReactElement | null {
               value={password}
               onChange={(e) => {
                 setPassword(e.target.value);
-                // Clear field error when user starts typing
                 if (fieldErrors.password) {
                   setFieldErrors((prev) => {
                     const next = { ...prev };
@@ -235,11 +234,15 @@ export default function LoginPage(): React.ReactElement | null {
                 }
               }}
               disabled={submitting}
-              placeholder="••••••••"
+              placeholder={t('passwordPlaceholder')}
               error={!!fieldErrors.password}
-              helperText={fieldErrors.password}
+              helperText={
+                fieldErrors.password
+                  ? tV(fieldErrors.password as Parameters<typeof tV>[0])
+                  : undefined
+              }
               inputProps={{
-                'aria-label': 'Password',
+                'aria-label': t('passwordAriaLabel'),
               }}
             />
           </Box>
@@ -247,7 +250,7 @@ export default function LoginPage(): React.ReactElement | null {
           {/* Error message */}
           {error !== null && (
             <Alert severity="error" role="alert">
-              {error}
+              {t(error as Parameters<typeof t>[0])}
             </Alert>
           )}
 
@@ -263,7 +266,7 @@ export default function LoginPage(): React.ReactElement | null {
               submitting ? <CircularProgress size={16} color="inherit" /> : null
             }
           >
-            {submitting ? 'Signing in…' : 'Sign in'}
+            {submitting ? t('submittingButton') : t('submitButton')}
           </Button>
         </Stack>
 
@@ -298,7 +301,7 @@ export default function LoginPage(): React.ReactElement | null {
           />
         </Box>
 
-        {/* Secondary action — Create new account */}
+        {/* Secondary action */}
         <Button
           component={Link}
           href="/register"
@@ -306,7 +309,7 @@ export default function LoginPage(): React.ReactElement | null {
           fullWidth
           size="large"
         >
-          Create new account
+          {t('createAccount')}
         </Button>
       </Box>
     </AuthLayout>

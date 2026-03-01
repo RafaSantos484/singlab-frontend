@@ -25,6 +25,8 @@ import StopIcon from '@mui/icons-material/Stop';
 import VolumeOffIcon from '@mui/icons-material/VolumeOff';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 
+import { useTranslations } from 'next-intl';
+
 import { useGlobalState } from '@/lib/store';
 import { useGlobalStateDispatch } from '@/lib/store/GlobalStateContext';
 import { useSongRawUrl } from '@/lib/hooks/useSongRawUrl';
@@ -113,31 +115,50 @@ interface GlobalPlayerInnerProps {
 }
 
 /**
- * Inner player component – simplified multi-track audio player.
+ * Inner player component – multi-track audio player with deterministic sync.
  *
  * Design principles
  * -----------------
  * 1. **All tracks always play simultaneously.** Selecting/deselecting a stem
- *    only changes its volume (0 = muted), ensuring perfect sync without
- *    complex restart logic.
+ *    only changes its volume (0 = muted), so every track stays in lock-step
+ *    without needing complex restart logic.
  *
- * 2. **Synchronized playback start.** `prepareAt(time, autoResume)` pauses all
- *    tracks, seeks to `time`, syncs current times, waits 50ms for readiness
- *    (mobile/cached audio), then plays all tracks in a coordinated burst.
- *    Uses play attempt tracking to cancel stale operations.
+ * 2. **Event-driven sync via `prepareAt`.** Every play operation (initial
+ *    play, resume after pause, seek) goes through `prepareAt(time, resume)`:
+ *    - Pauses all tracks.
+ *    - Seeks every track to `time`.
+ *    - Waits for all tracks to report `readyState >= HAVE_FUTURE_DATA` via
+ *      `waitForAllTracksReady` (5 s timeout safety net).
+ *    - Plays all tracks simultaneously in a single coordinated burst.
+ *    - Uses a play-attempt counter to cancel stale in-flight operations.
  *
- * 3. **Manual sync on source switch.** Switching between raw and separated
- *    sources explicitly syncs tracks and reapplies volume with 50ms delay
- *    for mobile readiness.
+ * 3. **`isSyncing` disables the UI.** While `prepareAt` is executing,
+ *    `isSyncing === true` and every transport control (play, stop, seek
+ *    slider, source toggle, stem presets) is disabled, preventing races.
  *
- * 4. **Disabled controls during loading.** All controls are disabled during
- *    loading/buffering phase, preventing premature user interactions.
+ * 4. **Seek-scrub split.** The seek slider fires two callbacks:
+ *    `handleSeekChange` (drag) – updates the displayed time and silently
+ *    pauses audio; `handleSeekCommit` (release) – runs `prepareAt` so all
+ *    tracks are re-synced to the committed position before resuming.
+ *
+ * 5. **Buffering stall recovery.** `waiting` / `stalled` events on the
+ *    master track pause all non-master tracks (preventing drift). When the
+ *    master fires `playing` after a stall, non-master tracks are re-synced
+ *    and restarted automatically.
+ *
+ * 6. **Source switching (raw ↔ separated).** The `tracks` memo is
+ *    source-dependent: raw mode builds only the raw element; separated mode
+ *    builds only stem elements. Switching source changes `playbackSource`
+ *    state, which changes `tracks` → `trackKey`, which triggers the rebuild
+ *    `useEffect`. The rebuild disposes old elements, creates fresh ones for
+ *    the new source, and auto-plays from 0 – equivalent to a song restart.
  *
  * @component
  */
 function GlobalPlayerInner({
   song,
 }: GlobalPlayerInnerProps): React.ReactElement {
+  const t = useTranslations('Player');
   const dispatch = useGlobalStateDispatch();
   const { playbackStatus } = useGlobalState();
 
@@ -193,16 +214,23 @@ function GlobalPlayerInner({
 
   // ── Unified track list ───────────────────────────────────────────────────
 
-  /** All sources (raw + finished stems) as a flat array, raw first. */
+  /**
+   * Active tracks for the current playback source only.
+   * - raw mode  → only the raw file.
+   * - separated → only finished stems (raw element is NOT created).
+   * Changing source disposes all existing elements and builds fresh ones,
+   * which acts as an automatic restart from 0.
+   */
   const tracks = useMemo<Track[]>(() => {
-    const result: Track[] = [];
-    if (rawUrl) result.push({ id: 'raw', label: 'Raw', src: rawUrl });
-    STEM_ORDER.forEach((stem) => {
+    if (playbackSource === 'raw') {
+      return rawUrl ? [{ id: 'raw', label: 'Raw', src: rawUrl }] : [];
+    }
+    // separated: only stems that have a resolved URL
+    return STEM_ORDER.flatMap((stem) => {
       const url = stemUrls[stem];
-      if (url) result.push({ id: stem, label: STEM_LABELS[stem], src: url });
+      return url ? [{ id: stem as TrackId, label: STEM_LABELS[stem], src: url }] : [];
     });
-    return result;
-  }, [rawUrl, stemUrls]);
+  }, [playbackSource, rawUrl, stemUrls]);
 
   /** Changes only when track identities or source URLs change. */
   const trackKey = useMemo(
@@ -210,20 +238,22 @@ function GlobalPlayerInner({
     [tracks],
   );
 
-  /** Master track drives time display and drift corrections. */
-  const masterId = useMemo<TrackId | null>(() => {
-    if (tracks.length === 0) return null;
-    return tracks.find((t) => t.id === 'raw')?.id ?? tracks[0]?.id ?? null;
-  }, [tracks]);
-
   // ── Audio engine state ───────────────────────────────────────────────────
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
+  /**
+   * True while a multi-track synchronisation operation is in progress
+   * (initial play, play after pause, seek). All transport controls are
+   * disabled during this time to prevent conflicting user interactions.
+   */
+  const [isSyncing, setIsSyncing] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(1);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  /** Non-null while the seek slider is being dragged; drives the displayed time. */
+  const [seekingTime, setSeekingTime] = useState<number | null>(null);
 
   // ── Refs ─────────────────────────────────────────────────────────────────
 
@@ -232,14 +262,28 @@ function GlobalPlayerInner({
 
   // Mirrors of state for use in stable callbacks / event handlers
   const isPlayingRef = useRef(false);
+  const isSyncingRef = useRef(false);
+  const isBufferingRef = useRef(false);
   const volumeRef = useRef(volume);
   const isMutedRef = useRef(isMuted);
   const audibleTrackIdsRef = useRef(audibleTrackIds);
-  const masterIdRef = useRef(masterId);
+  const playbackSourceRef = useRef<PlaybackSource>(playbackSource);
+  /** Stable ref so event handlers always call the latest applyVolumes. */
+  const applyVolumesRef = useRef<() => void>(() => { });
+  /** Stable ref so audio-element event handlers always call latest getMaster. */
+  const getMasterRef = useRef<() => HTMLAudioElement | null>(() => null);
+  /** Stable ref so audio-element event handlers always call latest getActiveElements. */
+  const getActiveElementsRef = useRef<() => HTMLAudioElement[]>(() => []);
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
+  useEffect(() => {
+    isSyncingRef.current = isSyncing;
+  }, [isSyncing]);
+  useEffect(() => {
+    isBufferingRef.current = isBuffering;
+  }, [isBuffering]);
   useEffect(() => {
     volumeRef.current = volume;
   }, [volume]);
@@ -250,8 +294,8 @@ function GlobalPlayerInner({
     audibleTrackIdsRef.current = audibleTrackIds;
   }, [audibleTrackIds]);
   useEffect(() => {
-    masterIdRef.current = masterId;
-  }, [masterId]);
+    playbackSourceRef.current = playbackSource;
+  }, [playbackSource]);
 
   // Stable ref so audio-element event handlers always call latest prepareAt
   const prepareAtRef = useRef<
@@ -262,14 +306,49 @@ function GlobalPlayerInner({
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
-  /** Get the master audio element (drives time display). */
+  /**
+   * Get the master audio element.
+   * The map only contains elements for the current source, so:
+   * - raw mode  → the raw element.
+   * - separated → the first stem element (by STEM_ORDER).
+   */
   const getMaster = useCallback((): HTMLAudioElement | null => {
-    const id = masterIdRef.current;
-    if (!id) return null;
-    return audioMapRef.current.get(id) ?? null;
+    const map = audioMapRef.current;
+    if (playbackSourceRef.current === 'raw') {
+      return map.get('raw') ?? null;
+    }
+    for (const stem of STEM_ORDER) {
+      const el = map.get(stem);
+      if (el) return el;
+    }
+    return null;
   }, []);
 
-  /** Set volume on every track; unselected and muted tracks get 0. */
+  /**
+   * Return all audio elements in playback order.
+   * The map exclusively holds elements for the current source.
+   * - raw mode  → [rawElement]
+   * - separated → stem elements in STEM_ORDER
+   */
+  const getActiveElements = useCallback((): HTMLAudioElement[] => {
+    const map = audioMapRef.current;
+    if (playbackSourceRef.current === 'raw') {
+      const el = map.get('raw');
+      return el ? [el] : [];
+    }
+    return STEM_ORDER.flatMap((stem) => {
+      const el = map.get(stem);
+      return el ? [el] : [];
+    });
+  }, []);
+
+  /**
+   * Set volume on all elements in the map.
+   * The map only holds elements for the current source, so no
+   * inactive-source filtering is required.
+   * Stems not in `audibleTrackIds` are muted (volume 0) but keep playing
+   * so they stay in sync with the master.
+   */
   const applyVolumes = useCallback((): void => {
     const base = isMutedRef.current ? 0 : volumeRef.current;
     audioMapRef.current.forEach((el, id) => {
@@ -277,95 +356,182 @@ function GlobalPlayerInner({
     });
   }, []);
 
-  /** Sync all non-master audio elements to master's current time. */
+  useEffect(() => {
+    applyVolumesRef.current = applyVolumes;
+  }, [applyVolumes]);
+  useEffect(() => {
+    getMasterRef.current = getMaster;
+  }, [getMaster]);
+  useEffect(() => {
+    getActiveElementsRef.current = getActiveElements;
+  }, [getActiveElements]);
+
+  /** Sync non-master elements within the active source to master's current time. */
   const syncAudioTracks = useCallback((): void => {
     const master = getMaster();
     if (!master) return;
     const masterTime = master.currentTime;
-    audioMapRef.current.forEach((a) => {
+    getActiveElements().forEach((a) => {
       if (a === master) return;
       if (Math.abs(a.currentTime - masterTime) > 0.05) {
         a.currentTime = masterTime;
       }
     });
-  }, [getMaster]);
+  }, [getActiveElements, getMaster]);
 
   /**
-   * Simplified synchronisation: pause all, seek to time, then play all.
-   * No complex barriers – just seek and let playback resume.
+   * Waits until every audio element in `elements` has buffered enough data
+   * at the current seek position (`readyState >= HAVE_FUTURE_DATA`). Resolves
+   * immediately if all elements are already ready. Resolves anyway after
+   * `TIMEOUT_MS` to avoid hanging indefinitely. Rejects (cancels) when a
+   * newer play attempt supersedes this one.
+   */
+  const waitForAllTracksReady = useCallback(
+    (elements: HTMLAudioElement[], playAttempt: number): Promise<void> => {
+      return new Promise<void>((resolve, reject) => {
+        const TIMEOUT_MS = 5_000;
+        // readyState 3 = HAVE_FUTURE_DATA – enough to play at current position
+        const notReady = elements.filter((el) => el.readyState < 3);
+
+        if (notReady.length === 0) {
+          resolve();
+          return;
+        }
+
+        let settled = false;
+        const cleanups: (() => void)[] = [];
+
+        const settle = (fn: () => void): void => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
+          cleanups.forEach((c) => c());
+          fn();
+        };
+
+        // After the timeout, resolve anyway and let the caller try to play
+        const timeoutId = setTimeout(
+          () => settle(() => resolve()),
+          TIMEOUT_MS,
+        );
+
+        let pending = notReady.length;
+
+        notReady.forEach((el) => {
+          const onCanPlay = (): void => {
+            // Abort if a newer play attempt has been issued
+            if (playingAttemptRef.current !== playAttempt) {
+              settle(() => reject(new Error('Stale play attempt')));
+              return;
+            }
+            pending--;
+            if (pending === 0) settle(() => resolve());
+          };
+          el.addEventListener('canplay', onCanPlay, { once: true });
+          cleanups.push(() => el.removeEventListener('canplay', onCanPlay));
+        });
+      });
+    },
+    [],
+  );
+
+  /**
+   * Core synchronisation entry point.
+   *
+   * 1. Increments the play-attempt counter (cancels any in-flight sync).
+   * 2. Sets `isSyncing = true` to disable all transport controls.
+   * 3. Pauses and seeks all tracks to `time`.
+   * 4. If `autoResume`: waits for all tracks to be buffered at the new
+   *    position, then plays all simultaneously.
+   * 5. Clears `isSyncing` in a `finally` block.
    */
   const prepareAt = useCallback(
     async (time: number, autoResume: boolean): Promise<void> => {
       const playAttempt = ++playingAttemptRef.current;
 
-      audioMapRef.current.forEach((a) => {
-        a.pause();
+      // Disable all transport controls while synchronising
+      setIsSyncing(true);
+
+      // 1. Pause active-source tracks to prevent the audio graph from advancing.
+      //    Inactive-source elements remain paused (enforced by applyVolumes).
+      const activeAudios = getActiveElements();
+      activeAudios.forEach((a) => a.pause());
+
+      // 2. Seek active-source tracks to exactly `time`.
+      //    We intentionally avoid fastSeek() here: it snaps each track to its
+      //    nearest keyframe, which differs per track and would leave them at
+      //    different actual positions.  Direct currentTime assignment is
+      //    synchronous and deterministic.
+      activeAudios.forEach((a) => {
         try {
-          const media = a as HTMLMediaElement & {
-            fastSeek?: (t: number) => void;
-          };
-          if (typeof media.fastSeek === 'function') media.fastSeek(time);
-          else a.currentTime = time;
-        } catch {
           a.currentTime = time;
+        } catch {
+          // Safari may throw on out-of-range seeks – ignore, currentTime
+          // will clamp to a valid value automatically.
         }
       });
-
-      setIsBuffering(false);
 
       const master = getMaster();
       if (master && isFinite(master.duration)) setDuration(master.duration);
 
-      if (autoResume) {
-        try {
-          syncAudioTracks();
-          // Small delay to ensure all tracks are ready, especially on mobile/cache
-          await new Promise((resolve) => setTimeout(resolve, 50));
-
-          // Check if another play attempt started while we were waiting
-          if (playingAttemptRef.current !== playAttempt) return;
-
-          const allAudios = Array.from(audioMapRef.current.values());
-
-          // Ensure all tracks are synced before play
-          syncAudioTracks();
-
-          // Try to play all tracks
-          const playResults = await Promise.allSettled(
-            allAudios.map((a) =>
-              a.play().catch((e) => {
-                console.error('[GlobalPlayer] Play failed:', e);
-                throw e;
-              }),
-            ),
-          );
-
-          // Check if this attempt is still valid
-          if (playingAttemptRef.current !== playAttempt) return;
-
-          const allSucceeded = playResults.every(
-            (r) => r.status === 'fulfilled',
-          );
-          if (allSucceeded) {
-            applyVolumes();
-            setIsPlaying(true);
-            dispatch({ type: 'PLAYER_SET_STATUS', payload: 'playing' });
-          } else {
-            setIsPlaying(false);
-            dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
-          }
-        } catch {
-          if (playingAttemptRef.current === playAttempt) {
-            setIsPlaying(false);
-            dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
-          }
-        }
-      } else {
+      if (!autoResume) {
         setCurrentTime(time);
         applyVolumes();
+        setIsSyncing(false);
+        return;
+      }
+
+      try {
+        const allAudios = activeAudios;
+
+        // 3. Hard-sync non-master active tracks to master's settled currentTime BEFORE
+        //    waiting for buffering. This corrects any sub-frame discrepancy that
+        //    can occur when browsers clamp a seek to the nearest decodable frame.
+        syncAudioTracks();
+
+        // 4. Wait until every track has buffered enough data at the seek position.
+        //    This must come AFTER syncAudioTracks so all tracks are at the same
+        //    position when we start listening for canplay events.
+        await waitForAllTracksReady(allAudios, playAttempt);
+
+        // Cancel if a newer operation superseded this one while we were waiting
+        if (playingAttemptRef.current !== playAttempt) return;
+
+        // 5. Start all tracks simultaneously
+        const playResults = await Promise.allSettled(
+          allAudios.map((a) =>
+            a.play().catch((e: unknown) => {
+              console.error('[GlobalPlayer] Play failed:', e);
+              throw e;
+            }),
+          ),
+        );
+
+        if (playingAttemptRef.current !== playAttempt) return;
+
+        const allSucceeded = playResults.every((r) => r.status === 'fulfilled');
+        if (allSucceeded) {
+          applyVolumes();
+          setIsPlaying(true);
+          setIsBuffering(false);
+          dispatch({ type: 'PLAYER_SET_STATUS', payload: 'playing' });
+        } else {
+          setIsPlaying(false);
+          dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
+        }
+      } catch {
+        if (playingAttemptRef.current === playAttempt) {
+          setIsPlaying(false);
+          dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
+        }
+      } finally {
+        // Always re-enable controls once this attempt settles
+        if (playingAttemptRef.current === playAttempt) {
+          setIsSyncing(false);
+        }
       }
     },
-    [applyVolumes, dispatch, getMaster, syncAudioTracks],
+    [applyVolumes, dispatch, getActiveElements, getMaster, syncAudioTracks, waitForAllTracksReady],
   );
 
   useEffect(() => {
@@ -373,9 +539,10 @@ function GlobalPlayerInner({
   }, [prepareAt]);
 
   // ── Reset player when song changes ───────────────────────────────────────
-  // Ensures previous song's audio doesn't interfere with new playback
+  // Ensures previous song's audio doesn't interfere with new playback.
+  // The trackKey-driven rebuild effect will rebuild and auto-play once
+  // the new song's URL(s) resolve.
   useEffect(() => {
-    // Cancel any pending play attempts
     playingAttemptRef.current++;
 
     audioMapRef.current.forEach((a) => {
@@ -387,14 +554,20 @@ function GlobalPlayerInner({
     setIsPlaying(false);
     isPlayingRef.current = false;
     setIsBuffering(false);
+    isBufferingRef.current = false;
+    setIsSyncing(false);
+    setSeekingTime(null);
     setCurrentTime(0);
     setDuration(0);
-    hasAutoPlayedRef.current = false;
+    // Reset to raw source on song change so the player always starts clean
+    setPlaybackSource('raw');
+    playbackSourceRef.current = 'raw';
   }, [song.id]);
 
   // ── Rebuild audio elements when track list changes ───────────────────────
 
   useEffect(() => {
+    // Dispose all previous elements regardless of source
     const prev = audioMapRef.current;
     prev.forEach((a) => {
       a.pause();
@@ -404,46 +577,90 @@ function GlobalPlayerInner({
     setIsPlaying(false);
     isPlayingRef.current = false;
     setIsBuffering(false);
+    isBufferingRef.current = false;
+    setIsSyncing(false);
+    setSeekingTime(null);
     setCurrentTime(0);
-    hasAutoPlayedRef.current = false;
+    setDuration(0);
 
     if (tracks.length === 0) return;
 
     const map = new Map<TrackId, HTMLAudioElement>();
-    const masterTrackId =
-      tracks.find((t) => t.id === 'raw')?.id ?? tracks[0]?.id;
 
     tracks.forEach((track) => {
       const el = document.createElement('audio');
       el.preload = 'auto';
       el.src = track.src;
 
-      if (track.id === masterTrackId) {
-        el.addEventListener('timeupdate', () => {
-          setCurrentTime(el.currentTime);
+      // Time + duration: only update state when this element is the current mode's master.
+      el.addEventListener('timeupdate', () => {
+        if (getMasterRef.current() === el) setCurrentTime(el.currentTime);
+      });
+      el.addEventListener('durationchange', () => {
+        if (getMasterRef.current() === el && isFinite(el.duration))
+          setDuration(el.duration);
+      });
+      el.addEventListener('loadedmetadata', () => {
+        if (getMasterRef.current() === el && isFinite(el.duration))
+          setDuration(el.duration);
+      });
+
+      // Ended: trigger end-of-song only when this is the current mode's master.
+      // Raw and separated sources are independent; only the active source's
+      // master governs when playback stops.
+      el.addEventListener('ended', () => {
+        if (getMasterRef.current() !== el) return;
+        audioMapRef.current.forEach((a) => {
+          a.pause();
+          a.currentTime = 0;
         });
-        el.addEventListener('durationchange', () => {
-          if (isFinite(el.duration)) setDuration(el.duration);
-        });
-        el.addEventListener('loadedmetadata', () => {
-          if (isFinite(el.duration)) setDuration(el.duration);
-        });
-        el.addEventListener('ended', () => {
-          audioMapRef.current.forEach((a) => {
-            a.pause();
-            a.currentTime = 0;
-          });
-          setIsPlaying(false);
-          isPlayingRef.current = false;
-          setCurrentTime(0);
-          dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
-        });
-      }
+        setIsPlaying(false);
+        isPlayingRef.current = false;
+        setCurrentTime(0);
+        dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
+      });
+
+      // ── Buffering / stall sync ──────────────────────────────────────────
+      // When the active mode's master stalls, pause other elements in the
+      // same mode. When master resumes ('playing'), re-sync and restart them.
+
+      const pauseNonMaster = (): void => {
+        if (getMasterRef.current() !== el) return;
+        if (!isPlayingRef.current) return;
+        setIsBuffering(true);
+        isBufferingRef.current = true;
+        const activeEls = getActiveElementsRef.current();
+        activeEls.forEach((a) => { if (a !== el) a.pause(); });
+      };
+
+      el.addEventListener('waiting', pauseNonMaster);
+      el.addEventListener('stalled', pauseNonMaster);
+
+      el.addEventListener('playing', () => {
+        if (getMasterRef.current() !== el) return;
+        // Only act if recovering from a buffering stall
+        if (!isBufferingRef.current) return;
+        isBufferingRef.current = false;
+        setIsBuffering(false);
+
+        // Sync and restart non-master elements of the same active source
+        const activeEls = getActiveElementsRef.current();
+        const nonMasterEls = activeEls.filter((a) => a !== el);
+        nonMasterEls.forEach((a) => { a.currentTime = el.currentTime; });
+        void Promise.all(
+          nonMasterEls.map((a) => a.play().catch(() => { })),
+        ).then(() => { applyVolumesRef.current(); });
+      });
 
       map.set(track.id, el);
     });
 
     audioMapRef.current = map;
+
+    // Auto-play from 0 whenever the active track set is (re)built.
+    // This covers: initial song load, raw URL becoming available,
+    // and source switches (raw ↔ separated).
+    void prepareAtRef.current(0, true);
 
     return () => {
       map.forEach((a) => {
@@ -472,81 +689,98 @@ function GlobalPlayerInner({
     applyVolumes();
   }, [volume, applyVolumes]);
 
-  // ── Auto-play when raw URL first becomes available ───────────────────────
-
-  const hasAutoPlayedRef = useRef(false);
-
-  // Reset auto-play flag when song changes
-  useEffect(() => {
-    hasAutoPlayedRef.current = false;
-  }, [song.id]);
-
   // Reset player when playback status becomes 'loading'
   // This handles replaying the same song (same song.id but clicked again)
   useEffect(() => {
     if (playbackStatus === 'loading') {
       // Cancel any pending play attempts
       playingAttemptRef.current++;
-      
+
       // Stop and reset all audio elements
       audioMapRef.current.forEach((a) => {
         a.pause();
         a.currentTime = 0;
       });
-      
+
       // Reset state
       setIsPlaying(false);
       isPlayingRef.current = false;
+      setIsBuffering(false);
+      isBufferingRef.current = false;
+      setIsSyncing(false);
+      setSeekingTime(null);
       setCurrentTime(0);
-      hasAutoPlayedRef.current = false;
-      
-      // If audio elements and URL already exist, start playback immediately
-      // This handles replaying the same song (rawUrl doesn't change so the
-      // auto-play effect below won't re-trigger)
-      if (rawUrl && audioMapRef.current.size > 0) {
-        hasAutoPlayedRef.current = true;
+
+      // If audio elements already exist, start playback immediately.
+      // (trackKey won't change if the URL is the same, so the rebuild
+      //  effect won't fire again — we trigger prepareAt directly here.)
+      if (audioMapRef.current.size > 0) {
         void prepareAt(0, true);
       }
     }
-  }, [playbackStatus, rawUrl, prepareAt]);
-
-  useEffect(() => {
-    if (!rawUrl || hasAutoPlayedRef.current) return;
-    if (audioMapRef.current.size === 0) return;
-    hasAutoPlayedRef.current = true;
-    void prepareAt(0, true);
-  }, [rawUrl, prepareAt]);
+  }, [playbackStatus, prepareAt]);
 
   // ── Controls ─────────────────────────────────────────────────────────────
 
   const togglePlay = useCallback(async (): Promise<void> => {
-    if (isBuffering) return;
+    // Block interaction while a sync operation is already in progress
+    if (isBuffering || isSyncing) return;
     const master = getMaster();
     if (!master) return;
 
     if (isPlaying) {
+      // Pause: cancel any in-flight sync and stop active-source tracks
       playingAttemptRef.current++;
-      audioMapRef.current.forEach((a) => a.pause());
+      getActiveElements().forEach((a) => a.pause());
       setIsPlaying(false);
+      setIsSyncing(false);
       dispatch({ type: 'PLAYER_SET_STATUS', payload: 'paused' });
       return;
     }
 
-    // Use prepareAt to ensure proper sync
+    // Resume from pause: re-sync all tracks then play simultaneously
     await prepareAt(master.currentTime || 0, true);
-  }, [dispatch, getMaster, isBuffering, isPlaying, prepareAt]);
+  }, [dispatch, getActiveElements, getMaster, isBuffering, isSyncing, isPlaying, prepareAt]);
 
   const handleStop = useCallback(async (): Promise<void> => {
     await prepareAt(0, false);
     dispatch({ type: 'PLAYER_STOP' });
   }, [dispatch, prepareAt]);
 
-  const handleSeek = useCallback(
-    async (_event: Event, value: number | number[]): Promise<void> => {
+  /**
+   * While the slider is being dragged: update the displayed time only.
+   * Audio tracks are silently paused to avoid seek-noise; no actual seek
+   * happens until the user releases the slider (see `handleSeekCommit`).
+   */
+  const handleSeekChange = useCallback(
+    (_event: Event, value: number | number[]): void => {
       const newTime = Array.isArray(value) ? value[0] : value;
-      await prepareAt(newTime, isPlaying);
+      setSeekingTime(newTime);
+      // Silently pause active-source tracks while scrubbing; isPlaying state
+      // stays true so we know to resume on commit.
+      if (isPlayingRef.current) {
+        getActiveElements().forEach((a) => a.pause());
+      }
     },
-    [isPlaying, prepareAt],
+    [getActiveElements],
+  );
+
+  /**
+   * When the slider is released: seek all tracks to the committed time,
+   * wait for them to be ready, then resume if the player was playing.
+   */
+  const handleSeekCommit = useCallback(
+    async (
+      _event: React.SyntheticEvent | Event,
+      value: number | number[],
+    ): Promise<void> => {
+      const newTime = Array.isArray(value) ? value[0] : value;
+      setSeekingTime(null);
+      // isPlayingRef.current reflects the logical playing state even while
+      // audio was silently paused during the scrub.
+      await prepareAt(newTime, isPlayingRef.current);
+    },
+    [prepareAt],
   );
 
   const toggleMute = useCallback((): void => {
@@ -564,8 +798,11 @@ function GlobalPlayerInner({
 
   /**
    * Switch between raw and separated source.
-   * Because all tracks are already playing simultaneously, this is a pure
-   * volume change – sync tracks explicitly to prevent drift.
+   *
+   * Switching disposes all current audio elements (via the trackKey-driven
+   * rebuild effect) and restarts the song from 0 on the new source.
+   * The rebuild effect handles auto-play so no manual coordination is needed
+   * here.
    */
   const handleSelectSource = useCallback(
     (
@@ -573,14 +810,21 @@ function GlobalPlayerInner({
       value: PlaybackSource | null,
     ): void => {
       if (!value || value === playbackSource) return;
+
+      // Cancel any in-flight sync before the map is rebuilt
+      playingAttemptRef.current++;
+
+      // Pause everything in the current source and update the source ref
+      // immediately so helpers reflect the new source before React re-renders.
+      getActiveElements().forEach((a) => a.pause());
+      playbackSourceRef.current = value;
+
       setPlaybackSource(value);
-      // Sync all tracks when switching sources, with a small delay for mobile
-      setTimeout(() => {
-        syncAudioTracks();
-        applyVolumes();
-      }, 50);
+      // `tracks` (and therefore `trackKey`) will change on the next render,
+      // triggering the rebuild useEffect which clears old elements, builds
+      // new ones, and auto-plays from 0.
     },
-    [applyVolumes, playbackSource, syncAudioTracks],
+    [getActiveElements, playbackSource],
   );
 
   const toggleStem = useCallback((stem: StemKey): void => {
@@ -674,12 +918,14 @@ function GlobalPlayerInner({
               </Typography>
             </Box>
 
-            {(isLoading || isBuffering) && (
+            {(isLoading || isBuffering || isSyncing) && (
               <Tooltip
                 title={
-                  isBuffering
-                    ? 'Buffering – waiting for all tracks…'
-                    : undefined
+                  isSyncing
+                    ? t('syncingTooltip')
+                    : isBuffering
+                      ? t('bufferingTooltip')
+                      : undefined
                 }
               >
                 <CircularProgress size={20} sx={{ color: 'primary.main' }} />
@@ -703,7 +949,7 @@ function GlobalPlayerInner({
                   sx={{ color: 'primary.main' }}
                 />
                 <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                  Audio source
+                  {t('audioSource')}
                 </Typography>
               </Stack>
               <ToggleButtonGroup
@@ -711,9 +957,10 @@ function GlobalPlayerInner({
                 value={playbackSource}
                 exclusive
                 onChange={handleSelectSource}
+                disabled={isSyncing}
               >
-                <ToggleButton value="raw">Raw</ToggleButton>
-                <ToggleButton value="separated">Separated</ToggleButton>
+                <ToggleButton value="raw">{t('rawLabel')}</ToggleButton>
+                <ToggleButton value="separated">{t('separatedLabel')}</ToggleButton>
               </ToggleButtonGroup>
             </Box>
           )}
@@ -721,13 +968,21 @@ function GlobalPlayerInner({
           {/* Transport controls */}
           <Stack direction="row" alignItems="center" spacing={{ xs: 1, sm: 2 }}>
             <Tooltip
-              title={isBuffering ? 'Buffering…' : isPlaying ? 'Pause' : 'Play'}
+              title={
+                isSyncing
+                  ? t('playTooltipSyncing')
+                  : isBuffering
+                    ? t('playTooltipBuffering')
+                    : isPlaying
+                      ? t('playTooltipPause')
+                      : t('playTooltipPlay')
+              }
             >
               <span>
                 <IconButton
                   onClick={togglePlay}
-                  disabled={!isPlayerReady || isLoading || isBuffering}
-                  aria-label={isPlaying ? 'Pause' : 'Play'}
+                  disabled={!isPlayerReady || isLoading || isBuffering || isSyncing}
+                  aria-label={isPlaying ? t('pauseAriaLabel') : t('playAriaLabel')}
                   sx={{
                     color: 'primary.main',
                     bgcolor: 'rgba(124, 58, 237, 0.1)',
@@ -743,12 +998,12 @@ function GlobalPlayerInner({
               </span>
             </Tooltip>
 
-            <Tooltip title="Stop">
+            <Tooltip title={t('stopTooltip')}>
               <span>
                 <IconButton
                   onClick={handleStop}
-                  disabled={!isPlayerReady || isLoading || isBuffering}
-                  aria-label="Stop"
+                  disabled={!isPlayerReady || isLoading || isBuffering || isSyncing}
+                  aria-label={t('stopAriaLabel')}
                   size="small"
                   sx={{
                     color: 'text.secondary',
@@ -765,18 +1020,20 @@ function GlobalPlayerInner({
 
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Slider
-                value={currentTime}
+                value={seekingTime ?? currentTime}
                 min={0}
                 max={duration || 100}
                 step={0.01}
-                onChange={handleSeek}
+                onChange={handleSeekChange}
+                onChangeCommitted={handleSeekCommit}
                 disabled={
                   !isPlayerReady ||
                   isLoading ||
                   isBuffering ||
+                  isSyncing ||
                   !isFinite(duration)
                 }
-                aria-label="Seek"
+                aria-label={t('seekAriaLabel')}
                 sx={{
                   color: 'primary.main',
                   height: 4,
@@ -801,7 +1058,7 @@ function GlobalPlayerInner({
                 fontSize: { xs: '0.7rem', sm: '0.75rem' },
               }}
             >
-              {formatTime(currentTime)} / {formatTime(duration)}
+              {formatTime(seekingTime ?? currentTime)} / {formatTime(duration)}
             </Typography>
 
             {/* Volume control – hidden on mobile */}
@@ -813,13 +1070,13 @@ function GlobalPlayerInner({
                 minWidth: '120px',
               }}
             >
-              <Tooltip title={isMuted ? 'Unmute' : 'Mute'}>
+              <Tooltip title={isMuted ? t('unmuteTooltip') : t('muteTooltip')}>
                 <span>
                   <IconButton
                     onClick={toggleMute}
                     disabled={isLoading}
                     size="small"
-                    aria-label={isMuted ? 'Unmute' : 'Mute'}
+                    aria-label={isMuted ? t('unmuteAriaLabel') : t('muteAriaLabel')}
                     sx={{
                       color: 'text.secondary',
                       '&:hover': { color: 'text.primary' },
@@ -840,7 +1097,7 @@ function GlobalPlayerInner({
                 step={0.01}
                 onChange={handleVolumeChange}
                 disabled={isLoading}
-                aria-label="Volume"
+                aria-label={t('volumeAriaLabel')}
                 sx={{
                   color: 'primary.main',
                   flex: 1,
@@ -854,7 +1111,7 @@ function GlobalPlayerInner({
           {playbackSource === 'separated' && availableStems.length > 0 && (
             <Stack spacing={1}>
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                Toggle stems to create your mix.
+                {t('toggleStemsLabel')}
               </Typography>
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                 {availableStems.map((stem) => {
@@ -862,7 +1119,7 @@ function GlobalPlayerInner({
                   return (
                     <Chip
                       key={stem}
-                      label={STEM_LABELS[stem]}
+                      label={t(('stems.' + stem) as Parameters<typeof t>[0])}
                       color={selected ? 'primary' : 'default'}
                       variant={selected ? 'filled' : 'outlined'}
                       onClick={() => toggleStem(stem)}
@@ -877,26 +1134,28 @@ function GlobalPlayerInner({
                   variant="outlined"
                   onClick={() => setPreset('instrumental')}
                   disabled={
-                    isLoading || !availableStems.some((s) => s !== 'vocals')
+                    isLoading ||
+                    isSyncing ||
+                    !availableStems.some((s) => s !== 'vocals')
                   }
                 >
-                  Instrumental
+                  {t('presets.instrumental')}
                 </Button>
                 <Button
                   size="small"
                   variant="outlined"
                   onClick={() => setPreset('vocals')}
-                  disabled={isLoading || !availableStems.includes('vocals')}
+                  disabled={isLoading || isSyncing || !availableStems.includes('vocals')}
                 >
-                  Vocals only
+                  {t('presets.vocalsOnly')}
                 </Button>
                 <Button
                   size="small"
                   variant="outlined"
                   onClick={() => setPreset('all')}
-                  disabled={isLoading}
+                  disabled={isLoading || isSyncing}
                 >
-                  All stems
+                  {t('presets.allStems')}
                 </Button>
               </Stack>
             </Stack>

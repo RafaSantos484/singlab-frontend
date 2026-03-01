@@ -43,7 +43,6 @@ export class PoyoSeparationAdapter implements SeparationProviderAdapter<PoyoSepa
       provider: this.name,
       status,
       taskId: this.getTaskId(data),
-      progress: this.getProgress(data),
       errorMessage: this.getErrorMessage(data),
       requestedAt: this.getRequestedAt(data),
       finishedAt: this.getFinishedAt(data),
@@ -52,7 +51,6 @@ export class PoyoSeparationAdapter implements SeparationProviderAdapter<PoyoSepa
       metadata: {
         status: data.status,
         created_time: data.created_time,
-        progress: data.progress ?? null,
       },
     };
   }
@@ -63,12 +61,6 @@ export class PoyoSeparationAdapter implements SeparationProviderAdapter<PoyoSepa
 
   getTaskId(data: PoyoSeparationTaskDetails): string | null {
     return data.task_id ?? null;
-  }
-
-  getProgress(data: PoyoSeparationTaskDetails): number | null {
-    if (data.status === 'finished') return 100;
-    if (typeof data.progress === 'number') return data.progress;
-    return null;
   }
 
   getErrorMessage(data: PoyoSeparationTaskDetails): string | null {

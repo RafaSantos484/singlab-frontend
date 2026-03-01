@@ -195,7 +195,7 @@ describe('validateCreateUser', () => {
     });
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.errors.name).toBe('Name must be at least 3 characters');
+      expect(result.errors.name).toBe('name.tooShort');
     }
   });
 });

@@ -20,7 +20,6 @@ import {
   InputLabel,
   Chip,
   Button,
-  LinearProgress,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -29,13 +28,12 @@ import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import GraphicEqIcon from '@mui/icons-material/GraphicEq';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import { useTranslations } from 'next-intl';
 
 import { SongCreateDialog } from '@/components/features/SongCreateDialog';
 import { SongEditDialog } from '@/components/features/SongEditDialog';
 import { SongDeleteButton } from '@/components/features/SongDeleteButton';
-// useAuthGuard ensures user is authenticated before rendering the page
 import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
-// useGlobalState provides access to user profile and songs list via Firestore
 import { useGlobalState } from '@/lib/store';
 import { useGlobalStateDispatch } from '@/lib/store/GlobalStateContext';
 import { DashboardLayout } from '@/components/layout';
@@ -48,6 +46,7 @@ import { GlobalPlayer } from '@/components/features/GlobalPlayer';
 // ---------------------------------------------------------------------------
 
 export default function DashboardPage(): React.ReactElement | null {
+  const t = useTranslations('Dashboard');
   const isLoading = useAuthGuard('private');
   const { userProfile, songs, songsStatus, currentSongId } = useGlobalState();
   const dispatch = useGlobalStateDispatch();
@@ -57,54 +56,34 @@ export default function DashboardPage(): React.ReactElement | null {
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
   const [mounted, setMounted] = useState(false);
 
-  // Prevent hydration mismatch by only rendering after client mount
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
   }, []);
 
-  // Client-side filtering and sorting
-  // This memo computes the final list of songs to display, with three steps:
-  // 1. Filter by search query (title/author) but always keep the currently playing song
-  // 2. Sort by upload date (newest or oldest first)
-  // 3. Pin the currently playing song to the top of the list for visibility
   const filteredAndSortedSongs = useMemo(() => {
-    // Don't process until mounted to prevent hydration mismatch
     if (!mounted) return [];
 
-    // Normalize search query for better matching
     const normalizedQuery = searchQuery.toLowerCase().trim();
 
-    // Filter by title or author (always keep currently playing song)
     let filtered = songs;
     if (normalizedQuery) {
       filtered = songs.filter((song) => {
-        // Always keep the currently playing song visible, even if it doesn't
-        // match the search query. This ensures users can always see and control
-        // what's playing regardless of active filters.
         if (song.id === currentSongId) return true;
-
-        // Regular filter: match against title or author
         const titleMatch = song.title.toLowerCase().includes(normalizedQuery);
         const authorMatch = song.author.toLowerCase().includes(normalizedQuery);
         return titleMatch || authorMatch;
       });
     }
 
-    // Sort by document creation date (Firestore server timestamp if available)
     const sorted = [...filtered].sort((a, b) => {
       const dateA = new Date(a.rawSongInfo.uploadedAt).getTime();
       const dateB = new Date(b.rawSongInfo.uploadedAt).getTime();
       return sortOrder === 'newest' ? dateB - dateA : dateA - dateB;
     });
 
-    // Pin currently playing song to the top of the sorted list
-    // This provides a consistent "Now Playing" location at the top of the page.
-    // Only move it if it's not already at index 0 (no-op if already first).
     if (currentSongId) {
-      const playingIndex = sorted.findIndex(
-        (song) => song.id === currentSongId,
-      );
+      const playingIndex = sorted.findIndex((song) => song.id === currentSongId);
       if (playingIndex > 0) {
         const [playingSong] = sorted.splice(playingIndex, 1);
         sorted.unshift(playingSong);
@@ -114,7 +93,6 @@ export default function DashboardPage(): React.ReactElement | null {
     return sorted;
   }, [songs, searchQuery, sortOrder, currentSongId, mounted]);
 
-  // Show loading state until component mounts on client (prevents hydration mismatch)
   if (!mounted || isLoading) {
     return (
       <Box
@@ -154,7 +132,7 @@ export default function DashboardPage(): React.ReactElement | null {
               mb: 1,
             }}
           >
-            Welcome back,
+            {t('welcomeBack')}
           </Typography>
           <Typography
             variant="h1"
@@ -191,7 +169,7 @@ export default function DashboardPage(): React.ReactElement | null {
               color: 'text.primary',
             }}
           >
-            Your songs
+            {t('yourSongs')}
           </Typography>
           <Typography
             variant="body2"
@@ -200,7 +178,7 @@ export default function DashboardPage(): React.ReactElement | null {
               color: 'text.disabled',
             }}
           >
-            {songs.length} track{songs.length !== 1 ? 's' : ''}
+            {t('trackCount', { count: songs.length })}
           </Typography>
         </Box>
 
@@ -214,15 +192,12 @@ export default function DashboardPage(): React.ReactElement | null {
               mb: 3,
             }}
           >
-            {/* Search input */}
             <TextField
-              placeholder="Search by title or author..."
+              placeholder={t('searchPlaceholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               fullWidth
-              sx={{
-                flex: 1,
-              }}
+              sx={{ flex: 1 }}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
@@ -232,23 +207,22 @@ export default function DashboardPage(): React.ReactElement | null {
               }}
             />
 
-            {/* Sort select */}
             <FormControl
               sx={{
                 minWidth: { xs: '100%', sm: '200px' },
               }}
             >
-              <InputLabel id="sort-order-label">Sort by</InputLabel>
+              <InputLabel id="sort-order-label">{t('sortByLabel')}</InputLabel>
               <Select
                 labelId="sort-order-label"
-                label="Sort by"
+                label={t('sortByLabel')}
                 value={sortOrder}
                 onChange={(e) =>
                   setSortOrder(e.target.value as 'newest' | 'oldest')
                 }
               >
-                <MenuItem value="newest">Newest first</MenuItem>
-                <MenuItem value="oldest">Oldest first</MenuItem>
+                <MenuItem value="newest">{t('sortNewest')}</MenuItem>
+                <MenuItem value="oldest">{t('sortOldest')}</MenuItem>
               </Select>
             </FormControl>
           </Box>
@@ -269,16 +243,14 @@ export default function DashboardPage(): React.ReactElement | null {
           >
             <CircularProgress size={16} />
             <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-              Loading songs…
+              {t('loadingSongs')}
             </Typography>
           </Box>
         )}
 
         {/* Error state */}
         {songsStatus === 'error' && (
-          <Alert severity="error">
-            Failed to load songs. Please refresh the page.
-          </Alert>
+          <Alert severity="error">{t('loadError')}</Alert>
         )}
 
         {/* Empty state */}
@@ -294,7 +266,7 @@ export default function DashboardPage(): React.ReactElement | null {
               }}
             >
               <Typography variant="body2" sx={{ color: 'text.disabled' }}>
-                No songs yet. Upload your first track to get started.
+                {t('emptyState')}
               </Typography>
             </Box>
           )}
@@ -313,7 +285,7 @@ export default function DashboardPage(): React.ReactElement | null {
               }}
             >
               <Typography variant="body2" sx={{ color: 'text.disabled' }}>
-                No songs found matching &quot;{searchQuery}&quot;
+                {t('noSearchResults', { query: searchQuery })}
               </Typography>
             </Box>
           )}
@@ -339,7 +311,7 @@ export default function DashboardPage(): React.ReactElement | null {
       {/* FAB button to create new song */}
       <Fab
         color="primary"
-        aria-label="add song"
+        aria-label={t('addSongAriaLabel')}
         onClick={() => setIsCreateDialogOpen(true)}
         sx={{
           position: 'fixed',
@@ -360,13 +332,11 @@ export default function DashboardPage(): React.ReactElement | null {
         <AddIcon sx={{ fontSize: '1.75rem', fontWeight: 600 }} />
       </Fab>
 
-      {/* Song creation modal */}
       <SongCreateDialog
         open={isCreateDialogOpen}
         onClose={() => setIsCreateDialogOpen(false)}
       />
 
-      {/* Song edit modal */}
       {editingSong && (
         <SongEditDialog
           open={!!editingSong}
@@ -375,20 +345,15 @@ export default function DashboardPage(): React.ReactElement | null {
         />
       )}
 
-      {/* Global audio player */}
       <GlobalPlayer />
     </DashboardLayout>
   );
 }
 
-/**
- * Props for the `SongCardItem` component.
- *
- * @property song - The song to display
- * @property isCurrent - Whether this song is currently playing in the global player
- * @property onPlay - Callback when the play button is clicked
- * @property onEdit - Callback when the edit button is clicked
- */
+// ---------------------------------------------------------------------------
+// SongCardItem
+// ---------------------------------------------------------------------------
+
 interface SongCardItemProps {
   song: Song;
   isCurrent: boolean;
@@ -397,27 +362,7 @@ interface SongCardItemProps {
 }
 
 /**
- * Individual song card component with metadata, playback controls, and separation status.
- *
- * Displays:
- * - Song title and author with truncation
- * - "Now Playing" badge (when `isCurrent`)
- * - Play, edit, and delete action buttons
- * - Stem separation status panel:
- *   - Not started: button to initiate separation
- *   - Processing: progress bar with current progress % and refresh status button
- *   - Finished: available stems with provider/task info
- *   - Failed: error message with retry button (initiates new separation request)
- *
- * Uses the `useSeparationStatus` hook to manage the separation lifecycle,
- * including automatic polling during processing. Firestore real-time
- * listener updates `song.separatedSongInfo` which triggers re-render.
- *
- * Note: The retry button on failure calls `requestSeparation` to start a new
- * separation attempt, while the refresh button during processing calls
- * `refreshStatus` to poll the current task status.
- *
- * @component
+ * Individual song card with metadata, playback controls, and separation status.
  */
 function SongCardItem({
   song,
@@ -425,6 +370,10 @@ function SongCardItem({
   onPlay,
   onEdit,
 }: SongCardItemProps): React.ReactElement {
+  const t = useTranslations('Dashboard');
+  const tSep = useTranslations('Separation');
+  const tPlayer = useTranslations('Player');
+
   const {
     separation,
     isRequesting,
@@ -471,7 +420,7 @@ function SongCardItem({
             {isCurrent && (
               <Chip
                 icon={<PlayCircleIcon />}
-                label="Now Playing"
+                label={t('nowPlaying')}
                 size="small"
                 sx={{
                   mb: 1,
@@ -512,9 +461,10 @@ function SongCardItem({
           </Box>
 
           <Box sx={{ display: 'flex', gap: 1 }}>
-            <Tooltip title="Play song">
+            <Tooltip title={t('tooltips.playSong')}>
               <IconButton
                 onClick={onPlay}
+                aria-label={t('tooltips.playSong')}
                 size="small"
                 sx={{
                   color: 'rgba(124, 58, 237, 0.8)',
@@ -529,9 +479,10 @@ function SongCardItem({
               </IconButton>
             </Tooltip>
 
-            <Tooltip title="Edit song">
+            <Tooltip title={t('tooltips.editSong')}>
               <IconButton
                 onClick={onEdit}
+                aria-label={t('tooltips.editSong')}
                 size="small"
                 sx={{
                   color: 'rgba(168, 85, 247, 0.8)',
@@ -571,7 +522,7 @@ function SongCardItem({
           >
             <GraphicEqIcon fontSize="small" sx={{ color: 'primary.main' }} />
             <Typography variant="body2" sx={{ fontWeight: 600 }}>
-              Stem separation
+              {tSep('title')}
             </Typography>
           </Box>
 
@@ -597,14 +548,14 @@ function SongCardItem({
               }}
             >
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                No separation requested yet.
+                {tSep('noSeparationYet')}
               </Typography>
               <Button
                 variant="contained"
                 onClick={() => requestSeparation('poyo')}
                 disabled={isRequesting}
               >
-                {isRequesting ? 'Starting…' : 'Start stem separation'}
+                {isRequesting ? tSep('startingButton') : tSep('startButton')}
               </Button>
             </Box>
           )}
@@ -612,17 +563,8 @@ function SongCardItem({
           {song.separatedSongInfo && isProcessing && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                Separating audio… {separation?.progress ?? 0}%
+                {tSep('processing')}
               </Typography>
-              <LinearProgress
-                variant={
-                  typeof separation?.progress === 'number'
-                    ? 'determinate'
-                    : 'indeterminate'
-                }
-                value={separation?.progress ?? undefined}
-                sx={{ height: 6, borderRadius: 1 }}
-              />
               <Button
                 size="small"
                 variant="outlined"
@@ -631,7 +573,7 @@ function SongCardItem({
                 disabled={isRefreshing}
                 sx={{ alignSelf: 'flex-start' }}
               >
-                {isRefreshing ? 'Refreshing…' : 'Refresh status'}
+                {isRefreshing ? tSep('refreshingStatus') : tSep('refreshStatus')}
               </Button>
             </Box>
           )}
@@ -639,17 +581,21 @@ function SongCardItem({
           {song.separatedSongInfo && isFinished && separation && (
             <Stack spacing={1}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Chip label={`Provider: ${separation.provider}`} size="small" />
+                <Chip label={`${tSep('provider')} ${separation.provider}`} size="small" />
                 {separation.taskId && (
-                  <Chip label={`Task ${separation.taskId}`} size="small" />
+                  <Chip label={`${tSep('task')} ${separation.taskId}`} size="small" />
                 )}
               </Box>
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                Stems ready. Select them in the player below.
+                {tSep('stemsReady')}
               </Typography>
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                 {availableStems.map((stem) => (
-                  <Chip key={stem} label={stem} size="small" />
+                  <Chip 
+                    key={stem} 
+                    label={tPlayer(('stems.' + stem) as Parameters<typeof tPlayer>[0])} 
+                    size="small" 
+                  />
                 ))}
               </Box>
             </Stack>
@@ -658,7 +604,9 @@ function SongCardItem({
           {song.separatedSongInfo && isFailed && separation && (
             <Stack spacing={1.5}>
               <Alert severity="error" sx={{ mb: 0 }}>
-                Separation failed: {separation.errorMessage ?? 'Unknown error'}
+                {tSep('failed', {
+                  errorMessage: separation.errorMessage ?? 'Unknown error',
+                })}
               </Alert>
               <Button
                 size="small"
@@ -668,7 +616,7 @@ function SongCardItem({
                 disabled={isRequesting}
                 sx={{ alignSelf: 'flex-start' }}
               >
-                {isRequesting ? 'Trying again…' : 'Try again'}
+                {isRequesting ? tSep('tryingAgain') : tSep('tryAgain')}
               </Button>
             </Stack>
           )}

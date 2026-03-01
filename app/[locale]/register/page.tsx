@@ -1,7 +1,6 @@
 'use client';
 
 import { type FormEvent, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   Box,
@@ -12,27 +11,29 @@ import {
   CircularProgress,
   Typography,
 } from '@mui/material';
+import { useTranslations } from 'next-intl';
 import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
 import { initiateEmailVerification } from '@/lib/firebase';
 import { usersApi, ApiError } from '@/lib/api';
 import { validateCreateUser } from '@/lib/validation/create-user';
 import { AuthLayout } from '@/components/layout';
+import { useRouter } from '@/lib/i18n/navigation';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function getErrorMessage(error: unknown): string {
+function getErrorKey(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.statusCode === 409) {
-      return 'This email address is already in use.';
+      return 'errors.emailAlreadyInUse';
     }
     if (error.statusCode === 400) {
-      return error.message;
+      return 'errors.unexpected';
     }
-    return 'An unexpected error occurred. Please try again.';
+    return 'errors.unexpected';
   }
-  return 'An unexpected error occurred. Please try again.';
+  return 'errors.unexpected';
 }
 
 // ---------------------------------------------------------------------------
@@ -40,6 +41,8 @@ function getErrorMessage(error: unknown): string {
 // ---------------------------------------------------------------------------
 
 export default function RegisterPage(): React.ReactElement | null {
+  const t = useTranslations('Auth.register');
+  const tV = useTranslations('Validation');
   const isLoading = useAuthGuard('public');
   const router = useRouter();
 
@@ -65,11 +68,9 @@ export default function RegisterPage(): React.ReactElement | null {
   async function handleSubmit(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
 
-    // Clear previous errors
     setError(null);
     setFieldErrors({});
 
-    // Validate form data
     const validation = validateCreateUser({
       name: name.trim(),
       email,
@@ -81,9 +82,8 @@ export default function RegisterPage(): React.ReactElement | null {
       return;
     }
 
-    // Check password match
     if (password !== confirmPassword) {
-      setError('Passwords do not match.');
+      setError('passwordMismatch');
       return;
     }
 
@@ -92,20 +92,12 @@ export default function RegisterPage(): React.ReactElement | null {
     setSubmitting(true);
 
     try {
-      // 1. Create the user via singlab-api (Firebase Auth + Firestore).
       await usersApi.createUser({ name: name.trim(), email, password });
-
-      // 2. Sign in temporarily to send the verification email, then sign out.
       await initiateEmailVerification(email, password);
-
-      // 3. Store registration flag in sessionStorage so the login page can
-      //    display the confirmation toast regardless of auth state timing.
       sessionStorage.setItem('emailVerificationSent', 'true');
-
-      // 4. Redirect to login.
       router.replace('/login');
     } catch (err) {
-      setError(getErrorMessage(err));
+      setError(getErrorKey(err));
     } finally {
       setSubmitting(false);
     }
@@ -128,14 +120,13 @@ export default function RegisterPage(): React.ReactElement | null {
   }
 
   return (
-    <AuthLayout title="SingLab" subtitle="Create your account">
-      {/* Form */}
+    <AuthLayout title="SingLab" subtitle={t('subtitle')}>
       <Box component="form" onSubmit={handleSubmit} noValidate>
         <Stack spacing={3}>
           {/* Full Name */}
           <TextField
             id="name"
-            label="Full Name"
+            label={t('nameLabel')}
             type="text"
             autoComplete="name"
             required
@@ -143,7 +134,6 @@ export default function RegisterPage(): React.ReactElement | null {
             value={name}
             onChange={(e) => {
               setName(e.target.value);
-              // Clear field error when user starts typing
               if (fieldErrors.name) {
                 setFieldErrors((prev) => {
                   const next = { ...prev };
@@ -153,18 +143,20 @@ export default function RegisterPage(): React.ReactElement | null {
               }
             }}
             disabled={submitting}
-            placeholder="Jane Doe"
+            placeholder={t('namePlaceholder')}
             error={!!fieldErrors.name}
-            helperText={fieldErrors.name}
+            helperText={
+              fieldErrors.name ? tV(fieldErrors.name as Parameters<typeof tV>[0]) : undefined
+            }
             inputProps={{
-              'aria-label': 'Full name',
+              'aria-label': t('nameAriaLabel'),
             }}
           />
 
           {/* Email */}
           <TextField
             id="email"
-            label="Email"
+            label={t('emailLabel')}
             type="email"
             autoComplete="email"
             required
@@ -172,7 +164,6 @@ export default function RegisterPage(): React.ReactElement | null {
             value={email}
             onChange={(e) => {
               setEmail(e.target.value);
-              // Clear field error when user starts typing
               if (fieldErrors.email) {
                 setFieldErrors((prev) => {
                   const next = { ...prev };
@@ -182,18 +173,20 @@ export default function RegisterPage(): React.ReactElement | null {
               }
             }}
             disabled={submitting}
-            placeholder="you@example.com"
+            placeholder={t('emailPlaceholder')}
             error={!!fieldErrors.email}
-            helperText={fieldErrors.email}
+            helperText={
+              fieldErrors.email ? tV(fieldErrors.email as Parameters<typeof tV>[0]) : undefined
+            }
             inputProps={{
-              'aria-label': 'Email address',
+              'aria-label': t('emailAriaLabel'),
             }}
           />
 
           {/* Password */}
           <TextField
             id="password"
-            label="Password"
+            label={t('passwordLabel')}
             type="password"
             autoComplete="new-password"
             required
@@ -201,7 +194,6 @@ export default function RegisterPage(): React.ReactElement | null {
             value={password}
             onChange={(e) => {
               setPassword(e.target.value);
-              // Clear field error when user starts typing
               if (fieldErrors.password) {
                 setFieldErrors((prev) => {
                   const next = { ...prev };
@@ -211,18 +203,22 @@ export default function RegisterPage(): React.ReactElement | null {
               }
             }}
             disabled={submitting}
-            placeholder="••••••••"
+            placeholder={t('passwordPlaceholder')}
             error={!!fieldErrors.password}
-            helperText={fieldErrors.password}
+            helperText={
+              fieldErrors.password
+                ? tV(fieldErrors.password as Parameters<typeof tV>[0])
+                : undefined
+            }
             inputProps={{
-              'aria-label': 'Password',
+              'aria-label': t('passwordAriaLabel'),
             }}
           />
 
           {/* Confirm Password */}
           <TextField
             id="confirm-password"
-            label="Confirm Password"
+            label={t('confirmPasswordLabel')}
             type="password"
             autoComplete="new-password"
             required
@@ -230,18 +226,18 @@ export default function RegisterPage(): React.ReactElement | null {
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
             disabled={submitting}
-            placeholder="••••••••"
+            placeholder={t('confirmPasswordPlaceholder')}
             error={passwordMismatch}
-            helperText={passwordMismatch ? 'Passwords do not match.' : ''}
+            helperText={passwordMismatch ? t('passwordMismatch') : ''}
             inputProps={{
-              'aria-label': 'Confirm password',
+              'aria-label': t('confirmPasswordAriaLabel'),
             }}
           />
 
           {/* API Error message */}
           {error !== null && (
             <Alert severity="error" role="alert">
-              {error}
+              {t(error as Parameters<typeof t>[0])}
             </Alert>
           )}
 
@@ -257,7 +253,7 @@ export default function RegisterPage(): React.ReactElement | null {
               submitting ? <CircularProgress size={16} color="inherit" /> : null
             }
           >
-            {submitting ? 'Creating account…' : 'Create account'}
+            {submitting ? t('submittingButton') : t('submitButton')}
           </Button>
         </Stack>
 
@@ -292,7 +288,7 @@ export default function RegisterPage(): React.ReactElement | null {
           />
         </Box>
 
-        {/* Secondary action — Back to sign in */}
+        {/* Back to sign in */}
         <Button
           component={Link}
           href="/login"
@@ -300,7 +296,7 @@ export default function RegisterPage(): React.ReactElement | null {
           fullWidth
           size="large"
         >
-          Already have an account? Sign in
+          {t('backToSignIn')}
         </Button>
       </Box>
     </AuthLayout>

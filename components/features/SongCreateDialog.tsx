@@ -16,12 +16,15 @@ import {
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import { useRef, useState } from 'react';
 import jsmediatags from 'jsmediatags';
+import { useTranslations } from 'next-intl';
 
 import {
   createSong,
   validateSongMetadata,
   validateSongFile,
   InvalidFileError,
+  InvalidFileTypeError,
+  FileSizeExceededError,
 } from '@/lib/api/song-creation';
 import { ApiError } from '@/lib/api/types';
 
@@ -54,6 +57,9 @@ export function SongCreateDialog({
   open,
   onClose,
 }: SongCreateDialogProps): React.ReactElement {
+  const t = useTranslations('SongCreate');
+  const tV = useTranslations('Validation');
+
   // Form state
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
@@ -148,8 +154,11 @@ export function SongCreateDialog({
 
       setIsExtractingMetadata(false);
     } catch (err) {
+      // File validation errors carry i18n keys as their message
       const message =
-        err instanceof InvalidFileError ? err.message : 'Invalid file';
+        err instanceof InvalidFileTypeError || err instanceof FileSizeExceededError
+          ? (err as InvalidFileError).message
+          : 'file.invalid';
       setSelectedFile(null);
       setFieldErrors((prev) => ({ ...prev, file: message }));
       setIsExtractingMetadata(false);
@@ -179,7 +188,7 @@ export function SongCreateDialog({
 
     // Validate file was selected
     if (!selectedFile) {
-      setFieldErrors({ file: 'Please select an audio file' });
+      setFieldErrors({ file: 'file.required' });
       return;
     }
 
@@ -203,10 +212,13 @@ export function SongCreateDialog({
         setFieldErrors({ file: err.message });
       } else if (err instanceof ApiError) {
         setError(
-          `Upload failed: ${err.message} (${err.statusCode}). Please try again.`,
+          t('errors.uploadFailed', {
+            message: err.message,
+            statusCode: err.statusCode,
+          }),
         );
       } else {
-        setError('An unexpected error occurred. Please try again.');
+        setError(t('errors.unexpected'));
       }
     } finally {
       setIsLoading(false);
@@ -274,7 +286,7 @@ export function SongCreateDialog({
           pb: 2,
         }}
       >
-        Upload New Song
+        {t('title')}
       </DialogTitle>
 
       <DialogContent sx={{ pt: 3, pb: 2 }}>
@@ -308,11 +320,10 @@ export function SongCreateDialog({
               },
             }}
           >
-            Attach the file first, then fill in Title and Author. We&apos;ll
-            auto-detect metadata when possible.
+            {t('infoMessage')}
           </Alert>
 
-          {/* File upload section - moved to top */}
+          {/* File upload section */}
           <Box>
             <input
               ref={fileInputRef}
@@ -353,7 +364,7 @@ export function SongCreateDialog({
                 },
               }}
             >
-              Choose Audio File
+              {t('chooseFileButton')}
             </Button>
 
             {/* Metadata extraction loading state */}
@@ -376,7 +387,7 @@ export function SongCreateDialog({
                   size={16}
                   sx={{ color: 'rgb(199, 210, 254)' }}
                 />
-                Extracting metadata...
+                {t('extractingMetadata')}
               </Typography>
             )}
 
@@ -410,7 +421,7 @@ export function SongCreateDialog({
                   color: 'rgba(252, 165, 165, 1)',
                 }}
               >
-                {fieldErrors.file}
+                {tV(fieldErrors.file as Parameters<typeof tV>[0])}
               </FormHelperText>
             )}
 
@@ -421,32 +432,32 @@ export function SongCreateDialog({
                   color: 'rgba(243, 232, 255, 0.6)',
                 }}
               >
-                Supported: MP3, WAV, OGG, WebM, MP4, MOV, FLAC (max 100 MB)
+                {t('supportedFormats')}
               </FormHelperText>
             )}
           </Box>
 
           {/* Title field */}
           <TextField
-            label="Song Title"
+            label={t('titleLabel')}
             value={title}
             onChange={(e) => {
               setTitle(e.target.value);
-              // Clear error when user starts typing
               if (fieldErrors.title) {
                 setFieldErrors((prev) => ({ ...prev, title: undefined }));
               }
             }}
             error={!!fieldErrors.title}
             helperText={
-              fieldErrors.title ||
-              (selectedFile && isExtractingMetadata
-                ? 'Detecting metadata...'
-                : '')
+              fieldErrors.title
+                ? tV(fieldErrors.title as Parameters<typeof tV>[0])
+                : selectedFile && isExtractingMetadata
+                  ? t('detectingMetadata')
+                  : ''
             }
             fullWidth
             disabled={isLoading || !selectedFile || isExtractingMetadata}
-            placeholder="e.g., Bohemian Rhapsody"
+            placeholder={t('titlePlaceholder')}
             inputProps={{
               maxLength: 255,
             }}
@@ -479,7 +490,7 @@ export function SongCreateDialog({
 
           {/* Author field */}
           <TextField
-            label="Artist / Author"
+            label={t('authorLabel')}
             value={author}
             onChange={(e) => {
               setAuthor(e.target.value);
@@ -489,14 +500,15 @@ export function SongCreateDialog({
             }}
             error={!!fieldErrors.author}
             helperText={
-              fieldErrors.author ||
-              (selectedFile && isExtractingMetadata
-                ? 'Detecting metadata...'
-                : '')
+              fieldErrors.author
+                ? tV(fieldErrors.author as Parameters<typeof tV>[0])
+                : selectedFile && isExtractingMetadata
+                  ? t('detectingMetadata')
+                  : ''
             }
             fullWidth
             disabled={isLoading || !selectedFile || isExtractingMetadata}
-            placeholder="e.g., Queen"
+            placeholder={t('authorPlaceholder')}
             inputProps={{
               maxLength: 255,
             }}
@@ -546,7 +558,7 @@ export function SongCreateDialog({
             },
           }}
         >
-          Cancel
+          {t('cancelButton')}
         </Button>
 
         <Button
@@ -573,10 +585,10 @@ export function SongCreateDialog({
           {isLoading ? (
             <>
               <CircularProgress size={20} sx={{ mr: 1, color: '#1a0e2e' }} />
-              Uploading...
+              {t('uploadingButton')}
             </>
           ) : (
-            'Upload Song'
+            t('uploadButton')
           )}
         </Button>
       </DialogActions>

@@ -142,7 +142,7 @@ describe('validateSignIn', () => {
     });
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.errors.email).toBe('Invalid email format');
+      expect(result.errors.email).toBe('email.invalid');
     }
   });
 });

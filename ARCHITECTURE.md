@@ -181,10 +181,25 @@ GlobalPlayer (component)
     │
     ├─→ Unified Multi-Track Audio Engine
     │       ├─→ All tracks (raw + stems) always play simultaneously
-    │       ├─→ Stem selection only changes volume (0 for deselected, current volume for selected)
-    │       ├─→ Simplified synchronization before play/seek:
-    │       │   └─→ prepareAt(time, autoResume) pauses, seeks all tracks, syncs them, then plays all
-    │       └─→ Manual sync on source switch (raw ↔ separated)
+    │       ├─→ Stem selection only changes volume (0 for deselected, base volume for selected)
+    │       ├─→ Deterministic synchronization on every play/resume/seek:
+    │       │   └─→ prepareAt(time, autoResume):
+    │       │         1. Pause all tracks
+    │       │         2. Seek all to exactly `time` (currentTime, not fastSeek)
+    │       │         3. syncAudioTracks() – aligns non-master tracks to master's
+    │       │            settled frame (corrects sub-frame browser clamping)
+    │       │         4. waitForAllTracksReady() – waits for all elements to reach
+    │       │            readyState ≥ HAVE_FUTURE_DATA via 'canplay' events
+    │       │            (5 s timeout safety net; stale attempts are cancelled)
+    │       │         5. play() all tracks simultaneously
+    │       │   Raises isSyncing=true for the whole operation, disabling all UI
+    │       ├─→ Seek-scrub split: onChange only updates display + silently pauses;
+    │       │   onChangeCommitted triggers prepareAt for the committed position
+    │       ├─→ Buffering stall recovery: 'waiting'/'stalled' on master pauses
+    │       │   non-master tracks; 'playing' re-syncs and restarts them
+    │       └─→ Source switch (raw ↔ separated): changing playbackSource updates
+    │           the tracks memo → trackKey → triggers rebuild useEffect, which
+    │           disposes old elements, creates fresh ones, and auto-plays from 0
     │
     └─→ Event handlers
             └─→ dispatch({ type: 'PLAYER_SET_STATUS', ... })
@@ -200,21 +215,36 @@ GlobalPlayer (component)
   1. **All tracks always play simultaneously** — Selecting/deselecting stems only
      changes volume (0 = muted, current volume = audible), eliminating cold-start
      issues and guaranteeing perfect sync.
-  2. **Simplified synchronization before play** — `prepareAt(time, autoResume)`
-     pauses all tracks, seeks to `time`, syncs current times, waits 50ms for
-     readiness (especially on mobile/cached audio), then calls `.play()` on all
-     tracks in a coordinated burst. Prevents race conditions where some tracks
-     remain paused while others play.
-  3. **Play attempt tracking** — Cancels stale play attempts if a user quickly
-     switches songs or clicks play/pause multiple times, preventing state
-     desynchronization.
-  4. **Manual sync on source switch** — Explicitly syncs all tracks and reapplies
-     volume when switching between raw and separated sources (50ms delay for
-     mobile readiness).
+  2. **Event-driven synchronization via `prepareAt`** — Every play/resume/seek
+     calls `prepareAt(time, autoResume)` which: pauses all tracks; seeks each to
+     the exact same `currentTime` (avoiding `fastSeek` whose keyframe snapping
+     varies per file); calls `syncAudioTracks()` to correct any sub-frame browser
+     clamping; then waits for all elements to be buffered at that position
+     (`readyState ≥ HAVE_FUTURE_DATA`) via `'canplay'` events before starting
+     simultaneous playback. A 5-second timeout acts as a safety net.
+  3. **`isSyncing` gate** — While `prepareAt` is running, all transport controls
+     (play, stop, seek slider, source toggle, stem presets) are disabled and a
+     spinner is shown, preventing conflicting user interactions.
+  4. **Seek-scrub split** — The seek slider uses `onChange` to update only the
+     displayed time (audio is silently paused during the drag), and
+     `onChangeCommitted` to trigger the full `prepareAt` sync at the committed
+     position. Avoids a buffer-fetch on every pixel of movement.
+  5. **Buffering stall recovery** — `'waiting'`/`'stalled'` events on the master
+     track pause all non-master tracks to prevent them drifting ahead. The
+     master's `'playing'` event re-syncs and restarts them automatically.
+  6. **Play-attempt tracking** — A monotonically increasing counter cancels stale
+     in-flight syncs if the user quickly switches songs or issues conflicting
+     commands.
+  7. **Source switching (raw ↔ separated)** — The `tracks` memo is
+     source-dependent: raw mode builds only the raw element; separated mode
+     builds only stem elements. Switching source changes `playbackSource`
+     state, which changes `tracks` → `trackKey`, which triggers the rebuild
+     `useEffect`. The rebuild disposes old elements, creates fresh ones for
+     the new source, and auto-plays from 0 – equivalent to a song restart.
   
   Supports playback source selection (raw vs. separated), dynamic stem selection
   with preset mixes (vocals-only, instrumental, all stems), and volume control.
-  All controls are disabled during loading/buffering for better UX.
+  All controls are disabled during loading/buffering/syncing for better UX.
 
 - **Song Cards (`SongCardItem`)** — Display song metadata, play/edit/delete buttons,
   and separation status panel. The separation panel shows:
@@ -241,12 +271,19 @@ GlobalPlayer (component)
 
 ### Benefits
 
-- **Perfect Synchronization** — Barrier-based coordination ensures no track
-  ever drifts, eliminating audio sync issues common in multi-track playback.
-- **Robust Buffering** — Automatic rebuffering on network stalls prevents playback
-  interruptions; watchdog timer prevents stuck loading states.
+- **Deterministic Synchronization** — All tracks are seeked to exactly the same
+  `currentTime` (no `fastSeek` keyframe snapping). `syncAudioTracks()` corrects
+  any residual sub-frame clamping before buffering begins, and playback starts only
+  once every track has confirmed it is buffered at that position via `'canplay'`
+  events.
+- **Stall-Resilient Buffering** — Network stalls on the master track pause
+  non-master tracks immediately; they are re-synced and restarted when the master
+  recovers. A 5-second timeout prevents indefinitely stuck states.
 - **Seamless Stem Switching** — All tracks always play, so switching stems is a
   pure volume change—no cold-start delays or playback interruption.
+- **Race-condition-free UI** — `isSyncing` disables all transport controls for
+  the duration of any sync operation. A play-attempt counter cancels stale async
+  operations on rapid user input or song switches.
 - **Single Source of Truth** — Unified track map and master reference point;
   global state manages visibility and user intentions.
 - **Persistent Controls** — Player always visible while song is loaded.

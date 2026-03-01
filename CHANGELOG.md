@@ -5,16 +5,29 @@ All notable changes to the SingLab Frontend will be documented in this file.
 ## [Unreleased]
 
 ### Changed
-- **Simplified GlobalPlayer architecture**: Removed complex barrier-based
-  synchronization with ticket system, eliminated periodic drift-correction
-  intervals, and removed automatic rebuffering logic. Now uses simpler
-  pre-play synchronization with play attempt tracking.
-- **Improved controls UX**: All player controls (play, pause, stop, seek, volume,
-  source toggle, stem selection) are disabled during loading/buffering phase,
-  preventing user interactions during initialization.
-- **Stabilized multi-track playback**: Fixed race condition on mobile devices
-  where cached audio would start playing silently. Now uses 50ms readiness delay
-  and dual synchronization when switching between raw and separated sources.
+- **Deterministic multi-track synchronization in GlobalPlayer**: Replaced
+  arbitrary fixed delays with event-driven synchronization. `prepareAt` now
+  seeks all tracks to the exact same `currentTime` (avoiding `fastSeek` whose
+  keyframe snapping varies per file), calls `syncAudioTracks()` to correct
+  sub-frame browser clamping, then waits for every track to report
+  `readyState ≥ HAVE_FUTURE_DATA` via `'canplay'` events (5 s timeout safety
+  net) before starting simultaneous playback.
+- **`isSyncing` gate for controls UX**: All transport controls (play, stop, seek
+  slider, source toggle, stem presets) are disabled and a spinner is shown while
+  any synchronization operation is in progress (`isSyncing === true`), preventing
+  conflicting user interactions during initialization, seek, and resume.
+- **Seek-scrub split**: The seek slider now uses `onChange` to update only the
+  displayed time (audio is silently paused while dragging) and `onChangeCommitted`
+  to trigger the full sync at the committed position, avoiding unnecessary buffer
+  fetches on every pixel of slider movement.
+- **Buffering stall recovery**: `'waiting'`/`'stalled'` events on the master
+  track now pause all non-master tracks immediately to prevent drift. The
+  master's `'playing'` event re-syncs and restarts them automatically.
+- **Source-exclusive track management**: The `tracks` memo now builds elements
+  exclusively for the current playback source (raw OR separated, never both).
+  Switching sources disposes all current audio elements and builds fresh ones
+  for the new source, restarting playback from position 0. This eliminates
+  cross-source drift and simplifies the audio graph.
 - **Refactored to single global player architecture**: Replaced per-card audio
   players with a unified `GlobalPlayer` component at the bottom of the dashboard.
 
@@ -23,6 +36,11 @@ All notable changes to the SingLab Frontend will be documented in this file.
   components removed in favor of the single global player.
 - **AudioManager singleton**: No longer needed with single audio element approach.
 - **useAudioState hook**: Replaced with simpler event listeners in `GlobalPlayer`.
+- **Separation progress field**: Removed `progress` from `NormalizedSeparationInfo`,
+  `PoyoSeparationTaskDetails`, and related types. The PoYo provider does not reliably
+  report incremental progress, so the field was removed from the API types and
+  adapter interface. The UI now shows a generic "Separating audio…" message without
+  percentage values.
 
 ### Added
 

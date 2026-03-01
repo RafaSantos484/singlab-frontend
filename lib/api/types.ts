@@ -145,7 +145,6 @@ export interface NormalizedSeparationInfo<TProviderData = unknown> {
   provider: SeparationProviderName;
   status: SeparationJobStatus;
   taskId: string | null;
-  progress: number | null;
   errorMessage: string | null;
   requestedAt: string | null;
   finishedAt: string | null;
@@ -178,7 +177,6 @@ interface PoyoSeparationTaskDetailsBase {
   status: PoyoSeparationStatus;
   created_time: string;
   error_message?: string | null;
-  progress?: number;
 }
 
 export type PoyoNotStartedSeparationTaskDetails =
@@ -190,14 +188,12 @@ export type PoyoRunningSeparationTaskDetails = PoyoSeparationTaskDetailsBase & {
   status: 'running';
   error_message: null;
   files: [];
-  progress: number;
 };
 
 export type PoyoFinishedSeparationTaskDetails =
   PoyoSeparationTaskDetailsBase & {
     status: 'finished';
     error_message: null;
-    progress: 100;
     files: {
       vocal_removal: SeparationProviderStemOutputs;
     };

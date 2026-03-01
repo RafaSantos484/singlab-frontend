@@ -1,10 +1,4 @@
-'use client';
-
 import { Geist, Geist_Mono } from 'next/font/google';
-import { ThemeProvider } from '@mui/material/styles';
-import CssBaseline from '@mui/material/CssBaseline';
-import { GlobalStateProvider } from '@/lib/store';
-import muiTheme from '@/lib/theme/muiTheme';
 import './globals.css';
 
 const geistSans = Geist({
@@ -18,13 +12,15 @@ const geistMono = Geist_Mono({
 });
 
 /**
- * Root layout component.
+ * Minimal root layout.
  *
- * Provides:
- * - MUI ThemeProvider with custom brand theme
- * - CssBaseline for consistent baseline styles
- * - GlobalStateProvider for app-wide state (auth, songs, etc.)
- * - Font configuration (Geist Sans, Geist Mono)
+ * Intentionally lean — locale-specific providers (MUI ThemeProvider,
+ * NextIntlClientProvider, GlobalStateProvider) live in
+ * `app/[locale]/layout.tsx` so they receive the correct locale at runtime.
+ *
+ * The `suppressHydrationWarning` attribute on `<html>` prevents React from
+ * warning about the `lang` attribute being injected client-side by the
+ * locale layout.
  */
 export default function RootLayout({
   children,
@@ -32,21 +28,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <head>
-        <title>SingLab — Karaoke & Singing Practice</title>
-        <meta
-          name="description"
-          content="Upload a track and practice singing with AI-separated vocal and instrumental layers."
-        />
-      </head>
+    <html suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <ThemeProvider theme={muiTheme}>
-          <CssBaseline />
-          <GlobalStateProvider>{children}</GlobalStateProvider>
-        </ThemeProvider>
+        {children}
       </body>
     </html>
   );

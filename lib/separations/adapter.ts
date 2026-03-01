@@ -22,9 +22,6 @@ export interface SeparationProviderAdapter<TData> {
   /** Provider task identifier, if available. */
   getTaskId(data: TData): string | null;
 
-  /** Percentage progress (0-100) when provided by the provider. */
-  getProgress(data: TData): number | null;
-
   /** Human-readable error message for failed tasks. */
   getErrorMessage(data: TData): string | null;
 

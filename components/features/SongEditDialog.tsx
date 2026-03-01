@@ -12,6 +12,7 @@ import {
   Alert,
 } from '@mui/material';
 import { useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
 
 import { type Song } from '@/lib/api/types';
 import { type UploadSongInput } from '@/lib/api/songs';
@@ -48,6 +49,9 @@ export function SongEditDialog({
   onClose,
   song,
 }: SongEditDialogProps): React.ReactElement {
+  const t = useTranslations('SongEdit');
+  const tV = useTranslations('Validation');
+
   // Form state
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
@@ -120,10 +124,13 @@ export function SongEditDialog({
       // Handle different error types
       if (err instanceof ApiError) {
         setError(
-          `Update failed: ${err.message} (${err.statusCode}). Please try again.`,
+          t('errors.updateFailed', {
+            message: err.message,
+            statusCode: err.statusCode,
+          }),
         );
       } else {
-        setError('An unexpected error occurred. Please try again.');
+        setError(t('errors.unexpected'));
       }
     } finally {
       setIsLoading(false);
@@ -183,7 +190,7 @@ export function SongEditDialog({
           pb: 2,
         }}
       >
-        Edit Song
+        {t('title')}
       </DialogTitle>
 
       <DialogContent sx={{ pt: 3, pb: 2 }}>
@@ -217,13 +224,12 @@ export function SongEditDialog({
               },
             }}
           >
-            Update the song&apos;s title and author. The audio file cannot be
-            changed.
+            {t('infoMessage')}
           </Alert>
 
           {/* Title field */}
           <TextField
-            label="Song Title"
+            label={t('titleLabel')}
             value={title}
             onChange={(e) => {
               setTitle(e.target.value);
@@ -233,10 +239,14 @@ export function SongEditDialog({
               }
             }}
             error={!!fieldErrors.title}
-            helperText={fieldErrors.title}
+            helperText={
+              fieldErrors.title
+                ? tV(fieldErrors.title as Parameters<typeof tV>[0])
+                : undefined
+            }
             fullWidth
             disabled={isLoading}
-            placeholder="e.g., Bohemian Rhapsody"
+            placeholder={t('titlePlaceholder')}
             inputProps={{
               maxLength: 255,
             }}
@@ -269,7 +279,7 @@ export function SongEditDialog({
 
           {/* Author field */}
           <TextField
-            label="Artist / Author"
+            label={t('authorLabel')}
             value={author}
             onChange={(e) => {
               setAuthor(e.target.value);
@@ -278,10 +288,14 @@ export function SongEditDialog({
               }
             }}
             error={!!fieldErrors.author}
-            helperText={fieldErrors.author}
+            helperText={
+              fieldErrors.author
+                ? tV(fieldErrors.author as Parameters<typeof tV>[0])
+                : undefined
+            }
             fullWidth
             disabled={isLoading}
-            placeholder="e.g., Queen"
+            placeholder={t('authorPlaceholder')}
             inputProps={{
               maxLength: 255,
             }}
@@ -331,7 +345,7 @@ export function SongEditDialog({
             },
           }}
         >
-          Cancel
+          {t('cancelButton')}
         </Button>
 
         <Button
@@ -356,10 +370,10 @@ export function SongEditDialog({
           {isLoading ? (
             <>
               <CircularProgress size={20} sx={{ mr: 1, color: '#1a0e2e' }} />
-              Updating...
+              {t('savingButton')}
             </>
           ) : (
-            'Update Song'
+            t('saveButton')
           )}
         </Button>
       </DialogActions>
