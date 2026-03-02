@@ -3,12 +3,23 @@
  *
  * Service layer for song creation operations.
  *
- * Encapsulates file validation, API calls, and error handling for uploading
- * new songs to the backend.
+ * Upload flow:
+ * 1. Validate the audio file (size and type).
+ * 2. Generate a stable `songId`.
+ * 3. Upload the raw file to Firebase Storage at
+ *    `users/:userId/songs/:songId/raw.mp3`.
+ * 4. Register the song with the API by sending JSON metadata.
+ *
+ * The backend validates that the storage file exists before persisting the
+ * Firestore document.
  */
 
+import { collection, doc } from 'firebase/firestore';
+
+import { getFirebaseAuth } from '@/lib/firebase/auth';
+import { getFirebaseFirestore } from '@/lib/firebase/firestore';
+import { uploadRawSong, deleteRawSong } from '@/lib/storage/uploadRawSong';
 import { songsApi } from './index';
-import type { UploadSongInput } from './songs';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -29,8 +40,30 @@ const SUPPORTED_AUDIO_FORMATS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Validation errors
+// Upload phase type
 // ---------------------------------------------------------------------------
+
+/**
+ * Describes the current phase of the two-step song creation process:
+ * - `'uploading'`   – raw audio file is being uploaded to Firebase Storage.
+ * - `'registering'` – file upload is complete; song metadata is being
+ *                     registered via the API.
+ */
+export type SongCreationPhase = 'uploading' | 'registering';
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown when the Firebase Storage upload step fails.
+ */
+export class StorageUploadError extends Error {
+  constructor(cause?: string) {
+    super(cause ?? 'Failed to upload file to storage');
+    this.name = 'StorageUploadError';
+  }
+}
 
 export class InvalidFileError extends Error {
   constructor(message: string) {
@@ -95,6 +128,8 @@ export interface CreateSongOptions {
   title: string;
   author: string;
   file: File;
+  /** Optional callback invoked when the creation phase changes. */
+  onPhaseChange?: (phase: SongCreationPhase) => void;
 }
 
 export interface CreateSongResult {
@@ -104,37 +139,88 @@ export interface CreateSongResult {
 }
 
 /**
- * Creates a new song by uploading an audio file and metadata.
+ * Generates a Firestore-compatible document ID for a new song.
+ * Uses the Firestore client SDK to produce the same format as server-generated IDs.
  *
- * Validates the file before uploading and returns the created song.
+ * @param userId - Firebase Auth UID of the song owner.
+ * @returns A new unique song document ID.
+ */
+function generateSongId(userId: string): string {
+  const firestore = getFirebaseFirestore();
+  return doc(collection(firestore, 'users', userId, 'songs')).id;
+}
+
+/**
+ * Creates a new song using a two-step process:
+ * 1. Uploads the raw audio file to Firebase Storage.
+ * 2. Registers the song document with the API (JSON metadata only).
  *
- * @param options - Options including file and metadata (title, author).
+ * The `onPhaseChange` callback receives `'uploading'` before the Storage
+ * upload and `'registering'` before the API call, allowing the UI to
+ * display granular progress.
+ *
+ * If the API registration fails after the file has been uploaded to Storage,
+ * the file is automatically rolled back (deleted). This ensures the storage
+ * is not left with orphaned files.
+ *
+ * @param options - File, metadata (title, author) and optional phase callback.
  * @returns The created song result.
- * @throws {InvalidFileError} If file validation fails.
- * @throws {ApiError} If the API call fails.
+ * @throws {InvalidFileError} If client-side file validation fails.
+ * @throws {StorageUploadError} If the Firebase Storage upload step fails.
+ * @throws {ApiError} If the API registration call fails (file is rolled back).
  */
 export async function createSong(
   options: CreateSongOptions,
 ): Promise<CreateSongResult> {
-  const { title, author, file } = options;
+  const { title, author, file, onPhaseChange } = options;
 
-  // Validate file before upload
+  // 1. Validate file before doing anything async.
   validateSongFile(file);
 
-  // Prepare metadata
-  const metadata: UploadSongInput = {
-    title,
-    author,
-  };
+  // 2. Resolve the current user — required to build the storage path.
+  const currentUser = getFirebaseAuth().currentUser;
+  if (!currentUser) {
+    throw new Error('No authenticated user');
+  }
+  const userId = currentUser.uid;
 
-  // Upload to API
-  const result = await songsApi.uploadSong(file, metadata);
+  // 3. Generate a stable songId that matches the storage path.
+  const songId = generateSongId(userId);
 
-  return {
-    songId: result.songId,
-    title: result.title,
-    author: result.author,
-  };
+  // 4. Upload the raw audio file to Storage.
+  onPhaseChange?.('uploading');
+  try {
+    await uploadRawSong(userId, songId, file);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown storage error';
+    throw new StorageUploadError(message);
+  }
+
+  // 5. Register the song document via the API.
+  onPhaseChange?.('registering');
+  try {
+    const result = await songsApi.uploadSong({ songId, title, author });
+
+    return {
+      songId: result.songId,
+      title: result.title,
+      author: result.author,
+    };
+  } catch (err) {
+    // API registration failed — rollback the Storage upload to avoid orphaned files.
+    try {
+      await deleteRawSong(userId, songId);
+    } catch (rollbackErr) {
+      const rollbackMsg =
+        rollbackErr instanceof Error ? rollbackErr.message : 'Unknown error';
+      console.error(
+        `Failed to rollback storage upload for song ${songId}: ${rollbackMsg}`,
+      );
+    }
+
+    // Re-throw the original API error.
+    throw err;
+  }
 }
 
 /**
