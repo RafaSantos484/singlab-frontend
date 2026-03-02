@@ -16,6 +16,7 @@ import { useEffect, useReducer } from 'react';
 import { getFirebaseAuth } from '@/lib/firebase/auth';
 import { getFirebaseFirestore } from '@/lib/firebase/firestore';
 import type { RawSongInfo, SeparatedSongInfo } from '@/lib/api/types';
+import { useStemAutoProcessor } from '@/lib/hooks/useStemAutoProcessor';
 
 import {
   GlobalStateContext,
@@ -74,6 +75,13 @@ interface GlobalStateProviderProps {
  */
 export function GlobalStateProvider({ children }: GlobalStateProviderProps) {
   const [state, dispatch] = useReducer(globalStateReducer, initialState);
+
+  // Automatically process stems when separation finishes
+  useStemAutoProcessor({
+    songs: state.songs,
+    songsStemUploading: state.songsStemUploading,
+    dispatch,
+  });
 
   // -------------------------------------------------------------------------
   // 1. Firebase Auth listener
