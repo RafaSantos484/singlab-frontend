@@ -26,7 +26,7 @@
  */
 
 export { GlobalStateProvider } from './GlobalStateProvider';
-export { useGlobalState } from './GlobalStateContext';
+export { useGlobalState, useGlobalStateDispatch } from './GlobalStateContext';
 
 export type {
   GlobalState,
