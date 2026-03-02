@@ -373,6 +373,7 @@ function SongCardItem({
   const t = useTranslations('Dashboard');
   const tSep = useTranslations('Separation');
   const tPlayer = useTranslations('Player');
+  const { songsStemUploading } = useGlobalState();
 
   const {
     separation,
@@ -388,6 +389,7 @@ function SongCardItem({
   const isProcessing = separation?.status === 'processing';
   const isFinished = separation?.status === 'finished';
   const isFailed = separation?.status === 'failed';
+  const isUploadingStems = songsStemUploading.has(song.id);
 
   const availableStems = isFinished
     ? Object.entries(stemUrls)
@@ -578,7 +580,16 @@ function SongCardItem({
             </Box>
           )}
 
-          {song.separatedSongInfo && isFinished && separation && (
+          {isUploadingStems && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <CircularProgress size={20} />
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                {tSep('uploadingStems')}
+              </Typography>
+            </Box>
+          )}
+
+          {song.separatedSongInfo && isFinished && separation && !isUploadingStems && (
             <Stack spacing={1}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <Chip label={`${tSep('provider')} ${separation.provider}`} size="small" />

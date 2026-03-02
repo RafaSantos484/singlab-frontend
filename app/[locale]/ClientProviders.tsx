@@ -3,6 +3,7 @@
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { GlobalStateProvider } from '@/lib/store';
+import { usePendingNavigationGuard } from '@/lib/hooks/usePendingNavigationGuard';
 import muiTheme from '@/lib/theme/muiTheme';
 
 interface ClientProvidersProps {
@@ -19,6 +20,8 @@ interface ClientProvidersProps {
 export function ClientProviders({
   children,
 }: ClientProvidersProps): React.ReactElement {
+  usePendingNavigationGuard();
+
   return (
     <ThemeProvider theme={muiTheme}>
       <CssBaseline />

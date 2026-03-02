@@ -18,6 +18,7 @@ import { usersApi, ApiError } from '@/lib/api';
 import { validateCreateUser } from '@/lib/validation/create-user';
 import { AuthLayout } from '@/components/layout';
 import { useRouter } from '@/lib/i18n/navigation';
+import { usePendingNavigationGuard } from '@/lib/hooks/usePendingNavigationGuard';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -45,6 +46,7 @@ export default function RegisterPage(): React.ReactElement | null {
   const tV = useTranslations('Validation');
   const isLoading = useAuthGuard('public');
   const router = useRouter();
+  const { confirmNavigationIfPending } = usePendingNavigationGuard();
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -295,6 +297,11 @@ export default function RegisterPage(): React.ReactElement | null {
           variant="outlined"
           fullWidth
           size="large"
+          onClick={(event) => {
+            if (!confirmNavigationIfPending()) {
+              event.preventDefault();
+            }
+          }}
         >
           {t('backToSignIn')}
         </Button>

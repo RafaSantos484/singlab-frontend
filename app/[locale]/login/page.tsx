@@ -19,6 +19,7 @@ import { type FirebaseError } from 'firebase/app';
 import { AuthLayout } from '@/components/layout';
 import { validateSignIn } from '@/lib/validation/sign-in';
 import { useRouter } from '@/lib/i18n/navigation';
+import { usePendingNavigationGuard } from '@/lib/hooks/usePendingNavigationGuard';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -54,6 +55,7 @@ export default function LoginPage(): React.ReactElement | null {
   const tV = useTranslations('Validation');
   const isLoading = useAuthGuard('public');
   const router = useRouter();
+  const { confirmNavigationIfPending } = usePendingNavigationGuard();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -308,6 +310,11 @@ export default function LoginPage(): React.ReactElement | null {
           variant="outlined"
           fullWidth
           size="large"
+          onClick={(event) => {
+            if (!confirmNavigationIfPending()) {
+              event.preventDefault();
+            }
+          }}
         >
           {t('createAccount')}
         </Button>
