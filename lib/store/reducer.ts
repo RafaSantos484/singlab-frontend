@@ -17,6 +17,10 @@ export type GlobalStateAction =
   | { type: 'SONGS_READY'; payload: Song[] }
   /** Firestore /users/{uid}/songs listener encountered an error */
   | { type: 'SONGS_ERROR' }
+  /** Start uploading stems for a song */
+  | { type: 'SONG_STEM_UPLOAD_START'; payload: string }
+  /** Finish uploading stems for a song (success or failure) */
+  | { type: 'SONG_STEM_UPLOAD_END'; payload: string }
   /** Load and play a song in the global player */
   | { type: 'PLAYER_LOAD_SONG'; payload: string }
   /** Set playback status */
@@ -38,6 +42,7 @@ export const initialState: GlobalState = {
   userProfile: null,
   songs: [],
   songsStatus: 'idle',
+  songsStemUploading: new Set(),
   currentSongId: null,
   playbackStatus: 'idle',
 };
@@ -82,6 +87,18 @@ export function globalStateReducer(
 
     case 'SONGS_ERROR':
       return { ...state, songsStatus: 'error' };
+
+    case 'SONG_STEM_UPLOAD_START': {
+      const newSet = new Set(state.songsStemUploading);
+      newSet.add(action.payload);
+      return { ...state, songsStemUploading: newSet };
+    }
+
+    case 'SONG_STEM_UPLOAD_END': {
+      const newSet = new Set(state.songsStemUploading);
+      newSet.delete(action.payload);
+      return { ...state, songsStemUploading: newSet };
+    }
 
     case 'PLAYER_LOAD_SONG':
       return {

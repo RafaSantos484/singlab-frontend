@@ -13,18 +13,12 @@ const VALID_PASSWORD_CHARS = /^[\x21-\x7E]+$/;
  * namespace) so that UI components can pass them to `useTranslations`.
  */
 export const SignInSchema = z.object({
-  email: z
-    .string()
-    .email('email.invalid')
-    .max(255, 'email.tooLong'),
+  email: z.string().email('email.invalid').max(255, 'email.tooLong'),
   password: z
     .string()
     .min(6, 'password.tooShort')
     .max(255, 'password.tooLong')
-    .regex(
-      VALID_PASSWORD_CHARS,
-      'password.invalidChars',
-    ),
+    .regex(VALID_PASSWORD_CHARS, 'password.invalidChars'),
 });
 
 export type SignInDto = z.infer<typeof SignInSchema>;

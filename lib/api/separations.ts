@@ -1,6 +1,7 @@
 import { type ApiClient } from './client';
 import {
   type ApiSuccessResponse,
+  type ApiMessageSuccessResponse,
   type PoyoSeparationTaskDetails,
   type SeparationProviderName,
 } from './types';
@@ -49,5 +50,27 @@ export class SeparationsApi {
     >(`/songs/${songId}/separations/status${query}`);
 
     return res.data;
+  }
+
+  /**
+   * Update the stems for a completed separation task.
+   *
+   * Called after uploading stems to Firebase Storage. Persists the stem
+   * storage paths to the song document.
+   *
+   * @param songId - Song document ID.
+   * @param stemPaths - Record of stem names to storage paths.
+   * @param provider - Optional provider identifier.
+   */
+  async updateSeparationStems(
+    songId: string,
+    stemPaths: Record<string, string>,
+    provider?: SeparationProviderName,
+  ): Promise<void> {
+    const query = provider ? `?provider=${provider}` : '';
+    await this.client.patch<ApiMessageSuccessResponse>(
+      `/songs/${songId}/separations/stems${query}`,
+      { stems: stemPaths },
+    );
   }
 }

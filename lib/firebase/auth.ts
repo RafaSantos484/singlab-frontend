@@ -6,6 +6,7 @@ import {
   type Auth,
   type User,
 } from 'firebase/auth';
+import { withPendingActivity } from '@/lib/async/pendingActivity';
 import { getFirebaseApp } from './app';
 
 /**
@@ -24,13 +25,15 @@ export function getFirebaseAuth(): Auth {
 export async function getCurrentUserIdToken(
   forceRefresh = false,
 ): Promise<string> {
-  const { currentUser } = getFirebaseAuth();
+  return withPendingActivity(async () => {
+    const { currentUser } = getFirebaseAuth();
 
-  if (!currentUser) {
-    throw new Error('No authenticated user');
-  }
+    if (!currentUser) {
+      throw new Error('No authenticated user');
+    }
 
-  return currentUser.getIdToken(forceRefresh);
+    return currentUser.getIdToken(forceRefresh);
+  });
 }
 
 /**
@@ -54,16 +57,18 @@ export class EmailNotVerifiedError extends Error {
  * @throws {FirebaseError} On invalid credentials or other auth errors.
  */
 export async function signIn(email: string, password: string): Promise<void> {
-  const { user } = await signInWithEmailAndPassword(
-    getFirebaseAuth(),
-    email,
-    password,
-  );
+  await withPendingActivity(async () => {
+    const { user } = await signInWithEmailAndPassword(
+      getFirebaseAuth(),
+      email,
+      password,
+    );
 
-  if (!user.emailVerified) {
-    await firebaseSignOut(getFirebaseAuth());
-    throw new EmailNotVerifiedError();
-  }
+    if (!user.emailVerified) {
+      await firebaseSignOut(getFirebaseAuth());
+      throw new EmailNotVerifiedError();
+    }
+  });
 }
 
 /**
@@ -74,7 +79,9 @@ export async function signIn(email: string, password: string): Promise<void> {
  * @param user - The Firebase `User` whose email should be verified.
  */
 export async function sendVerificationEmail(user: User): Promise<void> {
-  await sendEmailVerification(user);
+  await withPendingActivity(async () => {
+    await sendEmailVerification(user);
+  });
 }
 
 /**
@@ -91,15 +98,19 @@ export async function initiateEmailVerification(
   email: string,
   password: string,
 ): Promise<void> {
-  const auth = getFirebaseAuth();
-  const { user } = await signInWithEmailAndPassword(auth, email, password);
-  await sendEmailVerification(user);
-  await firebaseSignOut(auth);
+  await withPendingActivity(async () => {
+    const auth = getFirebaseAuth();
+    const { user } = await signInWithEmailAndPassword(auth, email, password);
+    await sendEmailVerification(user);
+    await firebaseSignOut(auth);
+  });
 }
 
 /**
  * Signs out the currently authenticated user.
  */
 export async function signOut(): Promise<void> {
-  await firebaseSignOut(getFirebaseAuth());
+  await withPendingActivity(async () => {
+    await firebaseSignOut(getFirebaseAuth());
+  });
 }

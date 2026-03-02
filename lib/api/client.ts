@@ -1,4 +1,5 @@
 import { Env } from '@/lib/env';
+import { withPendingActivity } from '@/lib/async/pendingActivity';
 import { ApiError, type ApiErrorResponse } from './types';
 
 // ---------------------------------------------------------------------------
@@ -76,14 +77,16 @@ export class ApiClient {
     path: string,
     body?: unknown | FormData,
   ): Promise<T> {
-    let res = await this.doFetch(method, path, body, false);
+    return withPendingActivity(async () => {
+      let res = await this.doFetch(method, path, body, false);
 
-    // Transparently retry once with a force-refreshed token on 401.
-    if (res.status === 401) {
-      res = await this.doFetch(method, path, body, true);
-    }
+      // Transparently retry once with a force-refreshed token on 401.
+      if (res.status === 401) {
+        res = await this.doFetch(method, path, body, true);
+      }
 
-    return this.handleResponse<T>(res);
+      return this.handleResponse<T>(res);
+    });
   }
 
   private async doFetch(

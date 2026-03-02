@@ -89,4 +89,68 @@ export class PoyoSeparationAdapter implements SeparationProviderAdapter<PoyoSepa
     const status = mapStatus(data.status);
     return status === 'processing';
   }
+
+  /**
+   * Determines whether stems should be processed and uploaded.
+   *
+   * Returns true when:
+   * - Separation task has finished processing
+   * - Stems have not yet been persisted to the song document
+   *
+   * @param data - PoYo provider task details.
+   * @param storedStems - Current stems stored in the song document (null if not uploaded yet).
+   * @returns True if stems should be downloaded and uploaded to Firebase Storage.
+   */
+  shouldProcessStems(
+    data: PoyoSeparationTaskDetails,
+    storedStems: SeparatedSongInfo<PoyoSeparationTaskDetails>['stems'],
+  ): boolean {
+    return mapStatus(data.status) === 'finished' && !storedStems;
+  }
+
+  /**
+   * Extracts stem download URLs from PoYo task data.
+   *
+   * PoYo returns stems nested in `data.files[0].vocal_removal` when the task
+   * is finished. This method flattens that structure into a simple
+   * `{ stemName: url }` record.
+   *
+   * @param data - PoYo provider task details.
+   * @returns Record of stem names to download URLs (empty if task not finished or no stems).
+   */
+  getStemUrls(data: PoyoSeparationTaskDetails): Record<string, string> {
+    if (
+      data.status === 'finished' &&
+      'files' in data &&
+      Array.isArray(data.files) &&
+      data.files.length > 0
+    ) {
+      const fileEntry = data.files[0];
+      if (
+        'vocal_removal' in fileEntry &&
+        typeof fileEntry.vocal_removal === 'object'
+      ) {
+        return unflattenStemUrls(fileEntry.vocal_removal);
+      }
+    }
+    return {};
+  }
+}
+
+/**
+ * Flatten PoYo's stem URL structure into a simple Record.
+ * PoYo returns: { vocals: url, bass: url, ... }
+ */
+function unflattenStemUrls(
+  stems: Record<string, string | null>,
+): Record<string, string> {
+  return Object.entries(stems).reduce<Record<string, string>>(
+    (acc, [key, url]) => {
+      if (url) {
+        acc[key] = url;
+      }
+      return acc;
+    },
+    {},
+  );
 }

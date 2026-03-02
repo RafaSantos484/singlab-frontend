@@ -83,7 +83,9 @@ export default function DashboardPage(): React.ReactElement | null {
     });
 
     if (currentSongId) {
-      const playingIndex = sorted.findIndex((song) => song.id === currentSongId);
+      const playingIndex = sorted.findIndex(
+        (song) => song.id === currentSongId,
+      );
       if (playingIndex > 0) {
         const [playingSong] = sorted.splice(playingIndex, 1);
         sorted.unshift(playingSong);
@@ -373,6 +375,7 @@ function SongCardItem({
   const t = useTranslations('Dashboard');
   const tSep = useTranslations('Separation');
   const tPlayer = useTranslations('Player');
+  const { songsStemUploading } = useGlobalState();
 
   const {
     separation,
@@ -388,6 +391,7 @@ function SongCardItem({
   const isProcessing = separation?.status === 'processing';
   const isFinished = separation?.status === 'finished';
   const isFailed = separation?.status === 'failed';
+  const isUploadingStems = songsStemUploading.has(song.id);
 
   const availableStems = isFinished
     ? Object.entries(stemUrls)
@@ -573,33 +577,55 @@ function SongCardItem({
                 disabled={isRefreshing}
                 sx={{ alignSelf: 'flex-start' }}
               >
-                {isRefreshing ? tSep('refreshingStatus') : tSep('refreshStatus')}
+                {isRefreshing
+                  ? tSep('refreshingStatus')
+                  : tSep('refreshStatus')}
               </Button>
             </Box>
           )}
 
-          {song.separatedSongInfo && isFinished && separation && (
-            <Stack spacing={1}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Chip label={`${tSep('provider')} ${separation.provider}`} size="small" />
-                {separation.taskId && (
-                  <Chip label={`${tSep('task')} ${separation.taskId}`} size="small" />
-                )}
-              </Box>
+          {isUploadingStems && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <CircularProgress size={20} />
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                {tSep('stemsReady')}
+                {tSep('uploadingStems')}
               </Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {availableStems.map((stem) => (
-                  <Chip 
-                    key={stem} 
-                    label={tPlayer(('stems.' + stem) as Parameters<typeof tPlayer>[0])} 
-                    size="small" 
-                  />
-                ))}
-              </Box>
-            </Stack>
+            </Box>
           )}
+
+          {song.separatedSongInfo &&
+            isFinished &&
+            separation &&
+            !isUploadingStems && (
+              <Stack spacing={1}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Chip
+                    label={`${tSep('provider')} ${separation.provider}`}
+                    size="small"
+                  />
+                  {separation.taskId && (
+                    <Chip
+                      label={`${tSep('task')} ${separation.taskId}`}
+                      size="small"
+                    />
+                  )}
+                </Box>
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                  {tSep('stemsReady')}
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {availableStems.map((stem) => (
+                    <Chip
+                      key={stem}
+                      label={tPlayer(
+                        ('stems.' + stem) as Parameters<typeof tPlayer>[0],
+                      )}
+                      size="small"
+                    />
+                  ))}
+                </Box>
+              </Stack>
+            )}
 
           {song.separatedSongInfo && isFailed && separation && (
             <Stack spacing={1.5}>

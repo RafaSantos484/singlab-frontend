@@ -95,6 +95,11 @@ export interface GlobalState {
   songs: Song[];
   /** Loading status of the Firestore `/users/{uid}/songs` listener. */
   songsStatus: LoadStatus;
+  /**
+   * Set of song IDs currently uploading stems to Firebase Storage.
+   * Used to prevent concurrent uploads and show loading state in UI.
+   */
+  songsStemUploading: Set<string>;
 
   // --- Player ---
   /**

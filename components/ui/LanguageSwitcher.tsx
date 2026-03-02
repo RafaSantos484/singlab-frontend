@@ -7,6 +7,7 @@ import LanguageIcon from '@mui/icons-material/Language';
 import CheckIcon from '@mui/icons-material/Check';
 import { usePathname, useRouter } from '@/lib/i18n/navigation';
 import { routing, type Locale } from '@/lib/i18n/routing';
+import { usePendingNavigationGuard } from '@/lib/hooks/usePendingNavigationGuard';
 
 /**
  * Language switcher component.
@@ -21,6 +22,7 @@ export function LanguageSwitcher(): React.ReactElement {
   const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname();
+  const { confirmNavigationIfPending } = usePendingNavigationGuard();
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const open = Boolean(anchorEl);
@@ -36,6 +38,7 @@ export function LanguageSwitcher(): React.ReactElement {
   const handleSelectLocale = (nextLocale: Locale): void => {
     handleClose();
     if (nextLocale === locale) return;
+    if (!confirmNavigationIfPending()) return;
     router.replace(pathname, { locale: nextLocale });
   };
 
