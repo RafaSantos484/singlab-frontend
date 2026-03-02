@@ -117,41 +117,47 @@ interface GlobalPlayerInnerProps {
 /**
  * Inner player component – multi-track audio player with deterministic sync.
  *
- * Design principles
- * -----------------
- * 1. **All tracks always play simultaneously.** Selecting/deselecting a stem
- *    only changes its volume (0 = muted), so every track stays in lock-step
- *    without needing complex restart logic.
+ * ARCHITECTURE: Raw vs Separated Modes
+ * ====================================
  *
- * 2. **Event-driven sync via `prepareAt`.** Every play operation (initial
- *    play, resume after pause, seek) goes through `prepareAt(time, resume)`:
- *    - Pauses all tracks.
- *    - Seeks every track to `time`.
- *    - Waits for all tracks to report `readyState >= HAVE_FUTURE_DATA` via
- *      `waitForAllTracksReady` (5 s timeout safety net).
- *    - Plays all tracks simultaneously in a single coordinated burst.
- *    - Uses a play-attempt counter to cancel stale in-flight operations.
+ * This player supports two completely independent playback sources:
  *
- * 3. **`isSyncing` disables the UI.** While `prepareAt` is executing,
- *    `isSyncing === true` and every transport control (play, stop, seek
- *    slider, source toggle, stem presets) is disabled, preventing races.
+ * 1. RAW MODE (single-track playback)
+ *    - Plays the original audio file as-is
+ *    - Simple, single audio element
+ *    - No synchronisation complexity
+ *    - Transport controls (play/pause/seek/volume) direct to this element
  *
- * 4. **Seek-scrub split.** The seek slider fires two callbacks:
- *    `handleSeekChange` (drag) – updates the displayed time and silently
- *    pauses audio; `handleSeekCommit` (release) – runs `prepareAt` so all
- *    tracks are re-synced to the committed position before resuming.
+ * 2. SEPARATED MODE (multi-track playback with stems)
+ *    - Plays isolated stems: vocals, bass, drums, piano, guitar, other
+ *    - Vocals is MANDATORY and serves as the master (source of truth)
+ *    - All other stems stay in lock-step with vocals before playback
+ *    - Volume is shared across all stems; disabling a stem mutes it but keeps it playing
+ *    - Transport controls affect all stems equally
  *
- * 5. **Buffering stall recovery.** `waiting` / `stalled` events on the
- *    master track pause all non-master tracks (preventing drift). When the
- *    master fires `playing` after a stall, non-master tracks are re-synced
- *    and restarted automatically.
+ * Key design principles:
+ * ─────────────────────
+ * 1. **Independence**: Raw and separated modes never load each other's data.
+ *    Switching between them is a complete rebuild (restart from 0).
  *
- * 6. **Source switching (raw ↔ separated).** The `tracks` memo is
- *    source-dependent: raw mode builds only the raw element; separated mode
- *    builds only stem elements. Switching source changes `playbackSource`
- *    state, which changes `tracks` → `trackKey`, which triggers the rebuild
- *    `useEffect`. The rebuild disposes old elements, creates fresh ones for
- *    the new source, and auto-plays from 0 – equivalent to a song restart.
+ * 2. **Event-driven sync**: Synchronisation only happens on user interaction
+ *    (play, pause, seek, stem toggle). Never polling or interval-based checks.
+ *
+ * 3. **Master-slave model (separated mode)**:
+ *    - Vocals is the master (position, duration state)
+ *    - All other stems are slaves (follow vocal position + timing)
+ *    - Before any play operation, all stems sync to vocals' position
+ *
+ * 4. **Buffering handling**: When the master stalls due to network/disk lag,
+ *    slaves pause to prevent drift. On master-resume, slaves re-sync and
+ *    restart together.
+ *
+ * 5. **Seek operation split**:
+ *    - Slider drag (handleSeekChange): Update displayed time, pause audio silently
+ *    - Slider release (handleSeekCommit): Sync all tracks, then resume if needed
+ *
+ * 6. **URL caching**: Download URLs are cached centrally with TTL-based expiration.
+ *    Switching modes reuses cached URLs (no redundant requests).
  *
  * @component
  */
@@ -179,9 +185,16 @@ function GlobalPlayerInner({
     [separation, stemUrls],
   );
 
+  /**
+   * Vocals MUST be present for separated mode to be usable.
+   * This is a hard requirement by the specification.
+   */
+  const hasVocals = availableStems.includes('vocals');
+
   const hasSeparatedAudio =
     separation?.status === 'finished' &&
     !areStemUrlsLoading &&
+    hasVocals && // Only enable separated mode if vocals is available
     availableStems.length > 0;
 
   // ── UI selection state ───────────────────────────────────────────────────
@@ -216,10 +229,18 @@ function GlobalPlayerInner({
 
   /**
    * Active tracks for the current playback source only.
-   * - raw mode  → only the raw file.
-   * - separated → only finished stems (raw element is NOT created).
-   * Changing source disposes all existing elements and builds fresh ones,
-   * which acts as an automatic restart from 0.
+   *
+   * This design ensures complete independence between raw and separated modes:
+   * - raw mode    → only loads and plays the raw file, NEVER loads stems
+   * - separated   → only loads and plays stems, NEVER loads the raw file
+   *
+   * When the user switches between modes, the audio map is completely cleared
+   * and rebuilt with only the relevant source. This prevents memory waste and
+   * ensures clean playback semantics.
+   *
+   * Note: Changing the source causes immediate rebuild (via trackKey change),
+   * which disposes all old elements and creates fresh ones – equivalent to
+   * a song restart from 0.
    */
   const tracks = useMemo<Track[]>(() => {
     if (playbackSource === 'raw') {
@@ -310,20 +331,25 @@ function GlobalPlayerInner({
 
   /**
    * Get the master audio element.
-   * The map only contains elements for the current source, so:
-   * - raw mode  → the raw element.
-   * - separated → the first stem element (by STEM_ORDER).
+   *
+   * The master track is the source of truth for playback state (time, duration,
+   * play/pause). All other tracks in the same mode stay in sync with it.
+   *
+   * - raw mode  → the raw element (only one exists)
+   * - separated → the 'vocals' element (always present as mandatory)
+   *
+   * In separated mode, vocals is chosen as master because:
+   * - It's always present (mandatory, per spec)
+   * - Users focus their interaction (play, pause, seek) on it
+   * - Other stems follow along and stay synchronized
    */
   const getMaster = useCallback((): HTMLAudioElement | null => {
     const map = audioMapRef.current;
     if (playbackSourceRef.current === 'raw') {
       return map.get('raw') ?? null;
     }
-    for (const stem of STEM_ORDER) {
-      const el = map.get(stem);
-      if (el) return el;
-    }
-    return null;
+    // In separated mode, vocals is always the master track
+    return map.get('vocals') ?? null;
   }, []);
 
   /**
@@ -368,13 +394,22 @@ function GlobalPlayerInner({
     getActiveElementsRef.current = getActiveElements;
   }, [getActiveElements]);
 
-  /** Sync non-master elements within the active source to master's current time. */
+  /**
+   * Sync non-master elements within the active source to master's current time.
+   *
+   * In raw mode: This is a no-op since there's only the master element.
+   * In separated mode: Syncs all non-vocal tracks to the vocal track's position.
+   *
+   * This is called right before play to ensure all tracks start from the same
+   * exact position, preventing audible drifts or timing misaligns.
+   */
   const syncAudioTracks = useCallback((): void => {
     const master = getMaster();
     if (!master) return;
     const masterTime = master.currentTime;
     getActiveElements().forEach((a) => {
       if (a === master) return;
+      // Only sync if there's a meaningful drift (> 50ms)
       if (Math.abs(a.currentTime - masterTime) > 0.05) {
         a.currentTime = masterTime;
       }
@@ -437,12 +472,20 @@ function GlobalPlayerInner({
   /**
    * Core synchronisation entry point.
    *
-   * 1. Increments the play-attempt counter (cancels any in-flight sync).
-   * 2. Sets `isSyncing = true` to disable all transport controls.
-   * 3. Pauses and seeks all tracks to `time`.
-   * 4. If `autoResume`: waits for all tracks to be buffered at the new
-   *    position, then plays all simultaneously.
-   * 5. Clears `isSyncing` in a `finally` block.
+   * Ensures all active-source audio elements are in lock-step before playback:
+   * 1. Increments play-attempt counter to cancel stale sync operations
+   * 2. Pauses all active-source elements
+   * 3. Seeks all to the same time
+   * 4. If autoResume=true:
+   *    - Waits for all elements to buffer at the new position
+   *    - Starts all simultaneously
+   *
+   * Synchronization modes:
+   * - raw     → Simple: only one element exists, so no sync complexity
+   * - separated → Complex: all stems stay locked to vocals position
+   *
+   * The `isSyncing` flag blocks all UI interactions during this process to
+   * prevent race conditions or conflicting user actions.
    */
   const prepareAt = useCallback(
     async (time: number, autoResume: boolean): Promise<void> => {
@@ -486,6 +529,9 @@ function GlobalPlayerInner({
         // 3. Hard-sync non-master active tracks to master's settled currentTime BEFORE
         //    waiting for buffering. This corrects any sub-frame discrepancy that
         //    can occur when browsers clamp a seek to the nearest decodable frame.
+        //
+        //    In raw mode: This is a no-op (only master exists).
+        //    In separated: This syncs all stems to vocals' position.
         syncAudioTracks();
 
         // 4. Wait until every track has buffered enough data at the seek position.
@@ -614,6 +660,12 @@ function GlobalPlayerInner({
       // Ended: trigger end-of-song only when this is the current mode's master.
       // Raw and separated sources are independent; only the active source's
       // master governs when playback stops.
+      //
+      // When a song ends:
+      // - All tracks are paused
+      // - All tracks are reset to position 0 (beginning)
+      // - UI state is updated (stopped, not playing)
+      // - User can click play again to restart from the beginning
       el.addEventListener('ended', () => {
         if (getMasterRef.current() !== el) return;
         audioMapRef.current.forEach((a) => {
@@ -627,8 +679,14 @@ function GlobalPlayerInner({
       });
 
       // ── Buffering / stall sync ──────────────────────────────────────────
-      // When the active mode's master stalls, pause other elements in the
-      // same mode. When master resumes ('playing'), re-sync and restart them.
+      // Prevent drift when playback stalls (network lag, slow disk, etc.)
+      //
+      // When the master track waits for data:
+      //  1. Pause non-master tracks to prevent them from getting ahead
+      //  2. When master resumes, re-sync position and restart all
+      //
+      // In raw mode: This is a no-op (only master exists).
+      // In separated: This keeps non-vocal stems in lock-step with vocals.
 
       const pauseNonMaster = (): void => {
         if (getMasterRef.current() !== el) return;
@@ -651,7 +709,9 @@ function GlobalPlayerInner({
         isBufferingRef.current = false;
         setIsBuffering(false);
 
-        // Sync and restart non-master elements of the same active source
+        // Sync and restart non-master elements of the same active source.
+        // In raw mode: This is a no-op (only master exists).
+        // In separated: This re-syncs all stems to vocals position and restarts.
         const activeEls = getActiveElementsRef.current();
         const nonMasterEls = activeEls.filter((a) => a !== el);
         nonMasterEls.forEach((a) => {
@@ -819,10 +879,21 @@ function GlobalPlayerInner({
   /**
    * Switch between raw and separated source.
    *
-   * Switching disposes all current audio elements (via the trackKey-driven
-   * rebuild effect) and restarts the song from 0 on the new source.
-   * The rebuild effect handles auto-play so no manual coordination is needed
-   * here.
+   * Raw and separated modes are completely independent:
+   * - The source is never pre-loaded (no memory waste)
+   * - Switching rebuilds the audio map entirely (old elements disposed)
+   * - The rebuild effect auto-plays from 0 on the new source
+   *
+   * User experience: Clicking the toggle plays the song from the beginning
+   * in the new mode, with no extra loading time (URLs are cached).
+   *
+   * Implementation flow:
+   * 1. Cancel any in-flight sync operations
+   * 2. Pause current audio elements
+   * 3. Update playbackSource state
+   * 4. trackKey changes → rebuild effect fires
+   * 5. Rebuild disposes old elements, creates new ones
+   * 6. Auto-play from 0
    */
   const handleSelectSource = useCallback(
     (
@@ -847,17 +918,36 @@ function GlobalPlayerInner({
     [getActiveElements, playbackSource],
   );
 
-  const toggleStem = useCallback((stem: StemKey): void => {
-    setSelectedStems((prev) => {
-      if (prev.includes(stem)) {
-        return prev.length === 1 ? prev : prev.filter((s) => s !== stem);
+  const toggleStem = useCallback(
+    async (stem: StemKey): Promise<void> => {
+      // Ignore if currently syncing (UI should be disabled anyway)
+      if (isSyncingRef.current) return;
+
+      setSelectedStems((prev) => {
+        if (prev.includes(stem)) {
+          return prev.length === 1 ? prev : prev.filter((s) => s !== stem);
+        }
+        return [...prev, stem];
+      });
+
+      // After toggling a stem, if music is playing, re-sync all tracks.
+      // This prevents drift since a stem's latency may differ when muted vs unmuted.
+      if (isPlayingRef.current && playbackSourceRef.current === 'separated') {
+        const master = getMasterRef.current();
+        if (master && isFinite(master.currentTime)) {
+          // Re-sync all tracks to master's current position, then resume
+          await prepareAtRef.current(master.currentTime, true);
+        }
       }
-      return [...prev, stem];
-    });
-  }, []);
+    },
+    [],
+  );
 
   const setPreset = useCallback(
-    (preset: 'vocals' | 'instrumental' | 'all'): void => {
+    async (preset: 'vocals' | 'instrumental' | 'all'): Promise<void> => {
+      // Ignore if currently syncing (UI should be disabled anyway)
+      if (isSyncingRef.current) return;
+
       if (preset === 'vocals') {
         setSelectedStems(
           availableStems.includes('vocals')
@@ -869,6 +959,16 @@ function GlobalPlayerInner({
         if (stems.length > 0) setSelectedStems(stems);
       } else {
         setSelectedStems(availableStems);
+      }
+
+      // After changing the preset, if music is playing, re-sync all tracks.
+      // This prevents drift when the stem mix changes.
+      if (isPlayingRef.current && playbackSourceRef.current === 'separated') {
+        const master = getMasterRef.current();
+        if (master && isFinite(master.currentTime)) {
+          // Re-sync all tracks to master's current position, then resume
+          await prepareAtRef.current(master.currentTime, true);
+        }
       }
     },
     [availableStems, effectiveSelectedStems],
