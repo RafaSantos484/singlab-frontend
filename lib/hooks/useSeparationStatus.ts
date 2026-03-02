@@ -34,7 +34,7 @@ interface UseSeparationStatusResult {
  *
  * Responsibilities:
  * - **Submit**: Call `requestSeparation(provider)` to initiate a new separation task
- * - **Poll**: Automatically polls every 5 seconds while task status is 'processing'
+ * - **Poll**: Automatically polls every 60 seconds while task status is 'processing'
  * - **Refresh**: Manual `refreshStatus()` call to update status on demand
  * - **Normalize**: Converts provider-specific task data to unified schema via adapters
  * - **Error handling**: Captures and exposes API and network errors
@@ -46,8 +46,12 @@ interface UseSeparationStatusResult {
  *
  * Polling is automatic:
  * - Starts when separation task is 'processing' (via `shouldPollSeparation`)
- * - Immediately refreshes once, then polls at 5s intervals
+ * - Immediately refreshes once, then polls at 60s intervals
  * - Stops when task reaches 'finished' or 'failed' status
+ *
+ * **Stem processing** is handled separately by `useStemAutoProcessor` in the
+ * `GlobalStateProvider`. This hook only polls provider status, it does NOT
+ * upload stems automatically.
  *
  * @param song - The song to manage separation for
  * @returns Object with separation state, loading flags, error, and lifecycle methods
