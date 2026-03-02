@@ -97,6 +97,7 @@ Shared utilities used across the app:
 | `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`, `useSeparationStatus`, `useStemAutoProcessor`, etc.) |
 | `lib/separations/` | Adapter pattern for provider-agnostic separation normalization and stem URL extraction |
 | `lib/storage/` | Firebase Storage upload utilities (raw songs and separated stems) with rollback support |
+| `lib/storage/StorageUrlManager.ts` | Centralized Firebase Storage download URL caching with TTL (1 day) based expiration, deduplication of concurrent requests, and automatic refresh on expiry. Ensures fast URL access for real-time playback switching without redundant Firebase calls. |
 | `lib/store/` | Global state — `GlobalStateProvider` (React Context + useReducer) manages auth, songs, and player state |
 | `lib/theme/muiTheme.ts` | Centralized MUI theme tokens and component defaults |
 | `lib/validation/` | Zod-based validation schemas and functions (sign-in, user creation) |
@@ -208,7 +209,7 @@ Protected endpoints
 ## State Management
 
 The app uses React built-ins (useState, useContext, useReducer) to keep the
-bundle small. No external state management library is added until complexity
+
 requires it.
 
 Global state is managed by `GlobalStateProvider` (`lib/store/`) using React
@@ -230,6 +231,25 @@ call the REST API directly.
 The app uses a single global audio player with centralized state management to
 ensure a consistent playback experience. The player supports both raw audio
 playback and separated stem playback with dynamic stem selection.
+
+### Design Overview
+
+The GlobalPlayer component supports two completely independent playback modes:
+
+1. **Raw Mode** — Plays the original audio file as-is with a single audio element.
+     Simple, no synchronization complexity.
+
+2. **Separated Mode** — Plays isolated stems (vocals, bass, drums, piano, guitar, other).
+     - Vocals is mandatory and serves as the master (source of truth for playback position)
+     - All other stems stay in lock-step with vocals before and during playback
+     - Volume is shared across all stems; disabling a stem mutes it but keeps it playing in sync
+     - Transport controls (play, pause, seek, volume) affect all stems equally
+
+Raw and separated modes are completely independent:
+- Each mode is built on-demand; the inactive mode never loads data (no memory waste)
+- Switching between modes triggers a complete audio rebuild (old elements disposed, new ones created)
+- This acts as an automatic song restart from 0 on the new source
+- Raw and separated URLs are cached centrally via `StorageUrlManager` with 1-day TTL, so mode switches are instant
 
 ### Architecture
 
@@ -255,6 +275,11 @@ GlobalPlayer (component)
     ├─→ Unified Multi-Track Audio Engine
     │       ├─→ All tracks (raw + stems) always play simultaneously
     │       ├─→ Stem selection only changes volume (0 for deselected, base volume for selected)
+     │       ├─→ playbackSource: 'raw' or 'separated'
+     │       │   ├─→ raw mode: single audio element, simple transport
+     │       │   └─→ separated mode: multi-stem playback with vocals as master
+     │       ├─→ In separated mode: all non-vocal tracks stay synced to vocals' position
+     │       ├─→ Stem selection changes which stems are audible (volume 0 = muted but still playing)
     │       ├─→ Deterministic synchronization on every play/resume/seek:
     │       │   └─→ prepareAt(time, autoResume):
     │       │         1. Pause all tracks
@@ -264,15 +289,19 @@ GlobalPlayer (component)
     │       │         4. waitForAllTracksReady() – waits for all elements to reach
     │       │            readyState ≥ HAVE_FUTURE_DATA via 'canplay' events
     │       │            (5 s timeout safety net; stale attempts are cancelled)
-    │       │         5. play() all tracks simultaneously
+     │       │         5. play() all active-track elements simultaneously
     │       │   Raises isSyncing=true for the whole operation, disabling all UI
     │       ├─→ Seek-scrub split: onChange only updates display + silently pauses;
     │       │   onChangeCommitted triggers prepareAt for the committed position
     │       ├─→ Buffering stall recovery: 'waiting'/'stalled' on master pauses
     │       │   non-master tracks; 'playing' re-syncs and restarts them
-    │       └─→ Source switch (raw ↔ separated): changing playbackSource updates
-    │           the tracks memo → trackKey → triggers rebuild useEffect, which
-    │           disposes old elements, creates fresh ones, and auto-plays from 0
+     │       └─→ Mode switch (raw ↔ separated):
+     │           1. Cancel any in-flight sync operations
+     │           2. Pause current audio elements
+     │           3. Update playbackSource state
+     │           4. trackKey changes → rebuild effect fires
+     │           5. Rebuild disposes old elements, creates new ones for new mode
+     │           6. Auto-play from 0 with cached URLs (instant mode switch)
     │
     └─→ Event handlers
             └─→ dispatch({ type: 'PLAYER_SET_STATUS', ... })
@@ -280,40 +309,43 @@ GlobalPlayer (component)
 
 ### Key Components
 
+
 - **`GlobalPlayer` (`components/features/GlobalPlayer.tsx`)** — Single audio
   player component that manages multi-track synchronization for seamless playback
   of raw audio and separated stems.
   
   **Design Principles:**
-  1. **All tracks always play simultaneously** — Selecting/deselecting stems only
-     changes volume (0 = muted, current volume = audible), eliminating cold-start
-     issues and guaranteeing perfect sync.
-  2. **Event-driven synchronization via `prepareAt`** — Every play/resume/seek
+  1. **Two independent playback modes** — Raw mode plays a single audio element.
+     Separated mode plays multiple stem elements with vocals as the master track.
+     Modes are completely independent; switching mode is a full audio rebuild.
+  2. **Master-slave model (separated mode only)** — Vocals is the mandatory master
+     track that drives playback position. All other stems follow vocals' position
+     and maintain perfect lock-step synchronization. In raw mode, there is only
+     one element (the raw audio), so no synchronization is needed.
+  3. **Event-driven synchronization via `prepareAt`** — Every play/resume/seek
      calls `prepareAt(time, autoResume)` which: pauses all tracks; seeks each to
      the exact same `currentTime` (avoiding `fastSeek` whose keyframe snapping
      varies per file); calls `syncAudioTracks()` to correct any sub-frame browser
      clamping; then waits for all elements to be buffered at that position
      (`readyState ≥ HAVE_FUTURE_DATA`) via `'canplay'` events before starting
      simultaneous playback. A 5-second timeout acts as a safety net.
-  3. **`isSyncing` gate** — While `prepareAt` is running, all transport controls
+  4. **`isSyncing` gate** — While `prepareAt` is running, all transport controls
      (play, stop, seek slider, source toggle, stem presets) are disabled and a
      spinner is shown, preventing conflicting user interactions.
-  4. **Seek-scrub split** — The seek slider uses `onChange` to update only the
+  5. **Seek-scrub split** — The seek slider uses `onChange` to update only the
      displayed time (audio is silently paused during the drag), and
      `onChangeCommitted` to trigger the full `prepareAt` sync at the committed
      position. Avoids a buffer-fetch on every pixel of movement.
-  5. **Buffering stall recovery** — `'waiting'`/`'stalled'` events on the master
+  6. **Buffering stall recovery** — `'waiting'`/`'stalled'` events on the master
      track pause all non-master tracks to prevent them drifting ahead. The
      master's `'playing'` event re-syncs and restarts them automatically.
-  6. **Play-attempt tracking** — A monotonically increasing counter cancels stale
+  7. **Play-attempt tracking** — A monotonically increasing counter cancels stale
      in-flight syncs if the user quickly switches songs or issues conflicting
      commands.
-  7. **Source switching (raw ↔ separated)** — The `tracks` memo is
-     source-dependent: raw mode builds only the raw element; separated mode
-     builds only stem elements. Switching source changes `playbackSource`
-     state, which changes `tracks` → `trackKey`, which triggers the rebuild
-     `useEffect`. The rebuild disposes old elements, creates fresh ones for
-     the new source, and auto-plays from 0 – equivalent to a song restart.
+  8. **URL caching strategy** — Raw audio and stem URLs are cached centrally via
+       `StorageUrlManager` with 1-day TTL expiration. This ensures fast mode
+       switching without redundant Firebase API calls. Concurrent requests for the
+       same path are deduplicated, and expired URLs are automatically refreshed.
   
   Supports playback source selection (raw vs. separated), dynamic stem selection
   with preset mixes (vocals-only, instrumental, all stems), and volume control.
