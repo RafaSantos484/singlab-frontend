@@ -73,7 +73,13 @@ Components are split into two groups:
           Uses `useSeparationStatus` hook to manage the separation lifecycle.
      - `SongDeleteButton` — reusable confirmation dialog for deleting songs with
           loading state, accessibility features, and error handling.
-     - `SongCreateDialog` — upload workflow (metadata + file validation + API).
+     - `SongCreateDialog` — upload workflow with:
+          * File picker + drag-and-drop support
+          * Audio format validation (MIME type + extension fallback)
+          * Client-side metadata extraction from audio tags
+          * Client-side FFmpeg WASM MP3 conversion with progress tracking
+          * Form validation for title/author
+          * Multi-phase progress UI (converting → uploading → registering)
      - `SongEditDialog` — song metadata editing with validation and error handling.
 
 ### 3. Lib
@@ -82,8 +88,9 @@ Shared utilities used across the app:
 
 | Module | Responsibility |
 |---|---|
-| `lib/api/` | Typed HTTP client wrapping `singlab-api` endpoints |
-| `lib/api/song-creation.ts` | Two-step song upload: client-side Storage upload + API registration with rollback |
+| `lib/api/` | Typed HTTP client wrapping `singlab-api` endpoints (includes 30s request timeout and logging) |
+| `lib/api/song-creation.ts` | Three-step song upload: validation → FFmpeg MP3 conversion → Storage upload → API registration with rollback |
+| `lib/audio/convertToMp3.ts` | Client-side audio/video → MP3 conversion using FFmpeg WASM (singleton, lazy-loaded from CDN) |
 | `lib/api/separations.ts` | API client for stem separation operations (request, refresh, update stems) |
 | `lib/async/` | Pending activity tracking for navigation guards (prevents leaving during uploads) |
 | `lib/firebase/` | Firebase app initialization (singleton) and auth helpers |
@@ -116,14 +123,29 @@ Protected endpoints
 
 ## Song Upload & Stem Processing Flows
 
-### Song Upload Flow (Two-Step: Storage → API)
+### Song Upload Flow (Three-Step: Validation → Conversion → Storage → API)
 
 ```
-[User selects audio file in SongCreateDialog]
+[User selects audio file via picker or drag-and-drop in SongCreateDialog]
      │
-     │ 1. Client-side validation (size, format)
-     │ 2. Generate stable songId (Firestore doc ID)
-     │ 3. Upload raw file to Storage: users/:userId/songs/:songId/raw.mp3
+     │ 1. Client-side validation (size, format, MIME + extension fallback)
+     │ 2. Metadata extraction from audio tags (optional, auto-fill title/artist)
+     │ 3. Extract metadata if available
+     ▼
+[FFmpeg WASM converts audio/video to MP3 (if not already MP3)]
+     │
+     │ Uses [@ffmpeg/ffmpeg] loaded from CDN (single-threaded, no COOP/COEP needed)
+     │ Fast path: if file is already MP3, returns unchanged
+     │ Supports: MP3, WAV, OGG, WebM, MP4, MOV, FLAC, AAC, M4A
+     │ VBR encoding (~192 kbps) for smaller file sizes
+     │ Progress callback updates UI (0–100%)
+     ▼
+[User fills in Title and Author (can be auto-filled from metadata)]
+     │
+     │ Client-side validation of metadata fields
+     ▼
+[Generate stable songId (Firestore doc ID)]
+[Upload MP3 to Storage: users/:userId/songs/:songId/raw.mp3]
      ▼
 [Firebase Storage SDK uploads audio]
      │

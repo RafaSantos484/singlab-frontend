@@ -43,8 +43,28 @@ All notable changes to the SingLab Frontend will be documented in this file.
   percentage values.
 
 ### Added
-
-#### Stem Separation Feature
+- **Client-side MP3 conversion** (`lib/audio/convertToMp3.ts`) — FFmpeg WASM
+  integration for converting any audio/video format to MP3 in the browser. Loaded
+  lazily from CDN (single-threaded, no COOP/COEP headers required). Supports:
+  MP3, WAV, OGG, WebM, MP4, MOV, FLAC, AAC, M4A. Includes fast path to skip
+  re-encoding if input is already MP3. Progress callback for UI updates.
+- **Drag-and-drop file upload UI** — `SongCreateDialog` now supports both file
+  picker and drag-and-drop interaction for uploading audio files. Visual feedback
+  while dragging and helpful hint text for discoverability.
+- **Extended audio format support** — File validation improved with MIME type
+  checks plus extension-based fallback for cases where MIME type is absent or
+  generic (e.g., `.m4a` files). Supports all audio formats FFmpeg can processes.
+- **Request timeout handling** — `ApiClient` now enforces a 30-second timeout
+  per request. Aborts stalled requests and throws a `408` error code for proper
+  error handling in UI (avoids indefinite hangs).
+- **API request logging** — `ApiClient` logs outgoing requests (method, path,
+  forceRefresh flag) to console for debugging and monitoring.
+- **Three-phase upload workflow** — Song creation now shows granular progress:
+  converting MP3 → uploading file → registering with API. `SongCreationPhase`
+  type updated to include `'converting'` phase.
+- **i18n support for new features** — Added translation keys for drag-and-drop
+  hints, conversion progress display, format support, and error messages in both
+  English and Portuguese.
 - **Stem separation API client** (`lib/api/separations.ts`) — Typed API wrapper
   for separation operations (`requestSeparation`, `refreshSeparationStatus`).
 - **`useSeparationStatus` hook** — Manages the complete separation lifecycle:
