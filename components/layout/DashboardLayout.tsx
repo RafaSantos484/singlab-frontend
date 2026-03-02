@@ -10,6 +10,7 @@ import {
 import { useTranslations } from 'next-intl';
 import { signOut } from '@/lib/firebase';
 import { useGlobalState } from '@/lib/store';
+import { usePendingNavigationGuard } from '@/lib/hooks/usePendingNavigationGuard';
 import { useState } from 'react';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 
@@ -32,9 +33,14 @@ export function DashboardLayout({
 }: DashboardLayoutProps): React.ReactElement {
   const t = useTranslations('Navigation');
   const { userProfile } = useGlobalState();
+  const { confirmNavigationIfPending } = usePendingNavigationGuard();
   const [signingOut, setSigningOut] = useState(false);
 
   async function handleSignOut(): Promise<void> {
+    if (!confirmNavigationIfPending()) {
+      return;
+    }
+
     setSigningOut(true);
     try {
       await signOut();
