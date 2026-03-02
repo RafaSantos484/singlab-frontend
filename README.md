@@ -11,14 +11,17 @@ back the original, vocal-only, and instrumental tracks for karaoke practice.
 
 - Next.js 16 with App Router and TypeScript
 - Firebase Authentication for user sign-in
-- **Client-side audio upload** with two-step flow:
-  - Upload raw audio directly to Firebase Storage (bypassing API)
+- **Client-side audio upload** with three-step flow:
+  - Audio format validation (MIME type + extension fallback)
+  - Client-side FFmpeg WASM MP3 conversion with progress tracking (supports MP3, WAV, OGG, WebM, MP4, MOV, FLAC, AAC, M4A)
+  - Upload converted MP3 to Firebase Storage (bypassing API)
   - Register song metadata via JSON API call
   - Automatic rollback on failure (orphaned files cleaned up)
-- **Pending activity tracking** — Prevents accidental navigation during uploads
-- Song submission with automatic metadata extraction from audio files
+- **Drag-and-drop file upload** — Intuitive drag-and-drop UI in song upload dialog
+- **Automatic metadata extraction** from audio files
   - Detects title and artist from ID3/audio tags
   - Auto-fills form fields (user can override)
+- **Pending activity tracking** — Prevents accidental navigation during uploads/conversions
 - **Stem separation workflow** with auto-processing:
   - Request separation via API (triggers backend PoYo task)
   - Client auto-detects separation completion via Firestore listener
@@ -128,16 +131,17 @@ npm run type-check      # TypeScript check (no emit)
 
 The frontend drives a two-phase song upload and stem processing pipeline:
 
-### 1. Song Upload (Client → Storage → API)
+### 1. Song Upload (Validation → Conversion → Storage → API)
 
-1. User selects audio file in `SongCreateDialog`.
-2. Client validates file (size, format).
-3. Client generates stable `songId` (Firestore doc ID).
-4. **Client uploads raw audio to Firebase Storage** at `users/:userId/songs/:songId/raw.mp3`.
+1. User selects audio file via file picker or drag-and-drop in `SongCreateDialog`.
+2. Client validates file (size, format via MIME type + extension fallback).
+3. Client extracts metadata (title, artist) from audio tags if available.
+4. **Client converts audio/video to MP3 using FFmpeg WASM** (fast path if already MP3).
 5. Client registers song metadata with API via `POST /songs` (JSON only).
-6. Backend validates that the Storage file exists and creates Firestore document.
-7. Real-time Firestore listener adds song to global state.
-8. **Rollback:** If API call fails after Storage upload, client deletes the uploaded file.
+6. **Client uploads converted MP3 to Firebase Storage** at `users/:userId/songs/:songId/raw.mp3`.
+7. Backend validates that the Storage file exists and creates Firestore document.
+8. Real-time Firestore listener adds song to global state.
+9. **Rollback:** If API call fails after Storage upload, client deletes the uploaded file.
 
 ### 2. Stem Separation & Auto-Processing
 

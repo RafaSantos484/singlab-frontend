@@ -109,8 +109,10 @@
     "title": "Enviar Nova Música",
     "infoMessage": "Selecione o arquivo primeiro, depois preencha Título e Artista. Tentaremos detectar os metadados automaticamente.",
     "chooseFileButton": "Escolher Arquivo de Áudio",
+    "dragDropHint": "ou arraste e solte um arquivo aqui",
+    "dropFileHere": "Solte o arquivo aqui",
     "extractingMetadata": "Extraindo metadados...",
-    "supportedFormats": "Suportados: MP3, WAV, OGG, WebM, MP4, MOV, FLAC (máx. 100 MB)",
+    "supportedFormats": "Suportados: MP3, WAV, OGG, WebM, MP4, MOV, FLAC, AAC, M4A (máx. 100 MB)",
     "detectingMetadata": "Detectando metadados...",
     "titleLabel": "Título da Música",
     "titlePlaceholder": "ex.: Bohemian Rhapsody",
@@ -120,9 +122,11 @@
     "uploadButton": "Enviar Música",
     "uploadingButton": "Enviando...",
     "uploadingFileButton": "Enviando arquivo...",
+    "convertingButton": "Convertendo para MP3{progress, select, 0 {} other { ({progress}%)}}",
     "registeringButton": "Registrando...",
     "errors": {
       "unexpected": "Ocorreu um erro inesperado. Por favor, tente novamente.",
+      "conversionFailed": "Falha ao converter arquivo para MP3: {message}. Por favor, tente novamente.",
       "uploadFailed": "Falha no envio: {message} ({statusCode}). Por favor, tente novamente.",
       "storageUploadFailed": "Falha ao enviar arquivo: {message}. Por favor, tente novamente."
     }

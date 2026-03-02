@@ -109,8 +109,10 @@
     "title": "Upload New Song",
     "infoMessage": "Attach the file first, then fill in Title and Author. We'll auto-detect metadata when possible.",
     "chooseFileButton": "Choose Audio File",
+    "dragDropHint": "or drag & drop a file here",
+    "dropFileHere": "Drop file here",
     "extractingMetadata": "Extracting metadata...",
-    "supportedFormats": "Supported: MP3, WAV, OGG, WebM, MP4, MOV, FLAC (max 100 MB)",
+    "supportedFormats": "Supported: MP3, WAV, OGG, WebM, MP4, MOV, FLAC, AAC, M4A (max 100 MB)",
     "detectingMetadata": "Detecting metadata...",
     "titleLabel": "Song Title",
     "titlePlaceholder": "e.g., Bohemian Rhapsody",
@@ -120,9 +122,11 @@
     "uploadButton": "Upload Song",
     "uploadingButton": "Uploading...",
     "uploadingFileButton": "Uploading file...",
+    "convertingButton": "Converting to MP3{progress, select, 0 {} other { ({progress}%)}}",
     "registeringButton": "Registering...",
     "errors": {
       "unexpected": "An unexpected error occurred. Please try again.",
+      "conversionFailed": "Failed to convert file to MP3: {message}. Please try again.",
       "uploadFailed": "Upload failed: {message} ({statusCode}). Please try again.",
       "storageUploadFailed": "Failed to upload file: {message}. Please try again."
     }

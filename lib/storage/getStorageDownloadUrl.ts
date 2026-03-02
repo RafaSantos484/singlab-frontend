@@ -1,24 +1,18 @@
 'use client';
 
-import { getDownloadURL, getStorage, ref } from 'firebase/storage';
-
-import { getFirebaseApp } from '@/lib/firebase/app';
-
-const urlCache = new Map<string, Promise<string>>();
+import { storageUrlManager } from '@/lib/storage/StorageUrlManager';
 
 /**
  * Returns a signed download URL for the given storage path.
- * Caches in-flight and resolved lookups to avoid duplicate requests.
+ *
+ * Uses a centralized cache manager that:
+ * - Deduplicates concurrent requests
+ * - Caches URLs with time-to-live based expiration (1 day)
+ * - Automatically refreshes expired URLs
+ *
+ * @param path - Firebase Storage path (e.g., "songs/raw/uuid.mp3")
+ * @returns A valid signed download URL
  */
 export async function getStorageDownloadUrl(path: string): Promise<string> {
-  if (!urlCache.has(path)) {
-    const storage = getStorage(getFirebaseApp());
-    const urlPromise = getDownloadURL(ref(storage, path)).catch((error) => {
-      urlCache.delete(path);
-      throw error;
-    });
-    urlCache.set(path, urlPromise);
-  }
-
-  return urlCache.get(path)!;
+  return storageUrlManager.getUrl(path);
 }
