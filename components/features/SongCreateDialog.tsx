@@ -25,6 +25,8 @@ import {
   InvalidFileError,
   InvalidFileTypeError,
   FileSizeExceededError,
+  StorageUploadError,
+  type SongCreationPhase,
 } from '@/lib/api/song-creation';
 import { ApiError } from '@/lib/api/types';
 
@@ -67,6 +69,9 @@ export function SongCreateDialog({
 
   // UI state
   const [isLoading, setIsLoading] = useState(false);
+  const [uploadPhase, setUploadPhase] = useState<SongCreationPhase | null>(
+    null,
+  );
   const [isExtractingMetadata, setIsExtractingMetadata] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<{
@@ -199,17 +204,21 @@ export function SongCreateDialog({
         title: title.trim(),
         author: author.trim(),
         file: selectedFile,
+        onPhaseChange: (phase) => setUploadPhase(phase),
       });
 
       // Success — reset form and close dialog
       setTitle('');
       setAuthor('');
       setSelectedFile(null);
+      setUploadPhase(null);
       onClose();
     } catch (err) {
       // Handle different error types
       if (err instanceof InvalidFileError) {
         setFieldErrors({ file: err.message });
+      } else if (err instanceof StorageUploadError) {
+        setError(t('errors.storageUploadFailed', { message: err.message }));
       } else if (err instanceof ApiError) {
         setError(
           t('errors.uploadFailed', {
@@ -222,6 +231,7 @@ export function SongCreateDialog({
       }
     } finally {
       setIsLoading(false);
+      setUploadPhase(null);
     }
   }
 
@@ -236,6 +246,7 @@ export function SongCreateDialog({
       setSelectedFile(null);
       setError(null);
       setFieldErrors({});
+      setUploadPhase(null);
       onClose();
     }
   }
@@ -585,7 +596,11 @@ export function SongCreateDialog({
           {isLoading ? (
             <>
               <CircularProgress size={20} sx={{ mr: 1, color: '#1a0e2e' }} />
-              {t('uploadingButton')}
+              {uploadPhase === 'uploading'
+                ? t('uploadingFileButton')
+                : uploadPhase === 'registering'
+                  ? t('registeringButton')
+                  : t('uploadingButton')}
             </>
           ) : (
             t('uploadButton')
