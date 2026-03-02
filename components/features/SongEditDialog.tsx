@@ -138,6 +138,14 @@ export function SongEditDialog({
   }
 
   /**
+   * Wraps handleSubmit as a form onSubmit handler (prevents page reload).
+   */
+  function handleFormSubmit(e: React.FormEvent<HTMLFormElement>): void {
+    e.preventDefault();
+    void handleSubmit();
+  }
+
+  /**
    * Handles dialog close.
    * Resets form state for the next open.
    */
@@ -176,6 +184,7 @@ export function SongEditDialog({
         },
       }}
     >
+      <Box component="form" onSubmit={handleFormSubmit}>
       <DialogTitle
         sx={{
           fontSize: '1.5rem',
@@ -349,7 +358,7 @@ export function SongEditDialog({
         </Button>
 
         <Button
-          onClick={handleSubmit}
+          type="submit"
           disabled={isLoading || !title.trim() || !author.trim()}
           variant="contained"
           sx={{
@@ -377,6 +386,7 @@ export function SongEditDialog({
           )}
         </Button>
       </DialogActions>
+      </Box>
     </Dialog>
   );
 }
