@@ -4,14 +4,16 @@
  * Service layer for song creation operations.
  *
  * Upload flow:
- * 1. Validate the audio file (size and type).
- * 2. Generate a stable `songId`.
- * 3. Upload the raw file to Firebase Storage at
- *    `users/:userId/songs/:songId/raw.mp3`.
- * 4. Register the song with the API by sending JSON metadata.
+ * 1. Validate the audio file (size and type via MIME + extension fallback).
+ * 2. Extract metadata (title, artist) from audio tags (optional).
+ * 3. Convert audio/video to MP3 using FFmpeg WASM (fast path if already MP3).
+ * 4. Generate a stable `songId` (Firestore doc ID).
+ * 5. Upload the MP3 file to Firebase Storage at `users/:userId/songs/:songId/raw.mp3`.
+ * 6. Register the song with the API by sending JSON metadata (title, author, songId).
  *
  * The backend validates that the storage file exists before persisting the
- * Firestore document.
+ * Firestore document. If the API call fails after Storage upload, the file is
+ * automatically rolled back (deleted from Storage).
  */
 
 import { collection, doc } from 'firebase/firestore';
@@ -29,14 +31,40 @@ const MAX_FILE_SIZE_MB = 100;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 // Supported audio/video formats from FFmpeg
+// All these formats are converted to MP3 before uploading.
 const SUPPORTED_AUDIO_FORMATS = [
   'audio/mpeg', // .mp3
+  'audio/mp3', // .mp3 (alternative MIME)
+  'audio/x-mpeg', // .mp3 (older MIME)
   'audio/wav', // .wav
+  'audio/x-wav', // .wav (alternative)
   'audio/ogg', // .ogg
-  'audio/webm', // .webm
+  'audio/webm', // .webm (audio)
+  'video/webm', // .webm (video)
   'video/mp4', // .mp4 (video with audio)
+  'audio/mp4', // .mp4 (audio-only)
   'video/quicktime', // .mov
   'audio/flac', // .flac
+  'audio/x-flac', // .flac (alternative)
+  'audio/aac', // .aac
+  'audio/x-aac', // .aac (alternative)
+  'audio/m4a', // .m4a
+  'audio/x-m4a', // .m4a (alternative)
+];
+
+// Supported extensions as fallback when MIME type is absent or generic
+const SUPPORTED_EXTENSIONS = [
+  '.mp3',
+  '.wav',
+  '.ogg',
+  '.webm',
+  '.mp4',
+  '.mov',
+  '.flac',
+  '.aac',
+  '.m4a',
+  '.mpeg',
+  '.mpga',
 ];
 
 // ---------------------------------------------------------------------------
@@ -44,12 +72,13 @@ const SUPPORTED_AUDIO_FORMATS = [
 // ---------------------------------------------------------------------------
 
 /**
- * Describes the current phase of the two-step song creation process:
- * - `'uploading'`   – raw audio file is being uploaded to Firebase Storage.
+ * Describes the current phase of the song creation process:
+ * - `'converting'`  – audio/video file is being converted to MP3.
+ * - `'uploading'`   – MP3 file is being uploaded to Firebase Storage.
  * - `'registering'` – file upload is complete; song metadata is being
  *                     registered via the API.
  */
-export type SongCreationPhase = 'uploading' | 'registering';
+export type SongCreationPhase = 'converting' | 'uploading' | 'registering';
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -114,8 +143,14 @@ export function validateSongFile(file: File): void {
     throw new FileSizeExceededError(file.name, file.size / 1024 / 1024);
   }
 
-  // Check file type
-  if (!SUPPORTED_AUDIO_FORMATS.includes(file.type)) {
+  // Check file type – first by MIME, then by extension as fallback
+  const mimeOk = SUPPORTED_AUDIO_FORMATS.includes(file.type);
+  const ext = file.name.includes('.')
+    ? file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
+    : '';
+  const extOk = SUPPORTED_EXTENSIONS.includes(ext);
+
+  if (!mimeOk && !extOk) {
     throw new InvalidFileTypeError(file.name);
   }
 }
@@ -152,7 +187,7 @@ function generateSongId(userId: string): string {
 
 /**
  * Creates a new song using a two-step process:
- * 1. Uploads the raw audio file to Firebase Storage.
+ * 1. Uploads the MP3 file to Firebase Storage (caller must convert beforehand).
  * 2. Registers the song document with the API (JSON metadata only).
  *
  * The `onPhaseChange` callback receives `'uploading'` before the Storage
@@ -163,7 +198,12 @@ function generateSongId(userId: string): string {
  * the file is automatically rolled back (deleted). This ensures the storage
  * is not left with orphaned files.
  *
- * @param options - File, metadata (title, author) and optional phase callback.
+ * **Note:** The caller (e.g., `SongCreateDialog`) is responsible for:
+ * - File format validation (MIME type + extension fallback)
+ * - Audio metadata extraction (title, artist from tags)
+ * - MP3 conversion using FFmpeg (via `convertToMp3`)
+ *
+ * @param options - MP3 file, metadata (title, author) and optional phase callback.
  * @returns The created song result.
  * @throws {InvalidFileError} If client-side file validation fails.
  * @throws {StorageUploadError} If the Firebase Storage upload step fails.
