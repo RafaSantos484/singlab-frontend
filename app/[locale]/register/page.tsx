@@ -18,6 +18,7 @@ import { usersApi, ApiError } from '@/lib/api';
 import { validateCreateUser } from '@/lib/validation/create-user';
 import { AuthLayout } from '@/components/layout';
 import { useRouter } from '@/lib/i18n/navigation';
+import { usePendingNavigationGuard } from '@/lib/hooks/usePendingNavigationGuard';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -45,6 +46,7 @@ export default function RegisterPage(): React.ReactElement | null {
   const tV = useTranslations('Validation');
   const isLoading = useAuthGuard('public');
   const router = useRouter();
+  const { confirmNavigationIfPending } = usePendingNavigationGuard();
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -146,7 +148,9 @@ export default function RegisterPage(): React.ReactElement | null {
             placeholder={t('namePlaceholder')}
             error={!!fieldErrors.name}
             helperText={
-              fieldErrors.name ? tV(fieldErrors.name as Parameters<typeof tV>[0]) : undefined
+              fieldErrors.name
+                ? tV(fieldErrors.name as Parameters<typeof tV>[0])
+                : undefined
             }
             inputProps={{
               'aria-label': t('nameAriaLabel'),
@@ -176,7 +180,9 @@ export default function RegisterPage(): React.ReactElement | null {
             placeholder={t('emailPlaceholder')}
             error={!!fieldErrors.email}
             helperText={
-              fieldErrors.email ? tV(fieldErrors.email as Parameters<typeof tV>[0]) : undefined
+              fieldErrors.email
+                ? tV(fieldErrors.email as Parameters<typeof tV>[0])
+                : undefined
             }
             inputProps={{
               'aria-label': t('emailAriaLabel'),
@@ -295,6 +301,11 @@ export default function RegisterPage(): React.ReactElement | null {
           variant="outlined"
           fullWidth
           size="large"
+          onClick={(event) => {
+            if (!confirmNavigationIfPending()) {
+              event.preventDefault();
+            }
+          }}
         >
           {t('backToSignIn')}
         </Button>

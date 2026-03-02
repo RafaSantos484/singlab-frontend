@@ -6,8 +6,10 @@ import {
   type UploadSongResult,
 } from './types';
 
-/** Metadata required when uploading a new song. */
+/** Metadata required when registering a new song after the client has uploaded the raw file to Storage. */
 export interface UploadSongInput {
+  /** Pre-generated stable ID that matches the file already uploaded to Storage. */
+  songId: string;
   title: string;
   author: string;
 }
@@ -29,23 +31,21 @@ export class SongsApi {
   // -------------------------------------------------------------------------
 
   /**
-   * Uploads an audio file and creates a new song.
+   * Registers a new song document after the client has uploaded the raw audio
+   * file to Cloud Storage at `users/:userId/songs/:songId/raw.mp3`.
    *
-   * @param file - The audio/video file to upload (max 100 MB).
-   * @param metadata - The song title and author.
-   * @returns The created song payload including the raw signed URL.
+   * The API validates that the storage file exists, then persists the Firestore
+   * document. This method only sends JSON metadata — the file upload is the
+   * caller's responsibility.
+   *
+   * @param metadata - Song ID, title and author.
+   * @returns The created song payload including rawSongInfo.
    */
-  async uploadSong(
-    file: File,
-    metadata: UploadSongInput,
-  ): Promise<UploadSongResult> {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('metadata', JSON.stringify(metadata));
-
-    const res = await this.client.postFormData<
-      ApiSuccessResponse<UploadSongResult>
-    >('/songs/upload', formData);
+  async uploadSong(metadata: UploadSongInput): Promise<UploadSongResult> {
+    const res = await this.client.post<ApiSuccessResponse<UploadSongResult>>(
+      '/songs/upload',
+      metadata,
+    );
 
     return res.data;
   }

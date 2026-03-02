@@ -20,6 +20,9 @@
     "enUS": "English",
     "ptBR": "Português (Brasil)"
   },
+  "NavigationGuard": {
+    "confirmLeaveMessage": "Há uma operação em andamento. Tem certeza que deseja sair desta página?"
+  },
   "Auth": {
     "signIn": {
       "subtitle": "Entre na sua conta",
@@ -92,6 +95,7 @@
     "startButton": "Iniciar separação de faixas",
     "startingButton": "Iniciando…",
     "processing": "Separando áudio…",
+    "uploadingStems": "Subindo faixas para armazenamento…",
     "refreshStatus": "Atualizar status",
     "refreshingStatus": "Atualizando…",
     "stemsReady": "Faixas prontas. Selecione-as no player abaixo.",
@@ -115,9 +119,12 @@
     "cancelButton": "Cancelar",
     "uploadButton": "Enviar Música",
     "uploadingButton": "Enviando...",
+    "uploadingFileButton": "Enviando arquivo...",
+    "registeringButton": "Registrando...",
     "errors": {
       "unexpected": "Ocorreu um erro inesperado. Por favor, tente novamente.",
-      "uploadFailed": "Falha no envio: {message} ({statusCode}). Por favor, tente novamente."
+      "uploadFailed": "Falha no envio: {message} ({statusCode}). Por favor, tente novamente.",
+      "storageUploadFailed": "Falha ao enviar arquivo: {message}. Por favor, tente novamente."
     }
   },
   "SongEdit": {

@@ -20,6 +20,9 @@
     "enUS": "English",
     "ptBR": "Português (Brasil)"
   },
+  "NavigationGuard": {
+    "confirmLeaveMessage": "There is an operation in progress. Are you sure you want to leave this page?"
+  },
   "Auth": {
     "signIn": {
       "subtitle": "Sign in to your account",
@@ -92,6 +95,7 @@
     "startButton": "Start stem separation",
     "startingButton": "Starting…",
     "processing": "Separating audio…",
+    "uploadingStems": "Uploading stems to storage…",
     "refreshStatus": "Refresh status",
     "refreshingStatus": "Refreshing…",
     "stemsReady": "Stems ready. Select them in the player below.",
@@ -115,9 +119,12 @@
     "cancelButton": "Cancel",
     "uploadButton": "Upload Song",
     "uploadingButton": "Uploading...",
+    "uploadingFileButton": "Uploading file...",
+    "registeringButton": "Registering...",
     "errors": {
       "unexpected": "An unexpected error occurred. Please try again.",
-      "uploadFailed": "Upload failed: {message} ({statusCode}). Please try again."
+      "uploadFailed": "Upload failed: {message} ({statusCode}). Please try again.",
+      "storageUploadFailed": "Failed to upload file: {message}. Please try again."
     }
   },
   "SongEdit": {
