@@ -7,10 +7,32 @@ import type {
 } from '@/lib/api/types';
 
 /**
+ * Contract for processing completed separation tasks and uploading stems.
+ * Providers implement this to expose provider-specific stem extraction logic.
+ */
+export interface SeparationStemProcessor<TData> {
+  /**
+   * Whether the separation has completed and stems should be processed.
+   * Returns true when status is 'finished' and stems haven't been uploaded yet.
+   */
+  shouldProcessStems(
+    data: TData,
+    storedStems: SeparatedSongInfo<TData>['stems'],
+  ): boolean;
+
+  /**
+   * Extract download URLs of separated stems from provider data.
+   * Returns empty object if task is not finished or no stems available.
+   */
+  getStemUrls(data: TData): Record<string, string>;
+}
+
+/**
  * Contract for adapting provider-specific payloads into normalized structures
  * consumable by the UI.
  */
-export interface SeparationProviderAdapter<TData> {
+export interface SeparationProviderAdapter<TData>
+  extends SeparationStemProcessor<TData> {
   readonly name: SeparationProviderName;
 
   /** Derive a provider-agnostic view of the separation state. */
