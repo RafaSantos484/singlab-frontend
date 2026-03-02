@@ -81,10 +81,7 @@ export function useSeparationStemProcessing(): {
             Object.keys(stemPaths),
           );
         } catch (rollbackError) {
-          console.error(
-            `Rollback failed for song ${songId}:`,
-            rollbackError,
-          );
+          console.error(`Rollback failed for song ${songId}:`, rollbackError);
         }
         throw error;
       }

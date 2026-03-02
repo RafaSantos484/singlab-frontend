@@ -83,7 +83,9 @@ export default function DashboardPage(): React.ReactElement | null {
     });
 
     if (currentSongId) {
-      const playingIndex = sorted.findIndex((song) => song.id === currentSongId);
+      const playingIndex = sorted.findIndex(
+        (song) => song.id === currentSongId,
+      );
       if (playingIndex > 0) {
         const [playingSong] = sorted.splice(playingIndex, 1);
         sorted.unshift(playingSong);
@@ -575,7 +577,9 @@ function SongCardItem({
                 disabled={isRefreshing}
                 sx={{ alignSelf: 'flex-start' }}
               >
-                {isRefreshing ? tSep('refreshingStatus') : tSep('refreshStatus')}
+                {isRefreshing
+                  ? tSep('refreshingStatus')
+                  : tSep('refreshStatus')}
               </Button>
             </Box>
           )}
@@ -589,28 +593,39 @@ function SongCardItem({
             </Box>
           )}
 
-          {song.separatedSongInfo && isFinished && separation && !isUploadingStems && (
-            <Stack spacing={1}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Chip label={`${tSep('provider')} ${separation.provider}`} size="small" />
-                {separation.taskId && (
-                  <Chip label={`${tSep('task')} ${separation.taskId}`} size="small" />
-                )}
-              </Box>
-              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                {tSep('stemsReady')}
-              </Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                {availableStems.map((stem) => (
-                  <Chip 
-                    key={stem} 
-                    label={tPlayer(('stems.' + stem) as Parameters<typeof tPlayer>[0])} 
-                    size="small" 
+          {song.separatedSongInfo &&
+            isFinished &&
+            separation &&
+            !isUploadingStems && (
+              <Stack spacing={1}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Chip
+                    label={`${tSep('provider')} ${separation.provider}`}
+                    size="small"
                   />
-                ))}
-              </Box>
-            </Stack>
-          )}
+                  {separation.taskId && (
+                    <Chip
+                      label={`${tSep('task')} ${separation.taskId}`}
+                      size="small"
+                    />
+                  )}
+                </Box>
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                  {tSep('stemsReady')}
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {availableStems.map((stem) => (
+                    <Chip
+                      key={stem}
+                      label={tPlayer(
+                        ('stems.' + stem) as Parameters<typeof tPlayer>[0],
+                      )}
+                      size="small"
+                    />
+                  ))}
+                </Box>
+              </Stack>
+            )}
 
           {song.separatedSongInfo && isFailed && separation && (
             <Stack spacing={1.5}>

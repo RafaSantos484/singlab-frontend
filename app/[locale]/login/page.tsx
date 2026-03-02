@@ -168,7 +168,9 @@ export default function LoginPage(): React.ReactElement | null {
             placeholder={t('emailPlaceholder')}
             error={!!fieldErrors.email}
             helperText={
-              fieldErrors.email ? tV(fieldErrors.email as Parameters<typeof tV>[0]) : undefined
+              fieldErrors.email
+                ? tV(fieldErrors.email as Parameters<typeof tV>[0])
+                : undefined
             }
             inputProps={{
               'aria-label': t('emailAriaLabel'),

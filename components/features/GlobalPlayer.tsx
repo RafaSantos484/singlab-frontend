@@ -228,7 +228,9 @@ function GlobalPlayerInner({
     // separated: only stems that have a resolved URL
     return STEM_ORDER.flatMap((stem) => {
       const url = stemUrls[stem];
-      return url ? [{ id: stem as TrackId, label: STEM_LABELS[stem], src: url }] : [];
+      return url
+        ? [{ id: stem as TrackId, label: STEM_LABELS[stem], src: url }]
+        : [];
     });
   }, [playbackSource, rawUrl, stemUrls]);
 
@@ -269,7 +271,7 @@ function GlobalPlayerInner({
   const audibleTrackIdsRef = useRef(audibleTrackIds);
   const playbackSourceRef = useRef<PlaybackSource>(playbackSource);
   /** Stable ref so event handlers always call the latest applyVolumes. */
-  const applyVolumesRef = useRef<() => void>(() => { });
+  const applyVolumesRef = useRef<() => void>(() => {});
   /** Stable ref so audio-element event handlers always call latest getMaster. */
   const getMasterRef = useRef<() => HTMLAudioElement | null>(() => null);
   /** Stable ref so audio-element event handlers always call latest getActiveElements. */
@@ -410,10 +412,7 @@ function GlobalPlayerInner({
         };
 
         // After the timeout, resolve anyway and let the caller try to play
-        const timeoutId = setTimeout(
-          () => settle(() => resolve()),
-          TIMEOUT_MS,
-        );
+        const timeoutId = setTimeout(() => settle(() => resolve()), TIMEOUT_MS);
 
         let pending = notReady.length;
 
@@ -531,7 +530,14 @@ function GlobalPlayerInner({
         }
       }
     },
-    [applyVolumes, dispatch, getActiveElements, getMaster, syncAudioTracks, waitForAllTracksReady],
+    [
+      applyVolumes,
+      dispatch,
+      getActiveElements,
+      getMaster,
+      syncAudioTracks,
+      waitForAllTracksReady,
+    ],
   );
 
   useEffect(() => {
@@ -630,7 +636,9 @@ function GlobalPlayerInner({
         setIsBuffering(true);
         isBufferingRef.current = true;
         const activeEls = getActiveElementsRef.current();
-        activeEls.forEach((a) => { if (a !== el) a.pause(); });
+        activeEls.forEach((a) => {
+          if (a !== el) a.pause();
+        });
       };
 
       el.addEventListener('waiting', pauseNonMaster);
@@ -646,10 +654,14 @@ function GlobalPlayerInner({
         // Sync and restart non-master elements of the same active source
         const activeEls = getActiveElementsRef.current();
         const nonMasterEls = activeEls.filter((a) => a !== el);
-        nonMasterEls.forEach((a) => { a.currentTime = el.currentTime; });
+        nonMasterEls.forEach((a) => {
+          a.currentTime = el.currentTime;
+        });
         void Promise.all(
-          nonMasterEls.map((a) => a.play().catch(() => { })),
-        ).then(() => { applyVolumesRef.current(); });
+          nonMasterEls.map((a) => a.play().catch(() => {})),
+        ).then(() => {
+          applyVolumesRef.current();
+        });
       });
 
       map.set(track.id, el);
@@ -740,7 +752,15 @@ function GlobalPlayerInner({
 
     // Resume from pause: re-sync all tracks then play simultaneously
     await prepareAt(master.currentTime || 0, true);
-  }, [dispatch, getActiveElements, getMaster, isBuffering, isSyncing, isPlaying, prepareAt]);
+  }, [
+    dispatch,
+    getActiveElements,
+    getMaster,
+    isBuffering,
+    isSyncing,
+    isPlaying,
+    prepareAt,
+  ]);
 
   const handleStop = useCallback(async (): Promise<void> => {
     await prepareAt(0, false);
@@ -960,7 +980,9 @@ function GlobalPlayerInner({
                 disabled={isSyncing}
               >
                 <ToggleButton value="raw">{t('rawLabel')}</ToggleButton>
-                <ToggleButton value="separated">{t('separatedLabel')}</ToggleButton>
+                <ToggleButton value="separated">
+                  {t('separatedLabel')}
+                </ToggleButton>
               </ToggleButtonGroup>
             </Box>
           )}
@@ -981,8 +1003,12 @@ function GlobalPlayerInner({
               <span>
                 <IconButton
                   onClick={togglePlay}
-                  disabled={!isPlayerReady || isLoading || isBuffering || isSyncing}
-                  aria-label={isPlaying ? t('pauseAriaLabel') : t('playAriaLabel')}
+                  disabled={
+                    !isPlayerReady || isLoading || isBuffering || isSyncing
+                  }
+                  aria-label={
+                    isPlaying ? t('pauseAriaLabel') : t('playAriaLabel')
+                  }
                   sx={{
                     color: 'primary.main',
                     bgcolor: 'rgba(124, 58, 237, 0.1)',
@@ -1002,7 +1028,9 @@ function GlobalPlayerInner({
               <span>
                 <IconButton
                   onClick={handleStop}
-                  disabled={!isPlayerReady || isLoading || isBuffering || isSyncing}
+                  disabled={
+                    !isPlayerReady || isLoading || isBuffering || isSyncing
+                  }
                   aria-label={t('stopAriaLabel')}
                   size="small"
                   sx={{
@@ -1076,7 +1104,9 @@ function GlobalPlayerInner({
                     onClick={toggleMute}
                     disabled={isLoading}
                     size="small"
-                    aria-label={isMuted ? t('unmuteAriaLabel') : t('muteAriaLabel')}
+                    aria-label={
+                      isMuted ? t('unmuteAriaLabel') : t('muteAriaLabel')
+                    }
                     sx={{
                       color: 'text.secondary',
                       '&:hover': { color: 'text.primary' },
@@ -1145,7 +1175,9 @@ function GlobalPlayerInner({
                   size="small"
                   variant="outlined"
                   onClick={() => setPreset('vocals')}
-                  disabled={isLoading || isSyncing || !availableStems.includes('vocals')}
+                  disabled={
+                    isLoading || isSyncing || !availableStems.includes('vocals')
+                  }
                 >
                   {t('presets.vocalsOnly')}
                 </Button>

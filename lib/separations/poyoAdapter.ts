@@ -126,7 +126,10 @@ export class PoyoSeparationAdapter implements SeparationProviderAdapter<PoyoSepa
       data.files.length > 0
     ) {
       const fileEntry = data.files[0];
-      if ('vocal_removal' in fileEntry && typeof fileEntry.vocal_removal === 'object') {
+      if (
+        'vocal_removal' in fileEntry &&
+        typeof fileEntry.vocal_removal === 'object'
+      ) {
         return unflattenStemUrls(fileEntry.vocal_removal);
       }
     }

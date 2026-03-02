@@ -103,7 +103,8 @@ export async function processStemUrls(
         );
         return { stemName, storagePath };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
+        const message =
+          error instanceof Error ? error.message : 'Unknown error';
         console.error(
           `Failed to process stem ${stemName} for song ${songId}: ${message}`,
         );
@@ -112,15 +113,12 @@ export async function processStemUrls(
     }),
   );
 
-  return results.reduce<Record<string, string>>(
-    (acc, result) => {
-      if (result) {
-        acc[result.stemName] = result.storagePath;
-      }
-      return acc;
-    },
-    {},
-  );
+  return results.reduce<Record<string, string>>((acc, result) => {
+    if (result) {
+      acc[result.stemName] = result.storagePath;
+    }
+    return acc;
+  }, {});
 }
 
 /**

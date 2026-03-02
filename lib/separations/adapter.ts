@@ -31,8 +31,9 @@ export interface SeparationStemProcessor<TData> {
  * Contract for adapting provider-specific payloads into normalized structures
  * consumable by the UI.
  */
-export interface SeparationProviderAdapter<TData>
-  extends SeparationStemProcessor<TData> {
+export interface SeparationProviderAdapter<
+  TData,
+> extends SeparationStemProcessor<TData> {
   readonly name: SeparationProviderName;
 
   /** Derive a provider-agnostic view of the separation state. */

@@ -192,7 +192,8 @@ export async function createSong(
   try {
     await uploadRawSong(userId, songId, file);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown storage error';
+    const message =
+      err instanceof Error ? err.message : 'Unknown storage error';
     throw new StorageUploadError(message);
   }
 

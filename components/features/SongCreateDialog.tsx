@@ -161,7 +161,8 @@ export function SongCreateDialog({
     } catch (err) {
       // File validation errors carry i18n keys as their message
       const message =
-        err instanceof InvalidFileTypeError || err instanceof FileSizeExceededError
+        err instanceof InvalidFileTypeError ||
+        err instanceof FileSizeExceededError
           ? (err as InvalidFileError).message
           : 'file.invalid';
       setSelectedFile(null);
