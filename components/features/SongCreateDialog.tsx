@@ -8,6 +8,7 @@ import {
   DialogTitle,
   TextField,
   CircularProgress,
+  LinearProgress,
   FormHelperText,
   Box,
   Typography,
@@ -17,6 +18,8 @@ import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import { useRef, useState } from 'react';
 import jsmediatags from 'jsmediatags';
 import { useTranslations } from 'next-intl';
+
+import { convertToMp3, Mp3ConversionError } from '@/lib/audio/convertToMp3';
 
 import {
   createSong,
@@ -43,17 +46,24 @@ interface SongCreateDialogProps {
  * Dialog for creating a new song by uploading an audio file.
  *
  * Features:
- * - File picker for audio files (with format validation)
+ * - File picker + drag-and-drop support for audio files
+ * - Format validation (MIME type + extension fallback)
  * - Automatic metadata extraction from audio tags (title, artist)
+ * - Client-side MP3 conversion using FFmpeg WASM (for any audio/video format)
  * - Text fields for title and author with real-time validation
- * - Loading and error states for file upload and metadata processing
+ * - Multi-phase progress tracking (converting → uploading → saving)
+ * - Loading and error states with granular error messages
  * - Accessible keyboard navigation (ESC to close, TAB order)
  * - Field auto-fill from extracted metadata, with manual override
  *
- * Workflow: User selects file → metadata automatically extracted → fields
- * auto-fill with extracted data (user can edit) → form submission.
- * After successful upload, the dialog closes automatically and the songs
- * list updates via Firestore real-time listener in the global state.
+ * Workflow:
+ * 1. User selects file via picker or drag-and-drop
+ * 2. File is validated (format, size)
+ * 3. Metadata automatically extracted from audio tags (if present)
+ * 4. User fills in/confirms title and author
+ * 5. FFmpeg converts any format to MP3 (progress shown)
+ * 6. Converted MP3 uploaded to Storage + metadata sent to API
+ * 7. Dialog closes automatically; songs list updates via Firestore listener
  */
 export function SongCreateDialog({
   open,
@@ -72,7 +82,9 @@ export function SongCreateDialog({
   const [uploadPhase, setUploadPhase] = useState<SongCreationPhase | null>(
     null,
   );
+  const [conversionProgress, setConversionProgress] = useState<number>(0);
   const [isExtractingMetadata, setIsExtractingMetadata] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<{
     title?: string;
@@ -114,14 +126,44 @@ export function SongCreateDialog({
   }
 
   /**
+   * Validates the file and extracts metadata.
+   * Shared by both the file-picker change handler and the drag-and-drop handler.
+   */
+  async function processFile(file: File): Promise<void> {
+    try {
+      validateSongFile(file);
+      setSelectedFile(file);
+      setFieldErrors((prev) => ({ ...prev, file: undefined }));
+      setError(null);
+
+      // Extract metadata if file is audio
+      setIsExtractingMetadata(true);
+      const metadata = await extractMetadata(file);
+
+      if (metadata) {
+        if (metadata.title && !title) {
+          setTitle(metadata.title);
+        }
+        if (metadata.artist && !author) {
+          setAuthor(metadata.artist);
+        }
+      }
+
+      setIsExtractingMetadata(false);
+    } catch (err) {
+      const message =
+        err instanceof InvalidFileTypeError ||
+        err instanceof FileSizeExceededError
+          ? (err as InvalidFileError).message
+          : 'file.invalid';
+      setSelectedFile(null);
+      setFieldErrors((prev) => ({ ...prev, file: message }));
+      setIsExtractingMetadata(false);
+    }
+  }
+
+  /**
    * Handles file selection from the file input.
-   *
-   * Process:
-   * 1. Validates file type and size
-   * 2. Shows metadata extraction loading state
-   * 3. Attempts to extract title and artist from audio tags
-   * 4. Auto-fills empty title/author fields with extracted data
-   * 5. Disables title/author fields during extraction to signal async operation
    *
    * @param e - Change event from file input element
    */
@@ -137,38 +179,7 @@ export function SongCreateDialog({
       return;
     }
 
-    try {
-      validateSongFile(file);
-      setSelectedFile(file);
-      setFieldErrors((prev) => ({ ...prev, file: undefined }));
-      setError(null);
-
-      // Extract metadata if file is audio
-      setIsExtractingMetadata(true);
-      const metadata = await extractMetadata(file);
-
-      if (metadata) {
-        // Auto-fill fields with extracted metadata
-        if (metadata.title && !title) {
-          setTitle(metadata.title);
-        }
-        if (metadata.artist && !author) {
-          setAuthor(metadata.artist);
-        }
-      }
-
-      setIsExtractingMetadata(false);
-    } catch (err) {
-      // File validation errors carry i18n keys as their message
-      const message =
-        err instanceof InvalidFileTypeError ||
-        err instanceof FileSizeExceededError
-          ? (err as InvalidFileError).message
-          : 'file.invalid';
-      setSelectedFile(null);
-      setFieldErrors((prev) => ({ ...prev, file: message }));
-      setIsExtractingMetadata(false);
-    }
+    await processFile(file);
 
     // Reset input so same file can be selected again
     if (inputElement) {
@@ -176,9 +187,39 @@ export function SongCreateDialog({
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Drag-and-drop handlers
+  // ---------------------------------------------------------------------------
+
+  function handleDragOver(e: React.DragEvent<HTMLDivElement>): void {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isLoading) setIsDragOver(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent<HTMLDivElement>): void {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  }
+
+  async function handleDrop(e: React.DragEvent<HTMLDivElement>): Promise<void> {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+
+    if (isLoading) return;
+
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+
+    await processFile(file);
+  }
+
   /**
    * Handles form submission.
-   * Validates all fields, creates the song via API, and handles the response.
+   * Validates all fields, converts the file to MP3, creates the song via API,
+   * and handles the response.
    */
   async function handleSubmit(): Promise<void> {
     // Clear previous errors
@@ -198,13 +239,21 @@ export function SongCreateDialog({
       return;
     }
 
-    // Attempt upload
+    // Attempt conversion + upload
     setIsLoading(true);
     try {
+      // Step 1 – Convert to MP3 in the browser
+      setUploadPhase('converting');
+      setConversionProgress(0);
+      const mp3File = await convertToMp3(selectedFile, (pct) => {
+        setConversionProgress(pct);
+      });
+
+      // Step 2 – Upload and register
       await createSong({
         title: title.trim(),
         author: author.trim(),
-        file: selectedFile,
+        file: mp3File,
         onPhaseChange: (phase) => setUploadPhase(phase),
       });
 
@@ -213,11 +262,15 @@ export function SongCreateDialog({
       setAuthor('');
       setSelectedFile(null);
       setUploadPhase(null);
+      setConversionProgress(0);
       onClose();
     } catch (err) {
       // Handle different error types
       if (err instanceof InvalidFileError) {
         setFieldErrors({ file: err.message });
+      } else if (err instanceof Mp3ConversionError) {
+        console.error('MP3 conversion failed:', err);
+        setError(t('errors.conversionFailed', { message: err.message }));
       } else if (err instanceof StorageUploadError) {
         setError(t('errors.storageUploadFailed', { message: err.message }));
       } else if (err instanceof ApiError) {
@@ -228,12 +281,22 @@ export function SongCreateDialog({
           }),
         );
       } else {
+        console.error('Unexpected song upload error:', err);
         setError(t('errors.unexpected'));
       }
     } finally {
       setIsLoading(false);
       setUploadPhase(null);
+      setConversionProgress(0);
     }
+  }
+
+  /**
+   * Wraps handleSubmit as a form onSubmit handler (prevents page reload).
+   */
+  function handleFormSubmit(e: React.FormEvent<HTMLFormElement>): void {
+    e.preventDefault();
+    void handleSubmit();
   }
 
   /**
@@ -248,6 +311,7 @@ export function SongCreateDialog({
       setError(null);
       setFieldErrors({});
       setUploadPhase(null);
+      setConversionProgress(0);
       onClose();
     }
   }
@@ -284,6 +348,7 @@ export function SongCreateDialog({
         },
       }}
     >
+      <Box component="form" onSubmit={handleFormSubmit}>
       <DialogTitle
         sx={{
           fontSize: '1.5rem',
@@ -336,18 +401,54 @@ export function SongCreateDialog({
           </Alert>
 
           {/* File upload section */}
-          <Box>
+          <Box
+            onDragOver={handleDragOver}
+            onDragEnter={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            sx={{
+              borderRadius: 2,
+              border: isDragOver
+                ? '2px dashed rgba(168, 85, 247, 1)'
+                : '2px dashed transparent',
+              backgroundColor: isDragOver
+                ? 'rgba(168, 85, 247, 0.08)'
+                : 'transparent',
+              transition: 'border-color 0.15s ease, background-color 0.15s ease',
+              p: isDragOver ? 1 : 0,
+            }}
+          >
             <input
               ref={fileInputRef}
               type="file"
               accept={[
                 'audio/mpeg',
+                'audio/mp3',
+                'audio/x-mpeg',
                 'audio/wav',
+                'audio/x-wav',
                 'audio/ogg',
                 'audio/webm',
+                'video/webm',
                 'video/mp4',
+                'audio/mp4',
                 'video/quicktime',
                 'audio/flac',
+                'audio/x-flac',
+                'audio/aac',
+                'audio/x-aac',
+                'audio/m4a',
+                'audio/x-m4a',
+                '.mp3',
+                '.wav',
+                '.ogg',
+                '.webm',
+                '.mp4',
+                '.mov',
+                '.flac',
+                '.aac',
+                '.m4a',
+                '.mpeg',
               ].join(',')}
               onChange={handleFileSelect}
               disabled={isLoading}
@@ -361,7 +462,9 @@ export function SongCreateDialog({
               startIcon={<CloudUploadIcon />}
               fullWidth
               sx={{
-                borderColor: 'rgba(168, 85, 247, 0.5)',
+                borderColor: isDragOver
+                  ? 'rgba(168, 85, 247, 1)'
+                  : 'rgba(168, 85, 247, 0.5)',
                 color: 'rgb(243, 232, 255)',
                 textTransform: 'none',
                 fontSize: '0.95rem',
@@ -376,8 +479,23 @@ export function SongCreateDialog({
                 },
               }}
             >
-              {t('chooseFileButton')}
+              {isDragOver ? t('dropFileHere') : t('chooseFileButton')}
             </Button>
+
+            {/* Drag-and-drop hint */}
+            {!selectedFile && !fieldErrors.file && !isDragOver && (
+              <Typography
+                variant="caption"
+                sx={{
+                  display: 'block',
+                  mt: 0.75,
+                  textAlign: 'center',
+                  color: 'rgba(243, 232, 255, 0.45)',
+                }}
+              >
+                {t('dragDropHint')}
+              </Typography>
+            )}
 
             {/* Metadata extraction loading state */}
             {isExtractingMetadata && (
@@ -574,7 +692,7 @@ export function SongCreateDialog({
         </Button>
 
         <Button
-          onClick={handleSubmit}
+          type="submit"
           disabled={
             isLoading || !title.trim() || !author.trim() || !selectedFile
           }
@@ -597,17 +715,39 @@ export function SongCreateDialog({
           {isLoading ? (
             <>
               <CircularProgress size={20} sx={{ mr: 1, color: '#1a0e2e' }} />
-              {uploadPhase === 'uploading'
-                ? t('uploadingFileButton')
-                : uploadPhase === 'registering'
-                  ? t('registeringButton')
-                  : t('uploadingButton')}
+              {uploadPhase === 'converting'
+                ? t('convertingButton', {
+                    progress: conversionProgress,
+                  })
+                : uploadPhase === 'uploading'
+                  ? t('uploadingFileButton')
+                  : uploadPhase === 'saving'
+                    ? t('registeringButton')
+                    : t('uploadingButton')}
             </>
           ) : (
             t('uploadButton')
           )}
         </Button>
       </DialogActions>
+
+      {/* Converting progress bar (full-width, below actions) */}
+      {isLoading && uploadPhase === 'converting' && (
+        <LinearProgress
+          variant={conversionProgress > 0 ? 'determinate' : 'indeterminate'}
+          value={conversionProgress}
+          sx={{
+            height: 3,
+            borderRadius: '0 0 4px 4px',
+            backgroundColor: 'rgba(168, 85, 247, 0.15)',
+            '& .MuiLinearProgress-bar': {
+              background:
+                'linear-gradient(90deg, #a78bfa 0%, #c4b5fd 100%)',
+            },
+          }}
+        />
+      )}
+      </Box>
     </Dialog>
   );
 }

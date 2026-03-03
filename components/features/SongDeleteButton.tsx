@@ -17,7 +17,12 @@ import {
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 
-import { songsApi } from '@/lib/api';
+import { getFirebaseAuth } from '@/lib/firebase/auth';
+import { deleteSongDoc } from '@/lib/firebase/songs';
+import { deleteRawSong } from '@/lib/storage/uploadRawSong';
+import {
+  deleteSeparationStems,
+} from '@/lib/storage/uploadSeparationStems';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -29,6 +34,12 @@ export interface SongDeleteButtonProps {
 
   /** Title of the song (displayed in confirmation dialog). */
   songTitle: string;
+
+  /**
+   * Stem names to clean up from Storage when deleting.
+   * Pass the keys from `separatedSongInfo.stems.paths` if available.
+   */
+  stemNames?: string[];
 
   /** Optional size for the IconButton. Defaults to 'medium'. */
   size?: 'small' | 'medium' | 'large';
@@ -59,6 +70,7 @@ export interface SongDeleteButtonProps {
 export function SongDeleteButton({
   songId,
   songTitle,
+  stemNames,
   size = 'medium',
   onDeleted,
 }: SongDeleteButtonProps): React.ReactElement {
@@ -106,7 +118,29 @@ export function SongDeleteButton({
     setIsDeleting(true);
 
     try {
-      await songsApi.deleteSong(songId);
+      const currentUser = getFirebaseAuth().currentUser;
+      if (!currentUser) {
+        throw new Error('No authenticated user');
+      }
+      const userId = currentUser.uid;
+
+      // Delete Firestore document first
+      await deleteSongDoc(userId, songId);
+
+      // Clean up Storage files (non-blocking — doc is already gone)
+      try {
+        await deleteRawSong(userId, songId);
+      } catch {
+        // Ignore — raw file may already be deleted
+      }
+
+      if (stemNames && stemNames.length > 0) {
+        try {
+          await deleteSeparationStems(userId, songId, stemNames);
+        } catch {
+          // Ignore — stems may not exist
+        }
+      }
 
       // Success: close dialog and show success message
       setIsDialogOpen(false);
@@ -121,21 +155,11 @@ export function SongDeleteButton({
         onDeleted(songId);
       }
     } catch (error: unknown) {
-      // Error handling based on status code
-      let errorMessage = t('errors.default');
-
-      // Type guard for ApiError with statusCode property
-      if (error && typeof error === 'object' && 'statusCode' in error) {
-        const statusCode = (error as { statusCode: number }).statusCode;
-
-        if (statusCode === 401) {
-          errorMessage = t('errors.authExpired');
-        } else if (statusCode === 403) {
-          errorMessage = t('errors.forbidden');
-        } else if (statusCode === 404) {
-          errorMessage = t('errors.notFound');
-        }
-      }
+      // Error handling
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : t('errors.default');
 
       // Show error snackbar (keep dialog open so user can retry)
       setSnackbar({

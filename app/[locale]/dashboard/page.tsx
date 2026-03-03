@@ -500,7 +500,15 @@ function SongCardItem({
               </IconButton>
             </Tooltip>
 
-            <SongDeleteButton songId={song.id} songTitle={song.title} />
+            <SongDeleteButton
+              songId={song.id}
+              songTitle={song.title}
+              stemNames={
+                song.separatedSongInfo?.stems?.paths
+                  ? Object.keys(song.separatedSongInfo.stems.paths)
+                  : undefined
+              }
+            />
           </Box>
         </Box>
 

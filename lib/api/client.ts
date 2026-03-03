@@ -2,6 +2,8 @@ import { Env } from '@/lib/env';
 import { withPendingActivity } from '@/lib/async/pendingActivity';
 import { ApiError, type ApiErrorResponse } from './types';
 
+const API_REQUEST_TIMEOUT_MS = 30000;
+
 // ---------------------------------------------------------------------------
 // Token provider
 // ---------------------------------------------------------------------------
@@ -21,9 +23,11 @@ export type TokenProvider = (forceRefresh?: boolean) => Promise<string>;
  *
  * Responsibilities:
  * - Injects `Authorization: Bearer <token>` on every request.
+ * - Enforces a 30-second request timeout per call (aborts and throws 408).
  * - On a `401` response, transparently force-refreshes the token and retries
  *   the request once before propagating the error.
  * - Parses the API response envelope and throws `ApiError` for non-2xx codes.
+ * - Logs outgoing requests (for debugging and monitoring).
  */
 export class ApiClient {
   private readonly baseUrl: string;
@@ -97,6 +101,10 @@ export class ApiClient {
   ): Promise<Response> {
     const token = await this.getToken(forceRefresh);
     const headers = new Headers({ Authorization: `Bearer ${token}` });
+    const abortController = new AbortController();
+    const timeoutId: ReturnType<typeof setTimeout> = setTimeout(() => {
+      abortController.abort();
+    }, API_REQUEST_TIMEOUT_MS);
 
     let bodyInit: BodyInit | undefined;
 
@@ -108,7 +116,31 @@ export class ApiClient {
       bodyInit = JSON.stringify(body);
     }
 
-    return fetch(`${this.baseUrl}${path}`, { method, headers, body: bodyInit });
+    try {
+      console.log(
+        `API Request: ${method} ${this.baseUrl}${path} (forceRefresh=${forceRefresh})`,
+      );
+      return await fetch(`${this.baseUrl}${path}`, {
+        method,
+        headers,
+        body: bodyInit,
+        signal: abortController.signal,
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw new ApiError(
+          408,
+          `Request timeout after ${API_REQUEST_TIMEOUT_MS / 1000}s`,
+          new Date().toISOString(),
+        );
+      }
+
+      const message =
+        error instanceof Error ? error.message : 'Network request failed';
+      throw new ApiError(503, message, new Date().toISOString());
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   private async handleResponse<T>(res: Response): Promise<T> {

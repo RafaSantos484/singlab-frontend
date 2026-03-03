@@ -13,6 +13,9 @@ import {
   normalizeSeparationInfo,
   shouldPollSeparation,
 } from '@/lib/separations';
+import { getFirebaseAuth } from '@/lib/firebase/auth';
+import { updateSeparatedSongInfo } from '@/lib/firebase/songs';
+import { getStorageDownloadUrl } from '@/lib/storage/getStorageDownloadUrl';
 import { useStorageDownloadUrls } from './useStorageDownloadUrls';
 
 const POLL_INTERVAL_MS = 1000 * 60; // 1 minute
@@ -33,21 +36,19 @@ interface UseSeparationStatusResult {
  * Manages the complete lifecycle of stem separation for a song.
  *
  * Responsibilities:
- * - **Submit**: Call `requestSeparation(provider)` to initiate a new separation task
- * - **Poll**: Automatically polls every 60 seconds while task status is 'processing'
- * - **Refresh**: Manual `refreshStatus()` call to update status on demand
- * - **Normalize**: Converts provider-specific task data to unified schema via adapters
- * - **Error handling**: Captures and exposes API and network errors
+ * - **Submit**: Call `requestSeparation(provider)` to initiate a new separation task.
+ *   Gets the song's signed audio URL, calls the backend with audioUrl+title,
+ *   and persists the provider response to Firestore.
+ * - **Poll**: Automatically polls every 60 seconds while task status is 'processing'.
+ * - **Refresh**: Manual `refreshStatus()` call to update status on demand.
+ *   Calls the backend with the taskId, then writes the updated provider data
+ *   to Firestore.
+ * - **Normalize**: Converts provider-specific task data to unified schema via adapters.
+ * - **Error handling**: Captures and exposes API and network errors.
  *
  * The hook subscribes to `song.separatedSongInfo` (which is updated by the
  * Firestore listener in `GlobalStateProvider`) and normalizes it to a provider-agnostic
- * shape for UI consumption. When backend updates the Firestore document with new
- * task data, the hook automatically re-normalizes and the component re-renders.
- *
- * Polling is automatic:
- * - Starts when separation task is 'processing' (via `shouldPollSeparation`)
- * - Immediately refreshes once, then polls at 60s intervals
- * - Stops when task reaches 'finished' or 'failed' status
+ * shape for UI consumption.
  *
  * **Stem processing** is handled separately by `useStemAutoProcessor` in the
  * `GlobalStateProvider`. This hook only polls provider status, it does NOT
@@ -82,10 +83,30 @@ export function useSeparationStatus(song: Song): UseSeparationStatusResult {
   }, []);
 
   const refreshStatus = useCallback(async (): Promise<void> => {
+    const currentUser = getFirebaseAuth().currentUser;
+    if (!currentUser) return;
+
+    // Need the taskId from the existing separation info
+    const normalized = normalizeSeparationInfo(song.separatedSongInfo);
+    if (!normalized?.taskId) return;
+
     setIsRefreshing(true);
     setError(null);
     try {
-      await separationsApi.refreshSeparationStatus(song.id);
+      const providerData =
+        await separationsApi.refreshSeparationStatus(
+          normalized.taskId,
+          normalized.provider,
+        );
+
+      if (providerData) {
+        // Write updated provider data to Firestore
+        await updateSeparatedSongInfo(currentUser.uid, song.id, {
+          provider: normalized.provider,
+          providerData,
+          stems: song.separatedSongInfo?.stems ?? null,
+        });
+      }
     } catch (err) {
       const message =
         err instanceof Error
@@ -95,14 +116,44 @@ export function useSeparationStatus(song: Song): UseSeparationStatusResult {
     } finally {
       setIsRefreshing(false);
     }
-  }, [song.id]);
+  }, [song.id, song.separatedSongInfo]);
 
   const requestSeparation = useCallback(
     async (provider?: SeparationProviderName): Promise<void> => {
+      const currentUser = getFirebaseAuth().currentUser;
+      if (!currentUser) {
+        setError('No authenticated user');
+        return;
+      }
+
+      // Get a signed URL for the raw audio file
+      if (!song.rawSongInfo?.path) {
+        setError('Song has no audio file');
+        return;
+      }
+
       setIsRequesting(true);
       setError(null);
       try {
-        await separationsApi.requestSeparation(song.id, provider);
+        const audioUrl = await getStorageDownloadUrl(
+          song.rawSongInfo.path,
+        );
+
+        const providerData =
+          await separationsApi.requestSeparation(
+            audioUrl,
+            song.title,
+            provider,
+          );
+
+        if (providerData) {
+          // Persist provider task data to Firestore
+          await updateSeparatedSongInfo(currentUser.uid, song.id, {
+            provider: provider ?? 'poyo',
+            providerData,
+            stems: null,
+          });
+        }
       } catch (err) {
         const message =
           err instanceof Error
@@ -113,10 +164,10 @@ export function useSeparationStatus(song: Song): UseSeparationStatusResult {
         setIsRequesting(false);
       }
     },
-    [song.id],
+    [song.id, song.title, song.rawSongInfo?.path],
   );
 
-  // Poll while backend reports in-progress state
+  // Poll while task is in-progress
   useEffect(() => {
     clearPoll();
 

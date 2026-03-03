@@ -1,6 +1,7 @@
 import {
   getAuth,
   signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
   sendEmailVerification,
   type Auth,
@@ -44,6 +45,39 @@ export class EmailNotVerifiedError extends Error {
     super('Email address has not been verified.');
     this.name = 'EmailNotVerifiedError';
   }
+}
+
+/**
+ * Creates a new Firebase Auth user account.
+ *
+ * The caller is responsible for persisting the user profile document
+ * in Firestore (via `createUserDoc`) and sending a verification email.
+ *
+ * @param email - User's email address.
+ * @param password - User's password.
+ * @returns The UID of the newly created user.
+ * @throws {FirebaseError} On validation failure or email already in use.
+ */
+export async function createUserAccount(
+  email: string,
+  password: string,
+): Promise<string> {
+  return withPendingActivity(async () => {
+    const auth = getFirebaseAuth();
+    const { user } = await createUserWithEmailAndPassword(
+      auth,
+      email,
+      password,
+    );
+
+    // Send verification email before signing out
+    await sendEmailVerification(user);
+
+    // Sign out immediately — user should verify before logging in
+    await firebaseSignOut(auth);
+
+    return user.uid;
+  });
 }
 
 /**

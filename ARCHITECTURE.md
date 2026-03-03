@@ -9,36 +9,32 @@
 │  ┌─────────────────────────────────────────────────────────────┐ │
 │  │  Next.js App Router (singlab-frontend)                      │ │
 │  │                                                             │ │
-│  │  Pages & Layouts         Components            Lib (utils)     │ │
-│  │  ─────────────────       ──────────────         ──────────     │ │
-│  │  app/layout.tsx          features/GlobalPlayer  api/songs      │ │
-│  │  app/page.tsx            ui/…                   firebase/auth  │ │
-│  │  app/login/              …                      hooks/useAuth  │ │
-│  │  app/dashboard/                                 hooks/useSong  │ │
-│  └──────────────┬──────────────────────────────────────────────┘ │
-└─────────────────│─────────────────────────────────────────────────┘
-                  │  HTTP (REST)
-                  ▼
-┌───────────────────────────────────────────────────────────────────┐
-│  singlab-api (NestJS + Firebase Functions)                       │
-│                                                                   │
-│  POST /songs            ← Register song (JSON metadata only)     │
-│  GET  /songs            ← List user songs                        │
-│  GET  /songs/:id        ← Get song details                        │
-│  GET  /songs/:id/raw/url ← Get (and refresh) signed audio URL    │
-│  POST /songs/:id/separation ← Request stem separation            │
-│  PUT  /songs/:id/separation/stems ← Update stem storage paths    │
-└──────────────────────────────────┬────────────────────────────────┘
-                                   │
-                    ┌──────────────┼──────────────┐
-                    │              │              │
-                    ▼              ▼              ▼
-             ┌────────────┐ ┌──────────┐ ┌─────────────┐
-             │ Stem Split │ │  ASR /   │ │  Firestore  │
-             │ API (PoYo) │ │ Transcr. │ │  + Storage  │
-             │            │ │(OpenAI / │ │ (raw audio  │
-             │            │ │ AssemblyAI) │ and stems)  │
-             └────────────┘ └──────────┘ └─────────────┘
+│  │  Pages & Layouts         Components            Lib (utils)  │ │
+│  │  ─────────────────       ──────────────         ──────────  │ │
+│  │  app/layout.tsx          features/GlobalPlayer  firebase/*  │ │
+│  │  app/page.tsx            ui/…                   api/sep.    │ │
+│  │  app/login/              …                      hooks/*     │ │
+│  │  app/dashboard/                                 store/*     │ │
+│  └──────┬───────────────────────────┬─────────────────────────┘ │
+└─────────│───────────────────────────│──────────────────────────────┘
+          │  Direct SDK                │  HTTP (REST)
+          ▼                           ▼
+┌──────────────────────┐  ┌──────────────────────────────────────┐
+│ Firebase (client SDK)│  │ singlab-api (NestJS + Cloud Functions)│
+│                      │  │                                      │
+│ • Auth (sign-in,     │  │ POST /separations/submit              │
+│   registration)      │  │   → Forward request to PoYo API      │
+│ • Firestore (songs,  │  │ GET  /separations/status              │
+│   users, separation  │  │   → Fetch task status from PoYo      │
+│   info)              │  │                                      │
+│ • Cloud Storage      │  │ No Firestore / Storage access        │
+│   (raw audio, stems) │  └──────────────┬───────────────────────┘
+└──────────────────────┘                 │
+                                         ▼
+                                  ┌────────────┐
+                                  │ Stem Split │
+                                  │ API (PoYo) │
+                                  └────────────┘
 ```
 
 ## Frontend Layers
@@ -73,7 +69,13 @@ Components are split into two groups:
           Uses `useSeparationStatus` hook to manage the separation lifecycle.
      - `SongDeleteButton` — reusable confirmation dialog for deleting songs with
           loading state, accessibility features, and error handling.
-     - `SongCreateDialog` — upload workflow (metadata + file validation + API).
+     - `SongCreateDialog` — upload workflow with:
+          * File picker + drag-and-drop support
+          * Audio format validation (MIME type + extension fallback)
+          * Client-side metadata extraction from audio tags
+          * Client-side FFmpeg WASM MP3 conversion with progress tracking
+          * Form validation for title/author
+          * Multi-phase progress UI (converting → uploading → saving)
      - `SongEditDialog` — song metadata editing with validation and error handling.
 
 ### 3. Lib
@@ -82,14 +84,16 @@ Shared utilities used across the app:
 
 | Module | Responsibility |
 |---|---|
-| `lib/api/` | Typed HTTP client wrapping `singlab-api` endpoints |
-| `lib/api/song-creation.ts` | Two-step song upload: client-side Storage upload + API registration with rollback |
-| `lib/api/separations.ts` | API client for stem separation operations (request, refresh, update stems) |
+| `lib/api/` | Typed HTTP client for backend separation endpoints only (30s timeout, logging) |
+| `lib/api/song-creation.ts` | Three-step song upload: validation → FFmpeg MP3 conversion → Storage upload → Firestore save with rollback |
+| `lib/api/separations.ts` | API client for stem separation proxy (submit, status) |
+| `lib/audio/convertToMp3.ts` | Client-side audio/video → MP3 conversion using FFmpeg WASM (singleton, lazy-loaded from CDN) |
 | `lib/async/` | Pending activity tracking for navigation guards (prevents leaving during uploads) |
-| `lib/firebase/` | Firebase app initialization (singleton) and auth helpers |
+| `lib/firebase/` | Firebase app initialization (singleton), auth helpers, Firestore CRUD (songs, users), Storage utilities |
 | `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`, `useSeparationStatus`, `useStemAutoProcessor`, etc.) |
 | `lib/separations/` | Adapter pattern for provider-agnostic separation normalization and stem URL extraction |
 | `lib/storage/` | Firebase Storage upload utilities (raw songs and separated stems) with rollback support |
+| `lib/storage/StorageUrlManager.ts` | Centralized Firebase Storage download URL caching with TTL (1 day) based expiration, deduplication of concurrent requests, and automatic refresh on expiry. Ensures fast URL access for real-time playback switching without redundant Firebase calls. |
 | `lib/store/` | Global state — `GlobalStateProvider` (React Context + useReducer) manages auth, songs, and player state |
 | `lib/theme/muiTheme.ts` | Centralized MUI theme tokens and component defaults |
 | `lib/validation/` | Zod-based validation schemas and functions (sign-in, user creation) |
@@ -116,28 +120,43 @@ Protected endpoints
 
 ## Song Upload & Stem Processing Flows
 
-### Song Upload Flow (Two-Step: Storage → API)
+### Song Upload Flow (Validation → Conversion → Storage → Firestore)
 
 ```
-[User selects audio file in SongCreateDialog]
+[User selects audio file via picker or drag-and-drop in SongCreateDialog]
      │
-     │ 1. Client-side validation (size, format)
-     │ 2. Generate stable songId (Firestore doc ID)
-     │ 3. Upload raw file to Storage: users/:userId/songs/:songId/raw.mp3
+     │ 1. Client-side validation (size, format, MIME + extension fallback)
+     │ 2. Metadata extraction from audio tags (optional, auto-fill title/artist)
+     │ 3. Extract metadata if available
+     ▼
+[FFmpeg WASM converts audio/video to MP3 (if not already MP3)]
+     │
+     │ Uses [@ffmpeg/ffmpeg] loaded from CDN (single-threaded, no COOP/COEP needed)
+     │ Fast path: if file is already MP3, returns unchanged
+     │ Supports: MP3, WAV, OGG, WebM, MP4, MOV, FLAC, AAC, M4A
+     │ VBR encoding (~192 kbps) for smaller file sizes
+     │ Progress callback updates UI (0–100%)
+     ▼
+[User fills in Title and Author (can be auto-filled from metadata)]
+     │
+     │ Client-side validation of metadata fields
+     ▼
+[Generate stable songId (Firestore doc ID)]
+[Upload MP3 to Storage: users/:userId/songs/:songId/raw.mp3]
      ▼
 [Firebase Storage SDK uploads audio]
      │
      │ withPendingActivity() tracks upload
      │ Navigation guard prevents tab close
      ▼
-[POST /songs with { songId, title, author }]
+[createSongDoc() writes directly to Firestore]
      │
-     │ Backend validates Storage file exists
-     │ Creates Firestore document
+     │ Creates song document at /users/{uid}/songs/{songId}
+     │ No backend API call needed
      ▼
 [Success]
      │
-     │ If API call fails → rollback: delete Storage file
+     │ If Firestore write fails → rollback: delete Storage file
      │ Real-time listener adds song to globalState
      ▼
 [Song appears in dashboard]
@@ -148,15 +167,22 @@ Protected endpoints
 ```
 [User clicks "Request Separation" on song card]
      │
-     │ POST /songs/:id/separation
+     │ 1. Get signed audio URL from Storage
+     │ 2. POST /separations/submit { audioUrl, title }
      ▼
-[Backend initiates PoYo separation task]
+[Backend forwards request to PoYo API]
      │
-     │ Firestore updated with providerData.taskId
+     │ Returns provider response (taskId, status, etc.)
+     ▼
+[Frontend writes providerData to Firestore]
+     │
+     │ updateSeparatedSongInfo() writes to song doc
      ▼
 [useSeparationStatus polls status every 5s]
      │
-     │ Backend polls PoYo API and updates Firestore providerData
+     │ GET /separations/status?taskId=xxx
+     │ Backend fetches status from PoYo API
+     │ Frontend writes updated providerData to Firestore
      │ Firestore listener propagates changes to globalState
      ▼
 [Status: processing → finished]
@@ -170,14 +196,13 @@ Protected endpoints
      │ Uploads to Storage: users/:userId/songs/:songId/stems/:stemName.mp3
      │ withPendingActivity() tracks uploads
      ▼
-[PUT /songs/:id/separation/stems with storage paths]
+[Frontend writes stem paths directly to Firestore]
      │
-     │ Backend validates Storage files exist
-     │ Updates Firestore with stem paths + expiry metadata
+     │ updateSeparationStems() updates song doc with paths + uploadedAt
      ▼
 [Success]
      │
-     │ If API call fails → rollback: delete uploaded stems
+     │ If Firestore write fails → rollback: delete uploaded stems
      │ Real-time listener updates song.separatedSongInfo.stems
      ▼
 [Stems available in GlobalPlayer]
@@ -186,7 +211,7 @@ Protected endpoints
 ## State Management
 
 The app uses React built-ins (useState, useContext, useReducer) to keep the
-bundle small. No external state management library is added until complexity
+
 requires it.
 
 Global state is managed by `GlobalStateProvider` (`lib/store/`) using React
@@ -200,14 +225,34 @@ Global state is managed by `GlobalStateProvider` (`lib/store/`) using React
   `GlobalPlayer` component handles audio element control and UI rendering.
 
 Server-side interactions that are not covered by real-time listeners (e.g.
-refreshing a signed URL) are handled by dedicated hooks (`useSongRawUrl`) that
-call the REST API directly.
+fetching separation status from the backend proxy) are handled by dedicated
+hooks (`useSeparationStatus`, `useSongRawUrl`) that call the REST API or
+Firebase SDK directly.
 
 ## Audio Playback & Stem Separation
 
 The app uses a single global audio player with centralized state management to
 ensure a consistent playback experience. The player supports both raw audio
 playback and separated stem playback with dynamic stem selection.
+
+### Design Overview
+
+The GlobalPlayer component supports two completely independent playback modes:
+
+1. **Raw Mode** — Plays the original audio file as-is with a single audio element.
+     Simple, no synchronization complexity.
+
+2. **Separated Mode** — Plays isolated stems (vocals, bass, drums, piano, guitar, other).
+     - Vocals is mandatory and serves as the master (source of truth for playback position)
+     - All other stems stay in lock-step with vocals before and during playback
+     - Volume is shared across all stems; disabling a stem mutes it but keeps it playing in sync
+     - Transport controls (play, pause, seek, volume) affect all stems equally
+
+Raw and separated modes are completely independent:
+- Each mode is built on-demand; the inactive mode never loads data (no memory waste)
+- Switching between modes triggers a complete audio rebuild (old elements disposed, new ones created)
+- This acts as an automatic song restart from 0 on the new source
+- Raw and separated URLs are cached centrally via `StorageUrlManager` with 1-day TTL, so mode switches are instant
 
 ### Architecture
 
@@ -233,6 +278,11 @@ GlobalPlayer (component)
     ├─→ Unified Multi-Track Audio Engine
     │       ├─→ All tracks (raw + stems) always play simultaneously
     │       ├─→ Stem selection only changes volume (0 for deselected, base volume for selected)
+     │       ├─→ playbackSource: 'raw' or 'separated'
+     │       │   ├─→ raw mode: single audio element, simple transport
+     │       │   └─→ separated mode: multi-stem playback with vocals as master
+     │       ├─→ In separated mode: all non-vocal tracks stay synced to vocals' position
+     │       ├─→ Stem selection changes which stems are audible (volume 0 = muted but still playing)
     │       ├─→ Deterministic synchronization on every play/resume/seek:
     │       │   └─→ prepareAt(time, autoResume):
     │       │         1. Pause all tracks
@@ -242,15 +292,19 @@ GlobalPlayer (component)
     │       │         4. waitForAllTracksReady() – waits for all elements to reach
     │       │            readyState ≥ HAVE_FUTURE_DATA via 'canplay' events
     │       │            (5 s timeout safety net; stale attempts are cancelled)
-    │       │         5. play() all tracks simultaneously
+     │       │         5. play() all active-track elements simultaneously
     │       │   Raises isSyncing=true for the whole operation, disabling all UI
     │       ├─→ Seek-scrub split: onChange only updates display + silently pauses;
     │       │   onChangeCommitted triggers prepareAt for the committed position
     │       ├─→ Buffering stall recovery: 'waiting'/'stalled' on master pauses
     │       │   non-master tracks; 'playing' re-syncs and restarts them
-    │       └─→ Source switch (raw ↔ separated): changing playbackSource updates
-    │           the tracks memo → trackKey → triggers rebuild useEffect, which
-    │           disposes old elements, creates fresh ones, and auto-plays from 0
+     │       └─→ Mode switch (raw ↔ separated):
+     │           1. Cancel any in-flight sync operations
+     │           2. Pause current audio elements
+     │           3. Update playbackSource state
+     │           4. trackKey changes → rebuild effect fires
+     │           5. Rebuild disposes old elements, creates new ones for new mode
+     │           6. Auto-play from 0 with cached URLs (instant mode switch)
     │
     └─→ Event handlers
             └─→ dispatch({ type: 'PLAYER_SET_STATUS', ... })
@@ -258,40 +312,43 @@ GlobalPlayer (component)
 
 ### Key Components
 
+
 - **`GlobalPlayer` (`components/features/GlobalPlayer.tsx`)** — Single audio
   player component that manages multi-track synchronization for seamless playback
   of raw audio and separated stems.
   
   **Design Principles:**
-  1. **All tracks always play simultaneously** — Selecting/deselecting stems only
-     changes volume (0 = muted, current volume = audible), eliminating cold-start
-     issues and guaranteeing perfect sync.
-  2. **Event-driven synchronization via `prepareAt`** — Every play/resume/seek
+  1. **Two independent playback modes** — Raw mode plays a single audio element.
+     Separated mode plays multiple stem elements with vocals as the master track.
+     Modes are completely independent; switching mode is a full audio rebuild.
+  2. **Master-slave model (separated mode only)** — Vocals is the mandatory master
+     track that drives playback position. All other stems follow vocals' position
+     and maintain perfect lock-step synchronization. In raw mode, there is only
+     one element (the raw audio), so no synchronization is needed.
+  3. **Event-driven synchronization via `prepareAt`** — Every play/resume/seek
      calls `prepareAt(time, autoResume)` which: pauses all tracks; seeks each to
      the exact same `currentTime` (avoiding `fastSeek` whose keyframe snapping
      varies per file); calls `syncAudioTracks()` to correct any sub-frame browser
      clamping; then waits for all elements to be buffered at that position
      (`readyState ≥ HAVE_FUTURE_DATA`) via `'canplay'` events before starting
      simultaneous playback. A 5-second timeout acts as a safety net.
-  3. **`isSyncing` gate** — While `prepareAt` is running, all transport controls
+  4. **`isSyncing` gate** — While `prepareAt` is running, all transport controls
      (play, stop, seek slider, source toggle, stem presets) are disabled and a
      spinner is shown, preventing conflicting user interactions.
-  4. **Seek-scrub split** — The seek slider uses `onChange` to update only the
+  5. **Seek-scrub split** — The seek slider uses `onChange` to update only the
      displayed time (audio is silently paused during the drag), and
      `onChangeCommitted` to trigger the full `prepareAt` sync at the committed
      position. Avoids a buffer-fetch on every pixel of movement.
-  5. **Buffering stall recovery** — `'waiting'`/`'stalled'` events on the master
+  6. **Buffering stall recovery** — `'waiting'`/`'stalled'` events on the master
      track pause all non-master tracks to prevent them drifting ahead. The
      master's `'playing'` event re-syncs and restarts them automatically.
-  6. **Play-attempt tracking** — A monotonically increasing counter cancels stale
+  7. **Play-attempt tracking** — A monotonically increasing counter cancels stale
      in-flight syncs if the user quickly switches songs or issues conflicting
      commands.
-  7. **Source switching (raw ↔ separated)** — The `tracks` memo is
-     source-dependent: raw mode builds only the raw element; separated mode
-     builds only stem elements. Switching source changes `playbackSource`
-     state, which changes `tracks` → `trackKey`, which triggers the rebuild
-     `useEffect`. The rebuild disposes old elements, creates fresh ones for
-     the new source, and auto-plays from 0 – equivalent to a song restart.
+  8. **URL caching strategy** — Raw audio and stem URLs are cached centrally via
+       `StorageUrlManager` with 1-day TTL expiration. This ensures fast mode
+       switching without redundant Firebase API calls. Concurrent requests for the
+       same path are deduplicated, and expired URLs are automatically refreshed.
   
   Supports playback source selection (raw vs. separated), dynamic stem selection
   with preset mixes (vocals-only, instrumental, all stems), and volume control.
@@ -315,10 +372,12 @@ GlobalPlayer (component)
      metadata) which is updated in real-time via Firestore listener.
 
 - **Separation Polling (`useSeparationStatus` hook)** — Manages the separation
-  lifecycle for a song: submission via `separationsApi.requestSeparation()`,
-  polling via `separationsApi.refreshSeparationStatus()` every 5 seconds while
-  in-progress, and error handling. Automatically sets up/tears down the polling
-  interval based on task status.
+  lifecycle for a song: submission via `separationsApi.requestSeparation()` (which
+  gets a signed audio URL from Storage, sends it to the backend proxy, and writes
+  provider data to Firestore), polling via `separationsApi.refreshSeparationStatus()`
+  every 5 seconds while in-progress (writing updated status to Firestore), and
+  error handling. Automatically sets up/tears down the polling interval based on
+  task status.
 
 ### Benefits
 

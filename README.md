@@ -3,28 +3,33 @@
 SingLab is a web application focused on karaoke and singing practice. This
 repository contains the frontend, built with Next.js, React, and TypeScript.
 
-The app allows users to submit audio (uploaded files or approved links), track
-the AI processing pipeline (vocal separation + lyrics transcription), and play
-back the original, vocal-only, and instrumental tracks for karaoke practice.
+The app allows users to submit audio (uploaded files or approved links), request
+AI-powered stem separation, and play back the original, vocal-only, and
+instrumental tracks for karaoke practice. The frontend is **fully responsible
+for all Firebase data and file operations** — the backend acts only as a
+stateless proxy between the frontend and external AI services.
 
 ## Features
 
 - Next.js 16 with App Router and TypeScript
 - Firebase Authentication for user sign-in
-- **Client-side audio upload** with two-step flow:
-  - Upload raw audio directly to Firebase Storage (bypassing API)
-  - Register song metadata via JSON API call
+- **Client-side audio upload** with three-step flow:
+  - Audio format validation (MIME type + extension fallback)
+  - Client-side FFmpeg WASM MP3 conversion with progress tracking (supports MP3, WAV, OGG, WebM, MP4, MOV, FLAC, AAC, M4A)
+  - Upload converted MP3 to Firebase Storage (bypassing API)
+  - Save song metadata directly to Firestore
   - Automatic rollback on failure (orphaned files cleaned up)
-- **Pending activity tracking** — Prevents accidental navigation during uploads
-- Song submission with automatic metadata extraction from audio files
+- **Drag-and-drop file upload** — Intuitive drag-and-drop UI in song upload dialog
+- **Automatic metadata extraction** from audio files
   - Detects title and artist from ID3/audio tags
   - Auto-fills form fields (user can override)
+- **Pending activity tracking** — Prevents accidental navigation during uploads/conversions
 - **Stem separation workflow** with auto-processing:
-  - Request separation via API (triggers backend PoYo task)
+  - Request separation via backend proxy (forwards to PoYo AI)
+  - Frontend polls status and writes provider data to Firestore
   - Client auto-detects separation completion via Firestore listener
   - Client downloads stems from provider and uploads to Firebase Storage
-  - Backend validates and finalizes stem availability
-- Async job tracking for AI processing pipeline (vocal separation, lyrics transcription)
+  - Frontend writes stem paths directly to Firestore
 - Karaoke playback with vocal / instrumental stem toggle
 - Event-driven audio player state synchronization (responds to media keys)
 - Song deletion with confirmation dialog
@@ -100,12 +105,12 @@ npm run type-check      # TypeScript check (no emit)
 │   ├── ui/                 # Visual primitives/brand decorations
 │   └── features/           # Feature-specific components (player, dialogs)
 ├── lib/                    # Shared utilities, hooks, API clients
-│   ├── api/                # API client for singlab-api
-│   │   ├── song-creation.ts # Two-step upload: Storage → API registration
-│   │   ├── separations.ts   # Stem separation API client
+│   ├── api/                # API client for backend separation proxy only
+│   │   ├── song-creation.ts # Two-step upload: Storage → Firestore save
+│   │   ├── separations.ts   # Stem separation proxy client (submit, status)
 │   │   └── ...
 │   ├── async/              # Pending activity tracker (navigation guards)
-│   ├── firebase/           # Firebase client initialization
+│   ├── firebase/           # Firebase client (Auth, Firestore CRUD, Storage)
 │   ├── hooks/              # Custom React hooks (auth, separation, stem processing)
 │   ├── i18n/               # Internationalization routing and utilities
 │   ├── separations/        # Provider adapters for separation normalization
@@ -128,32 +133,33 @@ npm run type-check      # TypeScript check (no emit)
 
 The frontend drives a two-phase song upload and stem processing pipeline:
 
-### 1. Song Upload (Client → Storage → API)
+### 1. Song Upload (Validation → Conversion → Storage → Firestore)
 
-1. User selects audio file in `SongCreateDialog`.
-2. Client validates file (size, format).
-3. Client generates stable `songId` (Firestore doc ID).
-4. **Client uploads raw audio to Firebase Storage** at `users/:userId/songs/:songId/raw.mp3`.
-5. Client registers song metadata with API via `POST /songs` (JSON only).
-6. Backend validates that the Storage file exists and creates Firestore document.
+1. User selects audio file via file picker or drag-and-drop in `SongCreateDialog`.
+2. Client validates file (size, format via MIME type + extension fallback).
+3. Client extracts metadata (title, artist) from audio tags if available.
+4. **Client converts audio/video to MP3 using FFmpeg WASM** (fast path if already MP3).
+5. **Client uploads converted MP3 to Firebase Storage** at `users/:userId/songs/:songId/raw.mp3`.
+6. **Client writes song document directly to Firestore** via `createSongDoc()`.
 7. Real-time Firestore listener adds song to global state.
-8. **Rollback:** If API call fails after Storage upload, client deletes the uploaded file.
+8. **Rollback:** If Firestore write fails after Storage upload, client deletes the uploaded file.
 
 ### 2. Stem Separation & Auto-Processing
 
 1. User clicks "Request Separation" on a song card.
-2. Frontend calls `POST /songs/:id/separation`.
-3. Backend initiates PoYo separation task and updates Firestore `providerData`.
-4. `useSeparationStatus` hook polls task status (Firestore listener propagates changes).
-5. When `status=finished` and `stems=null`, **`useStemAutoProcessor` auto-triggers**:
+2. Frontend gets a signed audio URL from Storage and calls `POST /separations/submit`.
+3. Backend proxy forwards request to PoYo AI and returns the raw provider response.
+4. **Frontend writes provider data (taskId, status) to Firestore** via `updateSeparatedSongInfo()`.
+5. `useSeparationStatus` hook polls `GET /separations/status?taskId=xxx` every 5s.
+6. **Frontend writes updated status to Firestore** on each poll.
+7. When `status=finished` and `stems=null`, **`useStemAutoProcessor` auto-triggers**:
    - Extracts stem URLs from `providerData` (via `PoyoSeparationAdapter`).
    - Downloads each stem from PoYo as Blob.
    - Uploads stems to Firebase Storage at `users/:userId/songs/:songId/stems/:stemName.mp3`.
-   - Calls `PUT /songs/:id/separation/stems` to notify backend of storage paths.
-6. Backend validates Storage files and updates Firestore with stem paths.
-7. **Rollback:** If API call fails, client deletes uploaded stems.
-8. Real-time listener updates `song.separatedSongInfo.stems` in global state.
-9. Stems become available in `GlobalPlayer`.
+   - **Writes stem paths directly to Firestore** via `updateSeparationStems()`.
+8. **Rollback:** If Firestore write fails, client deletes uploaded stems.
+9. Real-time listener updates `song.separatedSongInfo.stems` in global state.
+10. Stems become available in `GlobalPlayer`.
 
 ## Environment Variables
 

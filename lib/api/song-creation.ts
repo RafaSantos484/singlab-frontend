@@ -4,22 +4,24 @@
  * Service layer for song creation operations.
  *
  * Upload flow:
- * 1. Validate the audio file (size and type).
- * 2. Generate a stable `songId`.
- * 3. Upload the raw file to Firebase Storage at
- *    `users/:userId/songs/:songId/raw.mp3`.
- * 4. Register the song with the API by sending JSON metadata.
+ * 1. Validate the audio file (size and type via MIME + extension fallback).
+ * 2. Extract metadata (title, artist) from audio tags (optional).
+ * 3. Convert audio/video to MP3 using FFmpeg WASM (fast path if already MP3).
+ * 4. Generate a stable `songId` (Firestore doc ID).
+ * 5. Upload the MP3 file to Firebase Storage at `users/:userId/songs/:songId/raw.mp3`.
+ * 6. Create the song document directly in Firestore with metadata and storage path.
  *
- * The backend validates that the storage file exists before persisting the
- * Firestore document.
+ * If the Firestore write fails after Storage upload, the file is
+ * automatically rolled back (deleted from Storage).
  */
 
-import { collection, doc } from 'firebase/firestore';
-
 import { getFirebaseAuth } from '@/lib/firebase/auth';
-import { getFirebaseFirestore } from '@/lib/firebase/firestore';
-import { uploadRawSong, deleteRawSong } from '@/lib/storage/uploadRawSong';
-import { songsApi } from './index';
+import {
+  uploadRawSong,
+  deleteRawSong,
+  buildRawSongStoragePath,
+} from '@/lib/storage/uploadRawSong';
+import { generateSongId, createSongDoc } from '@/lib/firebase/songs';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -29,14 +31,40 @@ const MAX_FILE_SIZE_MB = 100;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 // Supported audio/video formats from FFmpeg
+// All these formats are converted to MP3 before uploading.
 const SUPPORTED_AUDIO_FORMATS = [
   'audio/mpeg', // .mp3
+  'audio/mp3', // .mp3 (alternative MIME)
+  'audio/x-mpeg', // .mp3 (older MIME)
   'audio/wav', // .wav
+  'audio/x-wav', // .wav (alternative)
   'audio/ogg', // .ogg
-  'audio/webm', // .webm
+  'audio/webm', // .webm (audio)
+  'video/webm', // .webm (video)
   'video/mp4', // .mp4 (video with audio)
+  'audio/mp4', // .mp4 (audio-only)
   'video/quicktime', // .mov
   'audio/flac', // .flac
+  'audio/x-flac', // .flac (alternative)
+  'audio/aac', // .aac
+  'audio/x-aac', // .aac (alternative)
+  'audio/m4a', // .m4a
+  'audio/x-m4a', // .m4a (alternative)
+];
+
+// Supported extensions as fallback when MIME type is absent or generic
+const SUPPORTED_EXTENSIONS = [
+  '.mp3',
+  '.wav',
+  '.ogg',
+  '.webm',
+  '.mp4',
+  '.mov',
+  '.flac',
+  '.aac',
+  '.m4a',
+  '.mpeg',
+  '.mpga',
 ];
 
 // ---------------------------------------------------------------------------
@@ -44,12 +72,13 @@ const SUPPORTED_AUDIO_FORMATS = [
 // ---------------------------------------------------------------------------
 
 /**
- * Describes the current phase of the two-step song creation process:
- * - `'uploading'`   – raw audio file is being uploaded to Firebase Storage.
- * - `'registering'` – file upload is complete; song metadata is being
- *                     registered via the API.
+ * Describes the current phase of the song creation process:
+ * - `'converting'`  – audio/video file is being converted to MP3.
+ * - `'uploading'`   – MP3 file is being uploaded to Firebase Storage.
+ * - `'saving'`      – file upload is complete; song document is being
+ *                     written to Firestore.
  */
-export type SongCreationPhase = 'uploading' | 'registering';
+export type SongCreationPhase = 'converting' | 'uploading' | 'saving';
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -114,8 +143,14 @@ export function validateSongFile(file: File): void {
     throw new FileSizeExceededError(file.name, file.size / 1024 / 1024);
   }
 
-  // Check file type
-  if (!SUPPORTED_AUDIO_FORMATS.includes(file.type)) {
+  // Check file type – first by MIME, then by extension as fallback
+  const mimeOk = SUPPORTED_AUDIO_FORMATS.includes(file.type);
+  const ext = file.name.includes('.')
+    ? file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
+    : '';
+  const extOk = SUPPORTED_EXTENSIONS.includes(ext);
+
+  if (!mimeOk && !extOk) {
     throw new InvalidFileTypeError(file.name);
   }
 }
@@ -139,35 +174,28 @@ export interface CreateSongResult {
 }
 
 /**
- * Generates a Firestore-compatible document ID for a new song.
- * Uses the Firestore client SDK to produce the same format as server-generated IDs.
- *
- * @param userId - Firebase Auth UID of the song owner.
- * @returns A new unique song document ID.
- */
-function generateSongId(userId: string): string {
-  const firestore = getFirebaseFirestore();
-  return doc(collection(firestore, 'users', userId, 'songs')).id;
-}
-
-/**
  * Creates a new song using a two-step process:
- * 1. Uploads the raw audio file to Firebase Storage.
- * 2. Registers the song document with the API (JSON metadata only).
+ * 1. Uploads the MP3 file to Firebase Storage (caller must convert beforehand).
+ * 2. Creates the song document directly in Firestore with metadata.
  *
  * The `onPhaseChange` callback receives `'uploading'` before the Storage
- * upload and `'registering'` before the API call, allowing the UI to
+ * upload and `'saving'` before the Firestore write, allowing the UI to
  * display granular progress.
  *
- * If the API registration fails after the file has been uploaded to Storage,
+ * If the Firestore write fails after the file has been uploaded to Storage,
  * the file is automatically rolled back (deleted). This ensures the storage
  * is not left with orphaned files.
  *
- * @param options - File, metadata (title, author) and optional phase callback.
+ * **Note:** The caller (e.g., `SongCreateDialog`) is responsible for:
+ * - File format validation (MIME type + extension fallback)
+ * - Audio metadata extraction (title, artist from tags)
+ * - MP3 conversion using FFmpeg (via `convertToMp3`)
+ *
+ * @param options - MP3 file, metadata (title, author) and optional phase callback.
  * @returns The created song result.
  * @throws {InvalidFileError} If client-side file validation fails.
  * @throws {StorageUploadError} If the Firebase Storage upload step fails.
- * @throws {ApiError} If the API registration call fails (file is rolled back).
+ * @throws {Error} If the Firestore write fails (file is rolled back).
  */
 export async function createSong(
   options: CreateSongOptions,
@@ -189,7 +217,9 @@ export async function createSong(
 
   // 4. Upload the raw audio file to Storage.
   onPhaseChange?.('uploading');
+  let storagePath: string;
   try {
+    storagePath = buildRawSongStoragePath(userId, songId);
     await uploadRawSong(userId, songId, file);
   } catch (err) {
     const message =
@@ -197,18 +227,14 @@ export async function createSong(
     throw new StorageUploadError(message);
   }
 
-  // 5. Register the song document via the API.
-  onPhaseChange?.('registering');
+  // 5. Create the song document directly in Firestore.
+  onPhaseChange?.('saving');
   try {
-    const result = await songsApi.uploadSong({ songId, title, author });
+    await createSongDoc(userId, songId, title, author, storagePath);
 
-    return {
-      songId: result.songId,
-      title: result.title,
-      author: result.author,
-    };
+    return { songId, title, author };
   } catch (err) {
-    // API registration failed — rollback the Storage upload to avoid orphaned files.
+    // Firestore write failed — rollback the Storage upload to avoid orphaned files.
     try {
       await deleteRawSong(userId, songId);
     } catch (rollbackErr) {
@@ -219,7 +245,7 @@ export async function createSong(
       );
     }
 
-    // Re-throw the original API error.
+    // Re-throw the original error.
     throw err;
   }
 }
