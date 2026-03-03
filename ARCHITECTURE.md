@@ -9,36 +9,32 @@
 │  ┌─────────────────────────────────────────────────────────────┐ │
 │  │  Next.js App Router (singlab-frontend)                      │ │
 │  │                                                             │ │
-│  │  Pages & Layouts         Components            Lib (utils)     │ │
-│  │  ─────────────────       ──────────────         ──────────     │ │
-│  │  app/layout.tsx          features/GlobalPlayer  api/songs      │ │
-│  │  app/page.tsx            ui/…                   firebase/auth  │ │
-│  │  app/login/              …                      hooks/useAuth  │ │
-│  │  app/dashboard/                                 hooks/useSong  │ │
-│  └──────────────┬──────────────────────────────────────────────┘ │
-└─────────────────│─────────────────────────────────────────────────┘
-                  │  HTTP (REST)
-                  ▼
-┌───────────────────────────────────────────────────────────────────┐
-│  singlab-api (NestJS + Firebase Functions)                       │
-│                                                                   │
-│  POST /songs            ← Register song (JSON metadata only)     │
-│  GET  /songs            ← List user songs                        │
-│  GET  /songs/:id        ← Get song details                        │
-│  GET  /songs/:id/raw/url ← Get (and refresh) signed audio URL    │
-│  POST /songs/:id/separation ← Request stem separation            │
-│  PUT  /songs/:id/separation/stems ← Update stem storage paths    │
-└──────────────────────────────────┬────────────────────────────────┘
-                                   │
-                    ┌──────────────┼──────────────┐
-                    │              │              │
-                    ▼              ▼              ▼
-             ┌────────────┐ ┌──────────┐ ┌─────────────┐
-             │ Stem Split │ │  ASR /   │ │  Firestore  │
-             │ API (PoYo) │ │ Transcr. │ │  + Storage  │
-             │            │ │(OpenAI / │ │ (raw audio  │
-             │            │ │ AssemblyAI) │ and stems)  │
-             └────────────┘ └──────────┘ └─────────────┘
+│  │  Pages & Layouts         Components            Lib (utils)  │ │
+│  │  ─────────────────       ──────────────         ──────────  │ │
+│  │  app/layout.tsx          features/GlobalPlayer  firebase/*  │ │
+│  │  app/page.tsx            ui/…                   api/sep.    │ │
+│  │  app/login/              …                      hooks/*     │ │
+│  │  app/dashboard/                                 store/*     │ │
+│  └──────┬───────────────────────────┬─────────────────────────┘ │
+└─────────│───────────────────────────│──────────────────────────────┘
+          │  Direct SDK                │  HTTP (REST)
+          ▼                           ▼
+┌──────────────────────┐  ┌──────────────────────────────────────┐
+│ Firebase (client SDK)│  │ singlab-api (NestJS + Cloud Functions)│
+│                      │  │                                      │
+│ • Auth (sign-in,     │  │ POST /separations/submit              │
+│   registration)      │  │   → Forward request to PoYo API      │
+│ • Firestore (songs,  │  │ GET  /separations/status              │
+│   users, separation  │  │   → Fetch task status from PoYo      │
+│   info)              │  │                                      │
+│ • Cloud Storage      │  │ No Firestore / Storage access        │
+│   (raw audio, stems) │  └──────────────┬───────────────────────┘
+└──────────────────────┘                 │
+                                         ▼
+                                  ┌────────────┐
+                                  │ Stem Split │
+                                  │ API (PoYo) │
+                                  └────────────┘
 ```
 
 ## Frontend Layers
@@ -79,7 +75,7 @@ Components are split into two groups:
           * Client-side metadata extraction from audio tags
           * Client-side FFmpeg WASM MP3 conversion with progress tracking
           * Form validation for title/author
-          * Multi-phase progress UI (converting → uploading → registering)
+          * Multi-phase progress UI (converting → uploading → saving)
      - `SongEditDialog` — song metadata editing with validation and error handling.
 
 ### 3. Lib
@@ -88,12 +84,12 @@ Shared utilities used across the app:
 
 | Module | Responsibility |
 |---|---|
-| `lib/api/` | Typed HTTP client wrapping `singlab-api` endpoints (includes 30s request timeout and logging) |
-| `lib/api/song-creation.ts` | Three-step song upload: validation → FFmpeg MP3 conversion → Storage upload → API registration with rollback |
+| `lib/api/` | Typed HTTP client for backend separation endpoints only (30s timeout, logging) |
+| `lib/api/song-creation.ts` | Three-step song upload: validation → FFmpeg MP3 conversion → Storage upload → Firestore save with rollback |
+| `lib/api/separations.ts` | API client for stem separation proxy (submit, status) |
 | `lib/audio/convertToMp3.ts` | Client-side audio/video → MP3 conversion using FFmpeg WASM (singleton, lazy-loaded from CDN) |
-| `lib/api/separations.ts` | API client for stem separation operations (request, refresh, update stems) |
 | `lib/async/` | Pending activity tracking for navigation guards (prevents leaving during uploads) |
-| `lib/firebase/` | Firebase app initialization (singleton) and auth helpers |
+| `lib/firebase/` | Firebase app initialization (singleton), auth helpers, Firestore CRUD (songs, users), Storage utilities |
 | `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`, `useSeparationStatus`, `useStemAutoProcessor`, etc.) |
 | `lib/separations/` | Adapter pattern for provider-agnostic separation normalization and stem URL extraction |
 | `lib/storage/` | Firebase Storage upload utilities (raw songs and separated stems) with rollback support |
@@ -124,7 +120,7 @@ Protected endpoints
 
 ## Song Upload & Stem Processing Flows
 
-### Song Upload Flow (Three-Step: Validation → Conversion → Storage → API)
+### Song Upload Flow (Validation → Conversion → Storage → Firestore)
 
 ```
 [User selects audio file via picker or drag-and-drop in SongCreateDialog]
@@ -153,14 +149,14 @@ Protected endpoints
      │ withPendingActivity() tracks upload
      │ Navigation guard prevents tab close
      ▼
-[POST /songs with { songId, title, author }]
+[createSongDoc() writes directly to Firestore]
      │
-     │ Backend validates Storage file exists
-     │ Creates Firestore document
+     │ Creates song document at /users/{uid}/songs/{songId}
+     │ No backend API call needed
      ▼
 [Success]
      │
-     │ If API call fails → rollback: delete Storage file
+     │ If Firestore write fails → rollback: delete Storage file
      │ Real-time listener adds song to globalState
      ▼
 [Song appears in dashboard]
@@ -171,15 +167,22 @@ Protected endpoints
 ```
 [User clicks "Request Separation" on song card]
      │
-     │ POST /songs/:id/separation
+     │ 1. Get signed audio URL from Storage
+     │ 2. POST /separations/submit { audioUrl, title }
      ▼
-[Backend initiates PoYo separation task]
+[Backend forwards request to PoYo API]
      │
-     │ Firestore updated with providerData.taskId
+     │ Returns provider response (taskId, status, etc.)
+     ▼
+[Frontend writes providerData to Firestore]
+     │
+     │ updateSeparatedSongInfo() writes to song doc
      ▼
 [useSeparationStatus polls status every 5s]
      │
-     │ Backend polls PoYo API and updates Firestore providerData
+     │ GET /separations/status?taskId=xxx
+     │ Backend fetches status from PoYo API
+     │ Frontend writes updated providerData to Firestore
      │ Firestore listener propagates changes to globalState
      ▼
 [Status: processing → finished]
@@ -193,14 +196,13 @@ Protected endpoints
      │ Uploads to Storage: users/:userId/songs/:songId/stems/:stemName.mp3
      │ withPendingActivity() tracks uploads
      ▼
-[PUT /songs/:id/separation/stems with storage paths]
+[Frontend writes stem paths directly to Firestore]
      │
-     │ Backend validates Storage files exist
-     │ Updates Firestore with stem paths + expiry metadata
+     │ updateSeparationStems() updates song doc with paths + uploadedAt
      ▼
 [Success]
      │
-     │ If API call fails → rollback: delete uploaded stems
+     │ If Firestore write fails → rollback: delete uploaded stems
      │ Real-time listener updates song.separatedSongInfo.stems
      ▼
 [Stems available in GlobalPlayer]
@@ -223,8 +225,9 @@ Global state is managed by `GlobalStateProvider` (`lib/store/`) using React
   `GlobalPlayer` component handles audio element control and UI rendering.
 
 Server-side interactions that are not covered by real-time listeners (e.g.
-refreshing a signed URL) are handled by dedicated hooks (`useSongRawUrl`) that
-call the REST API directly.
+fetching separation status from the backend proxy) are handled by dedicated
+hooks (`useSeparationStatus`, `useSongRawUrl`) that call the REST API or
+Firebase SDK directly.
 
 ## Audio Playback & Stem Separation
 
@@ -369,10 +372,12 @@ GlobalPlayer (component)
      metadata) which is updated in real-time via Firestore listener.
 
 - **Separation Polling (`useSeparationStatus` hook)** — Manages the separation
-  lifecycle for a song: submission via `separationsApi.requestSeparation()`,
-  polling via `separationsApi.refreshSeparationStatus()` every 5 seconds while
-  in-progress, and error handling. Automatically sets up/tears down the polling
-  interval based on task status.
+  lifecycle for a song: submission via `separationsApi.requestSeparation()` (which
+  gets a signed audio URL from Storage, sends it to the backend proxy, and writes
+  provider data to Firestore), polling via `separationsApi.refreshSeparationStatus()`
+  every 5 seconds while in-progress (writing updated status to Firestore), and
+  error handling. Automatically sets up/tears down the polling interval based on
+  task status.
 
 ### Benefits
 
