@@ -96,7 +96,9 @@ export const StemUploadForm = forwardRef<
   ]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [stemProgress, setStemProgress] = useState<Record<string, StemProgress>>({});
+  const [stemProgress, setStemProgress] = useState<
+    Record<string, StemProgress>
+  >({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // Get selected types
@@ -333,114 +335,124 @@ export const StemUploadForm = forwardRef<
 
           return (
             <Box key={stem.id}>
-            <Box
-              sx={{
-                display: 'flex',
-                gap: 2,
-                alignItems: 'flex-start',
-                p: 2,
-                border: `1px solid ${
-                  progress ? 'rgba(168, 85, 247, 0.5)' : 'rgba(168, 85, 247, 0.2)'
-                }`,
-                borderRadius: '8px',
-                bgcolor: 'rgba(30, 27, 75, 0.5)',
-              }}
-            >
-              {/* Type select */}
-              <FormControl
-                sx={{ flex: 1, minWidth: '150px' }}
-                size="small"
-                error={!!stemError && !stem.type}
-              >
-                <InputLabel>{t('typeLabel')}</InputLabel>
-                <Select
-                  value={stem.type}
-                  label={t('typeLabel')}
-                  onChange={(e) =>
-                    updateStemType(
-                      stem.id,
-                      e.target.value as SeparationStemName | '',
-                    )
-                  }
-                  disabled={isVocalsDefault || isLoading}
-                >
-                  {isVocalsDefault ? (
-                    <MenuItem value="vocals">
-                      {tPlayer('stems.vocals')} ({t('requiredLabel')})
-                    </MenuItem>
-                  ) : (
-                    [
-                      <MenuItem key="empty" value="">
-                        <em>{t('selectTypeLabel')}</em>
-                      </MenuItem>,
-                      ...availableTypes
-                        .concat(stem.type ? [stem.type] : [])
-                        .map((type) => (
-                          <MenuItem key={type} value={type}>
-                            {tPlayer(
-                              `stems.${type}` as Parameters<typeof tPlayer>[0],
-                            )}
-                          </MenuItem>
-                        )),
-                    ]
-                  )}
-                </Select>
-                {stemError && !stem.type && (
-                  <FormHelperText>{stemError}</FormHelperText>
-                )}
-              </FormControl>
-
-              {/* File input */}
-              <TextField
-                type="file"
-                inputProps={{ accept: 'audio/*' }}
-                onChange={(e) => {
-                  const file =
-                    (e.target as HTMLInputElement).files?.[0] ?? null;
-                  updateStemFile(stem.id, file);
+              <Box
+                sx={{
+                  display: 'flex',
+                  gap: 2,
+                  alignItems: 'flex-start',
+                  p: 2,
+                  border: `1px solid ${
+                    progress
+                      ? 'rgba(168, 85, 247, 0.5)'
+                      : 'rgba(168, 85, 247, 0.2)'
+                  }`,
+                  borderRadius: '8px',
+                  bgcolor: 'rgba(30, 27, 75, 0.5)',
                 }}
-                disabled={isLoading}
-                error={!!stemError && !stem.file}
-                helperText={
-                  stemError && !stem.file
-                    ? stemError
-                    : stem.file
-                      ? stem.file.name
-                      : undefined
-                }
-                sx={{ flex: 1, minWidth: '200px' }}
-                size="small"
-              />
-
-              {/* Remove button */}
-              <IconButton
-                onClick={() => removeStem(stem.id)}
-                disabled={!canRemove}
-                size="small"
-                aria-label={t('removeButton')}
               >
-                <DeleteIcon fontSize="small" />
-              </IconButton>
-            </Box>
-
-            {/* Per-stem progress bar */}
-            {progress && (
-              <Box sx={{ mt: 0.5, px: 0.5 }}>
-                <Typography
-                  variant="caption"
-                  sx={{ color: 'text.secondary', mb: 0.5, display: 'block' }}
+                {/* Type select */}
+                <FormControl
+                  sx={{ flex: 1, minWidth: '150px' }}
+                  size="small"
+                  error={!!stemError && !stem.type}
                 >
-                  {progress.phase === 'converting'
-                    ? t('stemConverting', { progress: Math.round(progress.progress) })
-                    : t('stemUploading')}
-                </Typography>
-                <LinearProgress
-                  variant={progress.phase === 'uploading' && progress.progress === 0 ? 'indeterminate' : 'determinate'}
-                  value={progress.progress}
-                  sx={{ borderRadius: 1 }}
+                  <InputLabel>{t('typeLabel')}</InputLabel>
+                  <Select
+                    value={stem.type}
+                    label={t('typeLabel')}
+                    onChange={(e) =>
+                      updateStemType(
+                        stem.id,
+                        e.target.value as SeparationStemName | '',
+                      )
+                    }
+                    disabled={isVocalsDefault || isLoading}
+                  >
+                    {isVocalsDefault ? (
+                      <MenuItem value="vocals">
+                        {tPlayer('stems.vocals')} ({t('requiredLabel')})
+                      </MenuItem>
+                    ) : (
+                      [
+                        <MenuItem key="empty" value="">
+                          <em>{t('selectTypeLabel')}</em>
+                        </MenuItem>,
+                        ...availableTypes
+                          .concat(stem.type ? [stem.type] : [])
+                          .map((type) => (
+                            <MenuItem key={type} value={type}>
+                              {tPlayer(
+                                `stems.${type}` as Parameters<
+                                  typeof tPlayer
+                                >[0],
+                              )}
+                            </MenuItem>
+                          )),
+                      ]
+                    )}
+                  </Select>
+                  {stemError && !stem.type && (
+                    <FormHelperText>{stemError}</FormHelperText>
+                  )}
+                </FormControl>
+
+                {/* File input */}
+                <TextField
+                  type="file"
+                  inputProps={{ accept: 'audio/*' }}
+                  onChange={(e) => {
+                    const file =
+                      (e.target as HTMLInputElement).files?.[0] ?? null;
+                    updateStemFile(stem.id, file);
+                  }}
+                  disabled={isLoading}
+                  error={!!stemError && !stem.file}
+                  helperText={
+                    stemError && !stem.file
+                      ? stemError
+                      : stem.file
+                        ? stem.file.name
+                        : undefined
+                  }
+                  sx={{ flex: 1, minWidth: '200px' }}
+                  size="small"
                 />
+
+                {/* Remove button */}
+                <IconButton
+                  onClick={() => removeStem(stem.id)}
+                  disabled={!canRemove}
+                  size="small"
+                  aria-label={t('removeButton')}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
               </Box>
-            )}
+
+              {/* Per-stem progress bar */}
+              {progress && (
+                <Box sx={{ mt: 0.5, px: 0.5 }}>
+                  <Typography
+                    variant="caption"
+                    sx={{ color: 'text.secondary', mb: 0.5, display: 'block' }}
+                  >
+                    {progress.phase === 'converting'
+                      ? t('stemConverting', {
+                          progress: Math.round(progress.progress),
+                        })
+                      : t('stemUploading')}
+                  </Typography>
+                  <LinearProgress
+                    variant={
+                      progress.phase === 'uploading' && progress.progress === 0
+                        ? 'indeterminate'
+                        : 'determinate'
+                    }
+                    value={progress.progress}
+                    sx={{ borderRadius: 1 }}
+                  />
+                </Box>
+              )}
             </Box>
           );
         })}

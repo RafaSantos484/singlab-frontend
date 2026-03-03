@@ -243,10 +243,7 @@ export function SeparationDialog({
       </DialogContent>
 
       <DialogActions sx={{ p: 2 }}>
-        <Button
-          onClick={handleClose}
-          disabled={isSubmitting}
-        >
+        <Button onClick={handleClose} disabled={isSubmitting}>
           {t('cancelButton')}
         </Button>
         <Button
@@ -259,9 +256,7 @@ export function SeparationDialog({
             gap: 1,
           }}
         >
-          {isSubmitting && (
-            <CircularProgress size={20} />
-          )}
+          {isSubmitting && <CircularProgress size={20} />}
           {t('submitButton')}
         </Button>
       </DialogActions>
