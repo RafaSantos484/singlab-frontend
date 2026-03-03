@@ -4,7 +4,7 @@ SingLab is a web application focused on karaoke and singing practice. This
 repository contains the frontend, built with Next.js, React, and TypeScript.
 
 The app allows users to submit audio (uploaded files or approved links), request
-AI-powered stem separation, and play back the original, vocal-only, and
+stem separation (AI or manual upload), and play back the original, vocal-only, and
 instrumental tracks for karaoke practice. The frontend is **fully responsible
 for all Firebase data and file operations** — the backend acts only as a
 stateless proxy between the frontend and external AI services.
@@ -24,12 +24,11 @@ stateless proxy between the frontend and external AI services.
   - Detects title and artist from ID3/audio tags
   - Auto-fills form fields (user can override)
 - **Pending activity tracking** — Prevents accidental navigation during uploads/conversions
-- **Stem separation workflow** with auto-processing:
-  - Request separation via backend proxy (forwards to PoYo AI)
-  - Frontend polls status and writes provider data to Firestore
-  - Client auto-detects separation completion via Firestore listener
-  - Client downloads stems from provider and uploads to Firebase Storage
-  - Frontend writes stem paths directly to Firestore
+- **Dual-provider stem separation workflow**:
+  - Select provider in separation dialog (`poyo` AI proxy or `local` manual upload)
+  - `poyo`: request via backend proxy, poll status, auto-process provider stems
+  - `local`: upload stems directly from client and persist stem paths to Firestore
+  - Delete existing stems and re-request separation from another provider
 - Karaoke playback with vocal / instrumental stem toggle
 - Event-driven audio player state synchronization (responds to media keys)
 - Song deletion with confirmation dialog
@@ -144,22 +143,34 @@ The frontend drives a two-phase song upload and stem processing pipeline:
 7. Real-time Firestore listener adds song to global state.
 8. **Rollback:** If Firestore write fails after Storage upload, client deletes the uploaded file.
 
-### 2. Stem Separation & Auto-Processing
+### 2. Stem Separation (Provider-based)
 
-1. User clicks "Request Separation" on a song card.
-2. Frontend gets a signed audio URL from Storage and calls `POST /separations/submit`.
-3. Backend proxy forwards request to PoYo AI and returns the raw provider response.
-4. **Frontend writes provider data (taskId, status) to Firestore** via `updateSeparatedSongInfo()`.
-5. `useSeparationStatus` hook polls `GET /separations/status?taskId=xxx` every 5s.
-6. **Frontend writes updated status to Firestore** on each poll.
-7. When `status=finished` and `stems=null`, **`useStemAutoProcessor` auto-triggers**:
-   - Extracts stem URLs from `providerData` (via `PoyoSeparationAdapter`).
-   - Downloads each stem from PoYo as Blob.
-   - Uploads stems to Firebase Storage at `users/:userId/songs/:songId/stems/:stemName.mp3`.
-   - **Writes stem paths directly to Firestore** via `updateSeparationStems()`.
-8. **Rollback:** If Firestore write fails, client deletes uploaded stems.
-9. Real-time listener updates `song.separatedSongInfo.stems` in global state.
-10. Stems become available in `GlobalPlayer`.
+1. User opens `SeparationDialog` from dashboard card or global player.
+2. User selects one provider:
+  - `poyo` (backend-proxied AI separation)
+  - `local` (manual stem upload)
+
+#### `poyo` path
+
+1. Frontend gets signed raw audio URL from Storage and calls `POST /separations/submit`.
+2. Backend proxy forwards to PoYo and returns provider task payload.
+3. **Frontend writes provider data to Firestore** via `updateSeparatedSongInfo()`.
+4. `useSeparationStatus` polls `GET /separations/status?taskId=xxx` every 60s.
+5. On `finished` with no stored stems, `useStemAutoProcessor` downloads and uploads stems.
+6. **Frontend writes stem paths to Firestore** and UI updates through Firestore listener.
+
+#### `local` path
+
+1. User uploads at least 2 stems (vocals required) via `StemUploadForm`.
+2. Client converts each file to MP3 when needed.
+3. Client uploads stems to Storage and writes `provider: 'local'` + stem paths to Firestore.
+4. Stems become immediately available in `GlobalPlayer` (no polling required).
+
+#### Re-processing
+
+1. User can delete existing stems from dashboard card.
+2. Client deletes stem files in Storage and resets `separatedSongInfo` to `null`.
+3. User can request a new separation using either provider.
 
 ## Environment Variables
 
