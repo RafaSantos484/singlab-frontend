@@ -9,19 +9,19 @@
  * 3. Convert audio/video to MP3 using FFmpeg WASM (fast path if already MP3).
  * 4. Generate a stable `songId` (Firestore doc ID).
  * 5. Upload the MP3 file to Firebase Storage at `users/:userId/songs/:songId/raw.mp3`.
- * 6. Register the song with the API by sending JSON metadata (title, author, songId).
+ * 6. Create the song document directly in Firestore with metadata and storage path.
  *
- * The backend validates that the storage file exists before persisting the
- * Firestore document. If the API call fails after Storage upload, the file is
+ * If the Firestore write fails after Storage upload, the file is
  * automatically rolled back (deleted from Storage).
  */
 
-import { collection, doc } from 'firebase/firestore';
-
 import { getFirebaseAuth } from '@/lib/firebase/auth';
-import { getFirebaseFirestore } from '@/lib/firebase/firestore';
-import { uploadRawSong, deleteRawSong } from '@/lib/storage/uploadRawSong';
-import { songsApi } from './index';
+import {
+  uploadRawSong,
+  deleteRawSong,
+  buildRawSongStoragePath,
+} from '@/lib/storage/uploadRawSong';
+import { generateSongId, createSongDoc } from '@/lib/firebase/songs';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -75,10 +75,10 @@ const SUPPORTED_EXTENSIONS = [
  * Describes the current phase of the song creation process:
  * - `'converting'`  – audio/video file is being converted to MP3.
  * - `'uploading'`   – MP3 file is being uploaded to Firebase Storage.
- * - `'registering'` – file upload is complete; song metadata is being
- *                     registered via the API.
+ * - `'saving'`      – file upload is complete; song document is being
+ *                     written to Firestore.
  */
-export type SongCreationPhase = 'converting' | 'uploading' | 'registering';
+export type SongCreationPhase = 'converting' | 'uploading' | 'saving';
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -174,27 +174,15 @@ export interface CreateSongResult {
 }
 
 /**
- * Generates a Firestore-compatible document ID for a new song.
- * Uses the Firestore client SDK to produce the same format as server-generated IDs.
- *
- * @param userId - Firebase Auth UID of the song owner.
- * @returns A new unique song document ID.
- */
-function generateSongId(userId: string): string {
-  const firestore = getFirebaseFirestore();
-  return doc(collection(firestore, 'users', userId, 'songs')).id;
-}
-
-/**
  * Creates a new song using a two-step process:
  * 1. Uploads the MP3 file to Firebase Storage (caller must convert beforehand).
- * 2. Registers the song document with the API (JSON metadata only).
+ * 2. Creates the song document directly in Firestore with metadata.
  *
  * The `onPhaseChange` callback receives `'uploading'` before the Storage
- * upload and `'registering'` before the API call, allowing the UI to
+ * upload and `'saving'` before the Firestore write, allowing the UI to
  * display granular progress.
  *
- * If the API registration fails after the file has been uploaded to Storage,
+ * If the Firestore write fails after the file has been uploaded to Storage,
  * the file is automatically rolled back (deleted). This ensures the storage
  * is not left with orphaned files.
  *
@@ -207,7 +195,7 @@ function generateSongId(userId: string): string {
  * @returns The created song result.
  * @throws {InvalidFileError} If client-side file validation fails.
  * @throws {StorageUploadError} If the Firebase Storage upload step fails.
- * @throws {ApiError} If the API registration call fails (file is rolled back).
+ * @throws {Error} If the Firestore write fails (file is rolled back).
  */
 export async function createSong(
   options: CreateSongOptions,
@@ -229,7 +217,9 @@ export async function createSong(
 
   // 4. Upload the raw audio file to Storage.
   onPhaseChange?.('uploading');
+  let storagePath: string;
   try {
+    storagePath = buildRawSongStoragePath(userId, songId);
     await uploadRawSong(userId, songId, file);
   } catch (err) {
     const message =
@@ -237,18 +227,14 @@ export async function createSong(
     throw new StorageUploadError(message);
   }
 
-  // 5. Register the song document via the API.
-  onPhaseChange?.('registering');
+  // 5. Create the song document directly in Firestore.
+  onPhaseChange?.('saving');
   try {
-    const result = await songsApi.uploadSong({ songId, title, author });
+    await createSongDoc(userId, songId, title, author, storagePath);
 
-    return {
-      songId: result.songId,
-      title: result.title,
-      author: result.author,
-    };
+    return { songId, title, author };
   } catch (err) {
-    // API registration failed — rollback the Storage upload to avoid orphaned files.
+    // Firestore write failed — rollback the Storage upload to avoid orphaned files.
     try {
       await deleteRawSong(userId, songId);
     } catch (rollbackErr) {
@@ -259,7 +245,7 @@ export async function createSong(
       );
     }
 
-    // Re-throw the original API error.
+    // Re-throw the original error.
     throw err;
   }
 }
