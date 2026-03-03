@@ -13,8 +13,8 @@ import {
 } from '@mui/material';
 import { useTranslations } from 'next-intl';
 import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
-import { initiateEmailVerification } from '@/lib/firebase';
-import { usersApi, ApiError } from '@/lib/api';
+import { createUserAccount } from '@/lib/firebase/auth';
+import { createUserDoc } from '@/lib/firebase/users';
 import { validateCreateUser } from '@/lib/validation/create-user';
 import { AuthLayout } from '@/components/layout';
 import { useRouter } from '@/lib/i18n/navigation';
@@ -25,14 +25,15 @@ import { usePendingNavigationGuard } from '@/lib/hooks/usePendingNavigationGuard
 // ---------------------------------------------------------------------------
 
 function getErrorKey(error: unknown): string {
-  if (error instanceof ApiError) {
-    if (error.statusCode === 409) {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'code' in error
+  ) {
+    const code = (error as { code: string }).code;
+    if (code === 'auth/email-already-in-use') {
       return 'errors.emailAlreadyInUse';
     }
-    if (error.statusCode === 400) {
-      return 'errors.unexpected';
-    }
-    return 'errors.unexpected';
   }
   return 'errors.unexpected';
 }
@@ -94,8 +95,8 @@ export default function RegisterPage(): React.ReactElement | null {
     setSubmitting(true);
 
     try {
-      await usersApi.createUser({ name: name.trim(), email, password });
-      await initiateEmailVerification(email, password);
+      const uid = await createUserAccount(email, password);
+      await createUserDoc(uid, name.trim(), email);
       sessionStorage.setItem('emailVerificationSent', 'true');
       router.replace('/login');
     } catch (err) {
