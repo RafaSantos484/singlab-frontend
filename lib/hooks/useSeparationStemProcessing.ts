@@ -2,14 +2,15 @@
 
 import { useCallback } from 'react';
 import { getFirebaseAuth } from '@/lib/firebase/auth';
+import { updateSeparationStems } from '@/lib/firebase/songs';
 import {
   processStemUrls,
   deleteSeparationStems,
 } from '@/lib/storage/uploadSeparationStems';
-import { separationsApi } from '@/lib/api';
 import { PoyoSeparationAdapter } from '@/lib/separations/poyoAdapter';
 import type {
   SeparatedSongInfo,
+  SeparationStems,
   PoyoSeparationTaskDetails,
 } from '@/lib/api/types';
 
@@ -18,9 +19,11 @@ import type {
  *
  * When a separation task finishes (detected via status polling), the client
  * extracts stem URLs from provider data, downloads each stem, uploads to
- * Firebase Storage, and then notifies the backend of the stem storage paths.
+ * Firebase Storage, and then writes the stem storage paths directly to
+ * Firestore.
  *
- * If backend update fails, automatically rolls back by deleting uploaded stems.
+ * If the Firestore write fails, automatically rolls back by deleting
+ * uploaded stems from Storage.
  */
 export function useSeparationStemProcessing(): {
   processSeparationStems: (
@@ -62,17 +65,22 @@ export function useSeparationStemProcessing(): {
         stemUrls,
       );
 
+      const stemsData: SeparationStems = {
+        uploadedAt: new Date().toISOString(),
+        paths: stemPaths,
+      };
+
       try {
-        // Notify backend of the uploaded stems
-        await separationsApi.updateSeparationStems(
+        // Write stem paths directly to Firestore
+        await updateSeparationStems(
+          currentUser.uid,
           songId,
-          stemPaths,
-          separatedSongInfo.provider,
+          stemsData,
         );
       } catch (error) {
-        // Rollback: delete uploaded stems if backend update fails
+        // Rollback: delete uploaded stems if Firestore write fails
         console.error(
-          `Backend update failed for song ${songId}, rolling back stems`,
+          `Firestore update failed for song ${songId}, rolling back stems`,
         );
         try {
           await deleteSeparationStems(
