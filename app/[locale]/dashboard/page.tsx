@@ -78,7 +78,6 @@ export default function DashboardPage(): React.ReactElement | null {
     let filtered = songs;
     if (normalizedQuery) {
       filtered = songs.filter((song) => {
-        if (song.id === currentSongId) return true;
         const titleMatch = song.title.toLowerCase().includes(normalizedQuery);
         const authorMatch = song.author.toLowerCase().includes(normalizedQuery);
         return titleMatch || authorMatch;
@@ -91,18 +90,8 @@ export default function DashboardPage(): React.ReactElement | null {
       return sortOrder === 'newest' ? dateB - dateA : dateA - dateB;
     });
 
-    if (currentSongId) {
-      const playingIndex = sorted.findIndex(
-        (song) => song.id === currentSongId,
-      );
-      if (playingIndex > 0) {
-        const [playingSong] = sorted.splice(playingIndex, 1);
-        sorted.unshift(playingSong);
-      }
-    }
-
     return sorted;
-  }, [songs, searchQuery, sortOrder, currentSongId, mounted]);
+  }, [songs, searchQuery, sortOrder, mounted]);
 
   if (!mounted || isLoading) {
     return (
