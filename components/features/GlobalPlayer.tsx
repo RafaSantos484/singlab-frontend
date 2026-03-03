@@ -792,6 +792,26 @@ function GlobalPlayerInner({
     }
   }, [playbackStatus, prepareAt]);
 
+  // Sync UI time when tab becomes visible again
+  // Browsers throttle timeupdate events while the tab is hidden, so the UI
+  // can fall out of sync. This effect re-syncs currentTime when the user
+  // comes back to the tab.
+  useEffect(() => {
+    const handleVisibilityChange = (): void => {
+      if (document.hidden) return; // Tab is hidden, do nothing
+      // Tab is now visible – sync currentTime from the master element
+      const master = getMaster();
+      if (master && isFinite(master.currentTime)) {
+        setCurrentTime(master.currentTime);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [getMaster]);
+
   // ── Controls ─────────────────────────────────────────────────────────────
 
   const togglePlay = useCallback(async (): Promise<void> => {
