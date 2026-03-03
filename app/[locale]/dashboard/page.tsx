@@ -20,6 +20,11 @@ import {
   InputLabel,
   Chip,
   Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Snackbar,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -33,6 +38,7 @@ import { useTranslations } from 'next-intl';
 import { SongCreateDialog } from '@/components/features/SongCreateDialog';
 import { SongEditDialog } from '@/components/features/SongEditDialog';
 import { SongDeleteButton } from '@/components/features/SongDeleteButton';
+import { SeparationDialog } from '@/components/features/SeparationDialog';
 import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
 import { useGlobalState } from '@/lib/store';
 import { useGlobalStateDispatch } from '@/lib/store/GlobalStateContext';
@@ -40,6 +46,9 @@ import { DashboardLayout } from '@/components/layout';
 import type { SeparationStemName, Song } from '@/lib/api/types';
 import { useSeparationStatus } from '@/lib/hooks/useSeparationStatus';
 import { GlobalPlayer } from '@/components/features/GlobalPlayer';
+import { deleteSeparatedSongInfo } from '@/lib/firebase/songs';
+import { deleteSeparationStems } from '@/lib/storage/uploadSeparationStems';
+import { getFirebaseAuth } from '@/lib/firebase/auth';
 
 // ---------------------------------------------------------------------------
 // Page
@@ -373,18 +382,23 @@ function SongCardItem({
   onEdit,
 }: SongCardItemProps): React.ReactElement {
   const t = useTranslations('Dashboard');
+  const tAll = useTranslations();
   const tSep = useTranslations('Separation');
   const tPlayer = useTranslations('Player');
   const { songsStemUploading } = useGlobalState();
+  const [isSeparationDialogOpen, setIsSeparationDialogOpen] = useState(false);
+  const [isDeleteStemsDialogOpen, setIsDeleteStemsDialogOpen] = useState(false);
+  const [isDeletingStemsLoading, setIsDeletingStemsLoading] = useState(false);
+  const [showSeparationSuccessSnackbar, setShowSeparationSuccessSnackbar] =
+    useState(false);
+  const [separationSuccessMessage, setSeparationSuccessMessage] = useState('');
 
   const {
     separation,
-    isRequesting,
     isRefreshing,
     error: separationError,
     stemUrls,
     stemUrlError,
-    requestSeparation,
     refreshStatus,
   } = useSeparationStatus(song);
 
@@ -398,6 +412,45 @@ function SongCardItem({
         .filter(([, url]) => Boolean(url))
         .map(([key]) => key as SeparationStemName)
     : [];
+
+  const handleDeleteStems = async (): Promise<void> => {
+    try {
+      setIsDeletingStemsLoading(true);
+      const auth = getFirebaseAuth();
+      const userId = auth.currentUser?.uid;
+
+      if (!userId) {
+        throw new Error('User not authenticated');
+      }
+
+      // Get stem names from storage paths
+      const stemNames = song.separatedSongInfo?.stems?.paths
+        ? Object.keys(song.separatedSongInfo.stems.paths)
+        : [];
+
+      // Delete stem files from storage
+      if (stemNames.length > 0) {
+        await deleteSeparationStems(userId, song.id, stemNames);
+      }
+
+      // Delete separation info from Firestore
+      await deleteSeparatedSongInfo(userId, song.id);
+      setIsDeleteStemsDialogOpen(false);
+    } catch (err) {
+      console.error('Error deleting stems:', err);
+    } finally {
+      setIsDeletingStemsLoading(false);
+    }
+  };
+
+  const handleSeparationSuccess = (provider: 'poyo' | 'local'): void => {
+    const message =
+      provider === 'poyo'
+        ? tAll('SeparationDialog.success.poyo')
+        : tAll('SeparationDialog.success.local');
+    setSeparationSuccessMessage(message);
+    setShowSeparationSuccessSnackbar(true);
+  };
 
   return (
     <Card
@@ -564,10 +617,9 @@ function SongCardItem({
               </Typography>
               <Button
                 variant="contained"
-                onClick={() => requestSeparation('poyo')}
-                disabled={isRequesting}
+                onClick={() => setIsSeparationDialogOpen(true)}
               >
-                {isRequesting ? tSep('startingButton') : tSep('startButton')}
+                {tSep('startButton')}
               </Button>
             </Box>
           )}
@@ -621,7 +673,7 @@ function SongCardItem({
                 <Typography variant="body2" sx={{ color: 'text.secondary' }}>
                   {tSep('stemsReady')}
                 </Typography>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 1 }}>
                   {availableStems.map((stem) => (
                     <Chip
                       key={stem}
@@ -632,6 +684,15 @@ function SongCardItem({
                     />
                   ))}
                 </Box>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="error"
+                  onClick={() => setIsDeleteStemsDialogOpen(true)}
+                  sx={{ alignSelf: 'flex-start' }}
+                >
+                  {t('deleteStemsButton')}
+                </Button>
               </Stack>
             )}
 
@@ -646,16 +707,71 @@ function SongCardItem({
                 size="small"
                 variant="outlined"
                 startIcon={<RefreshIcon fontSize="small" />}
-                onClick={() => requestSeparation('poyo')}
-                disabled={isRequesting}
+                onClick={() => setIsSeparationDialogOpen(true)}
                 sx={{ alignSelf: 'flex-start' }}
               >
-                {isRequesting ? tSep('tryingAgain') : tSep('tryAgain')}
+                {tSep('tryAgain')}
               </Button>
             </Stack>
           )}
         </Box>
       </CardContent>
+
+      {/* Separation Dialog */}
+      <SeparationDialog
+        open={isSeparationDialogOpen}
+        onClose={() => setIsSeparationDialogOpen(false)}
+        onSuccess={handleSeparationSuccess}
+        song={song}
+      />
+
+      {/* Delete Stems Confirmation Dialog */}
+      <Dialog
+        open={isDeleteStemsDialogOpen}
+        onClose={() => setIsDeleteStemsDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>{t('deleteStemsTitle')}</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mt: 1 }}>
+            {t('deleteStemsMessage')}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setIsDeleteStemsDialogOpen(false)}
+            disabled={isDeletingStemsLoading}
+          >
+            {t('cancelButton')}
+          </Button>
+          <Button
+            onClick={handleDeleteStems}
+            color="error"
+            variant="contained"
+            disabled={isDeletingStemsLoading}
+          >
+            {isDeletingStemsLoading ? (
+              <CircularProgress size={20} sx={{ mr: 1 }} />
+            ) : null}
+            {t('deleteStemsButton')}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar
+        open={showSeparationSuccessSnackbar}
+        autoHideDuration={6000}
+        onClose={() => setShowSeparationSuccessSnackbar(false)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Alert
+          severity="success"
+          onClose={() => setShowSeparationSuccessSnackbar(false)}
+        >
+          {separationSuccessMessage}
+        </Alert>
+      </Snackbar>
     </Card>
   );
 }

@@ -114,7 +114,7 @@ export interface UploadSongResult {
 // ---------------------------------------------------------------------------
 
 /** Supported stem separation providers. */
-export type SeparationProviderName = 'poyo';
+export type SeparationProviderName = 'poyo' | 'local';
 
 /** High-level status of a separation task. */
 export type SeparationJobStatus = 'processing' | 'finished' | 'failed';
@@ -213,3 +213,17 @@ export type PoyoSeparationTaskDetails =
 
 export type PoyoSeparatedSongInfo =
   SeparatedSongInfo<PoyoSeparationTaskDetails>;
+// ---------------------------------------------------------------------------
+// Provider-specific models (Local)
+// ---------------------------------------------------------------------------
+
+/**
+ * Local provider data — tracks when stems were uploaded.
+ * Since stems are uploaded directly by the user, there is no async task.
+ */
+export interface LocalSeparationProviderData {
+  uploadedAt: string;
+}
+
+export type LocalSeparatedSongInfo =
+  SeparatedSongInfo<LocalSeparationProviderData>;

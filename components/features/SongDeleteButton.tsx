@@ -20,9 +20,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import { getFirebaseAuth } from '@/lib/firebase/auth';
 import { deleteSongDoc } from '@/lib/firebase/songs';
 import { deleteRawSong } from '@/lib/storage/uploadRawSong';
-import {
-  deleteSeparationStems,
-} from '@/lib/storage/uploadSeparationStems';
+import { deleteSeparationStems } from '@/lib/storage/uploadSeparationStems';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -157,9 +155,7 @@ export function SongDeleteButton({
     } catch (error: unknown) {
       // Error handling
       const errorMessage =
-        error instanceof Error
-          ? error.message
-          : t('errors.default');
+        error instanceof Error ? error.message : t('errors.default');
 
       // Show error snackbar (keep dialog open so user can retry)
       setSnackbar({
