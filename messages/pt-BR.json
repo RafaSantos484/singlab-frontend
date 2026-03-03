@@ -151,7 +151,8 @@
       "bothMissing": "Selecione um tipo e um arquivo",
       "duplicateType": "Este tipo de faixa já foi adicionado",
       "conversionFailed": "Falha ao converter arquivo para MP3: {message}",
-      "uploadFailed": "Falha ao enviar faixas: {message}"
+      "uploadFailed": "Falha ao enviar faixas: {message}",
+      "firestoreUpdateFailed": "Faixas enviadas foram desfeitas devido a erro no banco de dados: {message}"
     }
   },  "SongCreate": {
     "title": "Enviar Nova Música",

@@ -152,7 +152,8 @@
       "bothMissing": "Please select a type and a file",
       "duplicateType": "This stem type is already added",
       "conversionFailed": "Failed to convert file to MP3: {message}",
-      "uploadFailed": "Failed to upload stems: {message}"
+      "uploadFailed": "Failed to upload stems: {message}",
+      "firestoreUpdateFailed": "Uploaded stems were rolled back due to database error: {message}"
     }
   },
   "SongCreate": {
