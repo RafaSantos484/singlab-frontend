@@ -264,9 +264,11 @@ export const StemUploadForm = forwardRef<
 
       const uploadSettlements = await Promise.allSettled(uploadPromises);
 
-      // Track results and identify failures
-      let uploadError: Error | null = null;
-      uploadSettlements.forEach((settlement, index) => {
+      // Track results and identify failures.
+      // Use `unknown` type because Promise.allSettled().reason can be any value,
+      // not just Error (e.g., null, string, or custom object).
+      let uploadError: unknown = null;
+      uploadSettlements.forEach((settlement) => {
         if (settlement.status === 'fulfilled') {
           uploadResults.push(settlement.value);
           uploadedStemNames.push(settlement.value.type);
@@ -402,11 +404,10 @@ export const StemUploadForm = forwardRef<
                   gap: 2,
                   alignItems: 'flex-start',
                   p: 2,
-                  border: `1px solid ${
-                    progress
-                      ? 'rgba(168, 85, 247, 0.5)'
-                      : 'rgba(168, 85, 247, 0.2)'
-                  }`,
+                  border: `1px solid ${progress
+                    ? 'rgba(168, 85, 247, 0.5)'
+                    : 'rgba(168, 85, 247, 0.2)'
+                    }`,
                   borderRadius: '8px',
                   bgcolor: 'rgba(30, 27, 75, 0.5)',
                 }}
@@ -499,8 +500,8 @@ export const StemUploadForm = forwardRef<
                   >
                     {progress.phase === 'converting'
                       ? t('stemConverting', {
-                          progress: Math.round(progress.progress),
-                        })
+                        progress: Math.round(progress.progress),
+                      })
                       : t('stemUploading')}
                   </Typography>
                   <LinearProgress
