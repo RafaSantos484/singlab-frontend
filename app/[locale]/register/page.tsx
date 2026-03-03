@@ -25,11 +25,7 @@ import { usePendingNavigationGuard } from '@/lib/hooks/usePendingNavigationGuard
 // ---------------------------------------------------------------------------
 
 function getErrorKey(error: unknown): string {
-  if (
-    error &&
-    typeof error === 'object' &&
-    'code' in error
-  ) {
+  if (error && typeof error === 'object' && 'code' in error) {
     const code = (error as { code: string }).code;
     if (code === 'auth/email-already-in-use') {
       return 'errors.emailAlreadyInUse';

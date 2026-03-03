@@ -349,404 +349,404 @@ export function SongCreateDialog({
       }}
     >
       <Box component="form" onSubmit={handleFormSubmit}>
-      <DialogTitle
-        sx={{
-          fontSize: '1.5rem',
-          fontWeight: 600,
-          background: 'linear-gradient(135deg, #a78bfa 0%, #c4b5fd 100%)',
-          backgroundClip: 'text',
-          textFillColor: 'transparent',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          color: 'transparent',
-          borderBottom: '1px solid rgba(168, 85, 247, 0.2)',
-          pb: 2,
-        }}
-      >
-        {t('title')}
-      </DialogTitle>
+        <DialogTitle
+          sx={{
+            fontSize: '1.5rem',
+            fontWeight: 600,
+            background: 'linear-gradient(135deg, #a78bfa 0%, #c4b5fd 100%)',
+            backgroundClip: 'text',
+            textFillColor: 'transparent',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            color: 'transparent',
+            borderBottom: '1px solid rgba(168, 85, 247, 0.2)',
+            pb: 2,
+          }}
+        >
+          {t('title')}
+        </DialogTitle>
 
-      <DialogContent sx={{ pt: 3, pb: 2 }}>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {/* Error alert */}
-          {error && (
-            <Alert
-              severity="error"
-              sx={{
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                color: '#fca5a5',
-                border: '1px solid rgba(239, 68, 68, 0.3)',
-                '& .MuiAlert-icon': {
+        <DialogContent sx={{ pt: 3, pb: 2 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {/* Error alert */}
+            {error && (
+              <Alert
+                severity="error"
+                sx={{
+                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
                   color: '#fca5a5',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  '& .MuiAlert-icon': {
+                    color: '#fca5a5',
+                  },
+                }}
+              >
+                {error}
+              </Alert>
+            )}
+
+            {/* Helper text */}
+            <Alert
+              severity="info"
+              sx={{
+                backgroundColor: 'rgba(129, 140, 248, 0.1)',
+                color: '#c7d2fe',
+                border: '1px solid rgba(129, 140, 248, 0.3)',
+                '& .MuiAlert-icon': {
+                  color: '#c7d2fe',
                 },
               }}
             >
-              {error}
+              {t('infoMessage')}
             </Alert>
-          )}
 
-          {/* Helper text */}
-          <Alert
-            severity="info"
-            sx={{
-              backgroundColor: 'rgba(129, 140, 248, 0.1)',
-              color: '#c7d2fe',
-              border: '1px solid rgba(129, 140, 248, 0.3)',
-              '& .MuiAlert-icon': {
-                color: '#c7d2fe',
-              },
-            }}
-          >
-            {t('infoMessage')}
-          </Alert>
+            {/* File upload section */}
+            <Box
+              onDragOver={handleDragOver}
+              onDragEnter={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              sx={{
+                borderRadius: 2,
+                border: isDragOver
+                  ? '2px dashed rgba(168, 85, 247, 1)'
+                  : '2px dashed transparent',
+                backgroundColor: isDragOver
+                  ? 'rgba(168, 85, 247, 0.08)'
+                  : 'transparent',
+                transition:
+                  'border-color 0.15s ease, background-color 0.15s ease',
+                p: isDragOver ? 1 : 0,
+              }}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={[
+                  'audio/mpeg',
+                  'audio/mp3',
+                  'audio/x-mpeg',
+                  'audio/wav',
+                  'audio/x-wav',
+                  'audio/ogg',
+                  'audio/webm',
+                  'video/webm',
+                  'video/mp4',
+                  'audio/mp4',
+                  'video/quicktime',
+                  'audio/flac',
+                  'audio/x-flac',
+                  'audio/aac',
+                  'audio/x-aac',
+                  'audio/m4a',
+                  'audio/x-m4a',
+                  '.mp3',
+                  '.wav',
+                  '.ogg',
+                  '.webm',
+                  '.mp4',
+                  '.mov',
+                  '.flac',
+                  '.aac',
+                  '.m4a',
+                  '.mpeg',
+                ].join(',')}
+                onChange={handleFileSelect}
+                disabled={isLoading}
+                style={{ display: 'none' }}
+              />
 
-          {/* File upload section */}
-          <Box
-            onDragOver={handleDragOver}
-            onDragEnter={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            sx={{
-              borderRadius: 2,
-              border: isDragOver
-                ? '2px dashed rgba(168, 85, 247, 1)'
-                : '2px dashed transparent',
-              backgroundColor: isDragOver
-                ? 'rgba(168, 85, 247, 0.08)'
-                : 'transparent',
-              transition: 'border-color 0.15s ease, background-color 0.15s ease',
-              p: isDragOver ? 1 : 0,
-            }}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={[
-                'audio/mpeg',
-                'audio/mp3',
-                'audio/x-mpeg',
-                'audio/wav',
-                'audio/x-wav',
-                'audio/ogg',
-                'audio/webm',
-                'video/webm',
-                'video/mp4',
-                'audio/mp4',
-                'video/quicktime',
-                'audio/flac',
-                'audio/x-flac',
-                'audio/aac',
-                'audio/x-aac',
-                'audio/m4a',
-                'audio/x-m4a',
-                '.mp3',
-                '.wav',
-                '.ogg',
-                '.webm',
-                '.mp4',
-                '.mov',
-                '.flac',
-                '.aac',
-                '.m4a',
-                '.mpeg',
-              ].join(',')}
-              onChange={handleFileSelect}
-              disabled={isLoading}
-              style={{ display: 'none' }}
+              <Button
+                variant="outlined"
+                onClick={handleOpenFilePicker}
+                disabled={isLoading}
+                startIcon={<CloudUploadIcon />}
+                fullWidth
+                sx={{
+                  borderColor: isDragOver
+                    ? 'rgba(168, 85, 247, 1)'
+                    : 'rgba(168, 85, 247, 0.5)',
+                  color: 'rgb(243, 232, 255)',
+                  textTransform: 'none',
+                  fontSize: '0.95rem',
+                  py: 1.5,
+                  '&:hover': {
+                    borderColor: 'rgba(168, 85, 247, 1)',
+                    backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                  },
+                  '&.Mui-disabled': {
+                    borderColor: 'rgba(168, 85, 247, 0.2)',
+                    color: 'rgba(243, 232, 255, 0.5)',
+                  },
+                }}
+              >
+                {isDragOver ? t('dropFileHere') : t('chooseFileButton')}
+              </Button>
+
+              {/* Drag-and-drop hint */}
+              {!selectedFile && !fieldErrors.file && !isDragOver && (
+                <Typography
+                  variant="caption"
+                  sx={{
+                    display: 'block',
+                    mt: 0.75,
+                    textAlign: 'center',
+                    color: 'rgba(243, 232, 255, 0.45)',
+                  }}
+                >
+                  {t('dragDropHint')}
+                </Typography>
+              )}
+
+              {/* Metadata extraction loading state */}
+              {isExtractingMetadata && (
+                <Typography
+                  variant="body2"
+                  sx={{
+                    mt: 1.5,
+                    p: 1.5,
+                    backgroundColor: 'rgba(129, 140, 248, 0.1)',
+                    borderRadius: 1,
+                    border: '1px solid rgba(129, 140, 248, 0.3)',
+                    color: 'rgb(199, 210, 254)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                  }}
+                >
+                  <CircularProgress
+                    size={16}
+                    sx={{ color: 'rgb(199, 210, 254)' }}
+                  />
+                  {t('extractingMetadata')}
+                </Typography>
+              )}
+
+              {/* File name display */}
+              {selectedFile && !isExtractingMetadata && (
+                <Typography
+                  variant="body2"
+                  sx={{
+                    mt: 1.5,
+                    p: 1.5,
+                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                    borderRadius: 1,
+                    border: '1px solid rgba(34, 197, 94, 0.3)',
+                    color: 'rgb(134, 239, 172)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                  }}
+                >
+                  ✓ {selectedFile.name} (
+                  {(selectedFile.size / 1024 / 1024).toFixed(1)} MB)
+                </Typography>
+              )}
+
+              {/* File error / helper text */}
+              {fieldErrors.file && (
+                <FormHelperText
+                  error
+                  sx={{
+                    mt: 1.5,
+                    color: 'rgba(252, 165, 165, 1)',
+                  }}
+                >
+                  {tV(fieldErrors.file as Parameters<typeof tV>[0])}
+                </FormHelperText>
+              )}
+
+              {!selectedFile && !fieldErrors.file && (
+                <FormHelperText
+                  sx={{
+                    mt: 1.5,
+                    color: 'rgba(243, 232, 255, 0.6)',
+                  }}
+                >
+                  {t('supportedFormats')}
+                </FormHelperText>
+              )}
+            </Box>
+
+            {/* Title field */}
+            <TextField
+              label={t('titleLabel')}
+              value={title}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                if (fieldErrors.title) {
+                  setFieldErrors((prev) => ({ ...prev, title: undefined }));
+                }
+              }}
+              error={!!fieldErrors.title}
+              helperText={
+                fieldErrors.title
+                  ? tV(fieldErrors.title as Parameters<typeof tV>[0])
+                  : selectedFile && isExtractingMetadata
+                    ? t('detectingMetadata')
+                    : ''
+              }
+              fullWidth
+              disabled={isLoading || !selectedFile || isExtractingMetadata}
+              placeholder={t('titlePlaceholder')}
+              inputProps={{
+                maxLength: 255,
+              }}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  color: 'rgb(243, 232, 255)',
+                  borderColor: 'rgba(168, 85, 247, 0.3)',
+                  '&:hover fieldset': {
+                    borderColor: 'rgba(168, 85, 247, 0.6)',
+                  },
+                  '&.Mui-focused fieldset': {
+                    borderColor: 'rgba(168, 85, 247, 1)',
+                  },
+                },
+                '& .MuiInputBase-input::placeholder': {
+                  color: 'rgba(243, 232, 255, 0.5)',
+                  opacity: 1,
+                },
+                '& .MuiInputLabel-root': {
+                  color: 'rgba(243, 232, 255, 0.7)',
+                  '&.Mui-focused': {
+                    color: 'rgba(168, 85, 247, 1)',
+                  },
+                },
+                '& .MuiFormHelperText-root': {
+                  color: 'rgba(252, 165, 165, 1)',
+                },
+              }}
             />
 
-            <Button
-              variant="outlined"
-              onClick={handleOpenFilePicker}
-              disabled={isLoading}
-              startIcon={<CloudUploadIcon />}
+            {/* Author field */}
+            <TextField
+              label={t('authorLabel')}
+              value={author}
+              onChange={(e) => {
+                setAuthor(e.target.value);
+                if (fieldErrors.author) {
+                  setFieldErrors((prev) => ({ ...prev, author: undefined }));
+                }
+              }}
+              error={!!fieldErrors.author}
+              helperText={
+                fieldErrors.author
+                  ? tV(fieldErrors.author as Parameters<typeof tV>[0])
+                  : selectedFile && isExtractingMetadata
+                    ? t('detectingMetadata')
+                    : ''
+              }
               fullWidth
+              disabled={isLoading || !selectedFile || isExtractingMetadata}
+              placeholder={t('authorPlaceholder')}
+              inputProps={{
+                maxLength: 255,
+              }}
               sx={{
-                borderColor: isDragOver
-                  ? 'rgba(168, 85, 247, 1)'
-                  : 'rgba(168, 85, 247, 0.5)',
-                color: 'rgb(243, 232, 255)',
-                textTransform: 'none',
-                fontSize: '0.95rem',
-                py: 1.5,
-                '&:hover': {
-                  borderColor: 'rgba(168, 85, 247, 1)',
-                  backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                '& .MuiOutlinedInput-root': {
+                  color: 'rgb(243, 232, 255)',
+                  borderColor: 'rgba(168, 85, 247, 0.3)',
+                  '&:hover fieldset': {
+                    borderColor: 'rgba(168, 85, 247, 0.6)',
+                  },
+                  '&.Mui-focused fieldset': {
+                    borderColor: 'rgba(168, 85, 247, 1)',
+                  },
                 },
-                '&.Mui-disabled': {
-                  borderColor: 'rgba(168, 85, 247, 0.2)',
+                '& .MuiInputBase-input::placeholder': {
                   color: 'rgba(243, 232, 255, 0.5)',
+                  opacity: 1,
+                },
+                '& .MuiInputLabel-root': {
+                  color: 'rgba(243, 232, 255, 0.7)',
+                  '&.Mui-focused': {
+                    color: 'rgba(168, 85, 247, 1)',
+                  },
+                },
+                '& .MuiFormHelperText-root': {
+                  color: 'rgba(252, 165, 165, 1)',
                 },
               }}
-            >
-              {isDragOver ? t('dropFileHere') : t('chooseFileButton')}
-            </Button>
-
-            {/* Drag-and-drop hint */}
-            {!selectedFile && !fieldErrors.file && !isDragOver && (
-              <Typography
-                variant="caption"
-                sx={{
-                  display: 'block',
-                  mt: 0.75,
-                  textAlign: 'center',
-                  color: 'rgba(243, 232, 255, 0.45)',
-                }}
-              >
-                {t('dragDropHint')}
-              </Typography>
-            )}
-
-            {/* Metadata extraction loading state */}
-            {isExtractingMetadata && (
-              <Typography
-                variant="body2"
-                sx={{
-                  mt: 1.5,
-                  p: 1.5,
-                  backgroundColor: 'rgba(129, 140, 248, 0.1)',
-                  borderRadius: 1,
-                  border: '1px solid rgba(129, 140, 248, 0.3)',
-                  color: 'rgb(199, 210, 254)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1,
-                }}
-              >
-                <CircularProgress
-                  size={16}
-                  sx={{ color: 'rgb(199, 210, 254)' }}
-                />
-                {t('extractingMetadata')}
-              </Typography>
-            )}
-
-            {/* File name display */}
-            {selectedFile && !isExtractingMetadata && (
-              <Typography
-                variant="body2"
-                sx={{
-                  mt: 1.5,
-                  p: 1.5,
-                  backgroundColor: 'rgba(34, 197, 94, 0.1)',
-                  borderRadius: 1,
-                  border: '1px solid rgba(34, 197, 94, 0.3)',
-                  color: 'rgb(134, 239, 172)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1,
-                }}
-              >
-                ✓ {selectedFile.name} (
-                {(selectedFile.size / 1024 / 1024).toFixed(1)} MB)
-              </Typography>
-            )}
-
-            {/* File error / helper text */}
-            {fieldErrors.file && (
-              <FormHelperText
-                error
-                sx={{
-                  mt: 1.5,
-                  color: 'rgba(252, 165, 165, 1)',
-                }}
-              >
-                {tV(fieldErrors.file as Parameters<typeof tV>[0])}
-              </FormHelperText>
-            )}
-
-            {!selectedFile && !fieldErrors.file && (
-              <FormHelperText
-                sx={{
-                  mt: 1.5,
-                  color: 'rgba(243, 232, 255, 0.6)',
-                }}
-              >
-                {t('supportedFormats')}
-              </FormHelperText>
-            )}
+            />
           </Box>
+        </DialogContent>
 
-          {/* Title field */}
-          <TextField
-            label={t('titleLabel')}
-            value={title}
-            onChange={(e) => {
-              setTitle(e.target.value);
-              if (fieldErrors.title) {
-                setFieldErrors((prev) => ({ ...prev, title: undefined }));
-              }
-            }}
-            error={!!fieldErrors.title}
-            helperText={
-              fieldErrors.title
-                ? tV(fieldErrors.title as Parameters<typeof tV>[0])
-                : selectedFile && isExtractingMetadata
-                  ? t('detectingMetadata')
-                  : ''
-            }
-            fullWidth
-            disabled={isLoading || !selectedFile || isExtractingMetadata}
-            placeholder={t('titlePlaceholder')}
-            inputProps={{
-              maxLength: 255,
-            }}
+        <DialogActions
+          sx={{
+            gap: 1,
+            p: 2,
+            borderTop: '1px solid rgba(168, 85, 247, 0.2)',
+          }}
+        >
+          <Button
+            onClick={handleDialogClose}
+            disabled={isLoading}
             sx={{
-              '& .MuiOutlinedInput-root': {
-                color: 'rgb(243, 232, 255)',
-                borderColor: 'rgba(168, 85, 247, 0.3)',
-                '&:hover fieldset': {
-                  borderColor: 'rgba(168, 85, 247, 0.6)',
-                },
-                '&.Mui-focused fieldset': {
-                  borderColor: 'rgba(168, 85, 247, 1)',
-                },
+              color: 'rgba(243, 232, 255, 0.7)',
+              '&:hover': {
+                backgroundColor: 'rgba(168, 85, 247, 0.1)',
               },
-              '& .MuiInputBase-input::placeholder': {
+            }}
+          >
+            {t('cancelButton')}
+          </Button>
+
+          <Button
+            type="submit"
+            disabled={
+              isLoading || !title.trim() || !author.trim() || !selectedFile
+            }
+            variant="contained"
+            sx={{
+              background: 'linear-gradient(135deg, #a78bfa 0%, #c4b5fd 100%)',
+              color: '#1a0e2e',
+              fontWeight: 600,
+              textTransform: 'none',
+              fontSize: '0.95rem',
+              '&:hover': {
+                background: 'linear-gradient(135deg, #b8a3e0 0%, #d4c4ff 100%)',
+              },
+              '&.Mui-disabled': {
+                background: 'rgba(168, 85, 247, 0.3)',
                 color: 'rgba(243, 232, 255, 0.5)',
-                opacity: 1,
               },
-              '& .MuiInputLabel-root': {
-                color: 'rgba(243, 232, 255, 0.7)',
-                '&.Mui-focused': {
-                  color: 'rgba(168, 85, 247, 1)',
-                },
-              },
-              '& .MuiFormHelperText-root': {
-                color: 'rgba(252, 165, 165, 1)',
+            }}
+          >
+            {isLoading ? (
+              <>
+                <CircularProgress size={20} sx={{ mr: 1, color: '#1a0e2e' }} />
+                {uploadPhase === 'converting'
+                  ? t('convertingButton', {
+                      progress: conversionProgress,
+                    })
+                  : uploadPhase === 'uploading'
+                    ? t('uploadingFileButton')
+                    : uploadPhase === 'saving'
+                      ? t('registeringButton')
+                      : t('uploadingButton')}
+              </>
+            ) : (
+              t('uploadButton')
+            )}
+          </Button>
+        </DialogActions>
+
+        {/* Converting progress bar (full-width, below actions) */}
+        {isLoading && uploadPhase === 'converting' && (
+          <LinearProgress
+            variant={conversionProgress > 0 ? 'determinate' : 'indeterminate'}
+            value={conversionProgress}
+            sx={{
+              height: 3,
+              borderRadius: '0 0 4px 4px',
+              backgroundColor: 'rgba(168, 85, 247, 0.15)',
+              '& .MuiLinearProgress-bar': {
+                background: 'linear-gradient(90deg, #a78bfa 0%, #c4b5fd 100%)',
               },
             }}
           />
-
-          {/* Author field */}
-          <TextField
-            label={t('authorLabel')}
-            value={author}
-            onChange={(e) => {
-              setAuthor(e.target.value);
-              if (fieldErrors.author) {
-                setFieldErrors((prev) => ({ ...prev, author: undefined }));
-              }
-            }}
-            error={!!fieldErrors.author}
-            helperText={
-              fieldErrors.author
-                ? tV(fieldErrors.author as Parameters<typeof tV>[0])
-                : selectedFile && isExtractingMetadata
-                  ? t('detectingMetadata')
-                  : ''
-            }
-            fullWidth
-            disabled={isLoading || !selectedFile || isExtractingMetadata}
-            placeholder={t('authorPlaceholder')}
-            inputProps={{
-              maxLength: 255,
-            }}
-            sx={{
-              '& .MuiOutlinedInput-root': {
-                color: 'rgb(243, 232, 255)',
-                borderColor: 'rgba(168, 85, 247, 0.3)',
-                '&:hover fieldset': {
-                  borderColor: 'rgba(168, 85, 247, 0.6)',
-                },
-                '&.Mui-focused fieldset': {
-                  borderColor: 'rgba(168, 85, 247, 1)',
-                },
-              },
-              '& .MuiInputBase-input::placeholder': {
-                color: 'rgba(243, 232, 255, 0.5)',
-                opacity: 1,
-              },
-              '& .MuiInputLabel-root': {
-                color: 'rgba(243, 232, 255, 0.7)',
-                '&.Mui-focused': {
-                  color: 'rgba(168, 85, 247, 1)',
-                },
-              },
-              '& .MuiFormHelperText-root': {
-                color: 'rgba(252, 165, 165, 1)',
-              },
-            }}
-          />
-        </Box>
-      </DialogContent>
-
-      <DialogActions
-        sx={{
-          gap: 1,
-          p: 2,
-          borderTop: '1px solid rgba(168, 85, 247, 0.2)',
-        }}
-      >
-        <Button
-          onClick={handleDialogClose}
-          disabled={isLoading}
-          sx={{
-            color: 'rgba(243, 232, 255, 0.7)',
-            '&:hover': {
-              backgroundColor: 'rgba(168, 85, 247, 0.1)',
-            },
-          }}
-        >
-          {t('cancelButton')}
-        </Button>
-
-        <Button
-          type="submit"
-          disabled={
-            isLoading || !title.trim() || !author.trim() || !selectedFile
-          }
-          variant="contained"
-          sx={{
-            background: 'linear-gradient(135deg, #a78bfa 0%, #c4b5fd 100%)',
-            color: '#1a0e2e',
-            fontWeight: 600,
-            textTransform: 'none',
-            fontSize: '0.95rem',
-            '&:hover': {
-              background: 'linear-gradient(135deg, #b8a3e0 0%, #d4c4ff 100%)',
-            },
-            '&.Mui-disabled': {
-              background: 'rgba(168, 85, 247, 0.3)',
-              color: 'rgba(243, 232, 255, 0.5)',
-            },
-          }}
-        >
-          {isLoading ? (
-            <>
-              <CircularProgress size={20} sx={{ mr: 1, color: '#1a0e2e' }} />
-              {uploadPhase === 'converting'
-                ? t('convertingButton', {
-                    progress: conversionProgress,
-                  })
-                : uploadPhase === 'uploading'
-                  ? t('uploadingFileButton')
-                  : uploadPhase === 'saving'
-                    ? t('registeringButton')
-                    : t('uploadingButton')}
-            </>
-          ) : (
-            t('uploadButton')
-          )}
-        </Button>
-      </DialogActions>
-
-      {/* Converting progress bar (full-width, below actions) */}
-      {isLoading && uploadPhase === 'converting' && (
-        <LinearProgress
-          variant={conversionProgress > 0 ? 'determinate' : 'indeterminate'}
-          value={conversionProgress}
-          sx={{
-            height: 3,
-            borderRadius: '0 0 4px 4px',
-            backgroundColor: 'rgba(168, 85, 247, 0.15)',
-            '& .MuiLinearProgress-bar': {
-              background:
-                'linear-gradient(90deg, #a78bfa 0%, #c4b5fd 100%)',
-            },
-          }}
-        />
-      )}
+        )}
       </Box>
     </Dialog>
   );
