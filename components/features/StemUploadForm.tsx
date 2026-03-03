@@ -28,7 +28,7 @@ import { useTranslations } from 'next-intl';
 import { convertToMp3, Mp3ConversionError } from '@/lib/audio/convertToMp3';
 import { validateSongFile, InvalidFileError } from '@/lib/api/song-creation';
 import type { SeparationStemName } from '@/lib/api/types';
-import { uploadSeparationStem } from '@/lib/storage/uploadSeparationStems';
+import { uploadSeparationStem, deleteSeparationStems } from '@/lib/storage/uploadSeparationStems';
 import { getFirebaseAuth } from '@/lib/firebase/auth';
 import { updateSeparatedSongInfo } from '@/lib/firebase/songs';
 
@@ -258,7 +258,46 @@ export const StemUploadForm = forwardRef<
         return { type: stem.type, path: storagePath };
       });
 
-      const uploadResults = await Promise.all(uploadPromises);
+      const uploadResults: Array<{ type: SeparationStemName; path: string }> =
+        [];
+      const uploadedStemNames: string[] = [];
+
+      const uploadSettlements = await Promise.allSettled(uploadPromises);
+
+      // Track results and identify failures
+      let uploadError: Error | null = null;
+      uploadSettlements.forEach((settlement, index) => {
+        if (settlement.status === 'fulfilled') {
+          uploadResults.push(settlement.value);
+          uploadedStemNames.push(settlement.value.type);
+        } else {
+          // Capture first error for display
+          if (!uploadError) {
+            uploadError = settlement.reason;
+          }
+        }
+      });
+
+      // If any upload failed, rollback all successful uploads
+      if (uploadError) {
+        if (uploadedStemNames.length > 0) {
+          try {
+            await deleteSeparationStems(user.uid, songId, uploadedStemNames);
+          } catch (deleteErr) {
+            console.error('Failed to rollback uploaded stems:', deleteErr);
+          }
+        }
+
+        const message =
+          uploadError instanceof Error ? uploadError.message : 'Unknown error';
+        setError(
+          t('validation.uploadFailed', {
+            message,
+          }),
+        );
+        setStemProgress({});
+        return;
+      }
 
       const stemPaths: Partial<Record<SeparationStemName, string>> = {};
       uploadResults.forEach(({ type, path }) => {
@@ -266,16 +305,38 @@ export const StemUploadForm = forwardRef<
       });
 
       // Update Firestore with stems
-      await updateSeparatedSongInfo(user.uid, songId, {
-        provider: 'local',
-        providerData: {
-          uploadedAt: new Date().toISOString(),
-        },
-        stems: {
-          uploadedAt: new Date().toISOString(),
-          paths: stemPaths,
-        },
-      });
+      try {
+        await updateSeparatedSongInfo(user.uid, songId, {
+          provider: 'local',
+          providerData: {
+            uploadedAt: new Date().toISOString(),
+          },
+          stems: {
+            uploadedAt: new Date().toISOString(),
+            paths: stemPaths,
+          },
+        });
+      } catch (firestoreErr) {
+        // Rollback: delete all uploaded stems if Firestore update fails
+        if (uploadedStemNames.length > 0) {
+          try {
+            await deleteSeparationStems(user.uid, songId, uploadedStemNames);
+          } catch (deleteErr) {
+            console.error(
+              'Failed to rollback stems after Firestore update failure:',
+              deleteErr,
+            );
+          }
+        }
+
+        const message =
+          firestoreErr instanceof Error
+            ? firestoreErr.message
+            : 'Unknown error';
+        setError(t('validation.firestoreUpdateFailed', { message }));
+        setStemProgress({});
+        return;
+      }
 
       onSuccess();
     } catch (err) {
