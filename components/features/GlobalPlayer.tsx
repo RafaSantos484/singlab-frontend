@@ -132,8 +132,9 @@ interface GlobalPlayerInnerProps {
  *
  * 2. SEPARATED MODE (multi-track playback with stems)
  *    - Plays isolated stems: vocals, bass, drums, piano, guitar, other
- *    - Vocals is MANDATORY and serves as the master (source of truth)
- *    - All other stems stay in lock-step with vocals before playback
+ *    - One audible stem serves as the master (source of truth for playback position)
+ *    - If no stem is audible, vocals is the fallback master
+ *    - All other stems stay in lock-step with the master
  *    - Volume is shared across all stems; disabling a stem mutes it but keeps it playing
  *    - Transport controls affect all stems equally
  *
@@ -146,13 +147,15 @@ interface GlobalPlayerInnerProps {
  *    (play, pause, seek, stem toggle). Never polling or interval-based checks.
  *
  * 3. **Master-slave model (separated mode)**:
- *    - Vocals is the master (position, duration state)
- *    - All other stems are slaves (follow vocal position + timing)
- *    - Before any play operation, all stems sync to vocals' position
+ *    - An audible stem is the master (position, duration state)
+ *    - Fallback: vocals is the master if no stem is audible
+ *    - All other stems are slaves (follow master position + timing)
+ *    - Before any play operation, all stems sync to master's position
  *
  * 4. **Buffering handling**: When the master stalls due to network/disk lag,
  *    slaves pause to prevent drift. On master-resume, slaves re-sync and
  *    restart together.
+ *    (The master is the first audible stem, or vocals if none are audible.)
  *
  * 5. **Seek operation split**:
  *    - Slider drag (handleSeekChange): Update displayed time, pause audio silently
@@ -341,25 +344,32 @@ function GlobalPlayerInner({
   // ── Helpers ──────────────────────────────────────────────────────────────
 
   /**
-   * Get the master audio element.
+   * Get the master audio element for synchronization.
    *
-   * The master track is the source of truth for playback state (time, duration,
-   * play/pause). All other tracks in the same mode stay in sync with it.
+   * In raw mode: Returns the raw element (only one exists).
+   * In separated mode: 
+   *   - If any stem is audible (in audibleTrackIds), return the first audible one
+   *   - Otherwise, fallback to vocals (mandatory)
    *
-   * - raw mode  → the raw element (only one exists)
-   * - separated → the 'vocals' element (always present as mandatory)
-   *
-   * In separated mode, vocals is chosen as master because:
-   * - It's always present (mandatory, per spec)
-   * - Users focus their interaction (play, pause, seek) on it
-   * - Other stems follow along and stay synchronized
+   * This ensures we sync with an element that's actually playing audibly,
+   * preventing issues where the browser pauses a muted element when the tab
+   * becomes hidden.
    */
   const getMaster = useCallback((): HTMLAudioElement | null => {
     const map = audioMapRef.current;
     if (playbackSourceRef.current === 'raw') {
       return map.get('raw') ?? null;
     }
-    // In separated mode, vocals is always the master track
+    
+    // In separated mode, prefer an audible stem for sync
+    const audible = audibleTrackIdsRef.current;
+    for (const stem of STEM_ORDER) {
+      if (audible.has(stem) && map.has(stem)) {
+        return map.get(stem) ?? null;
+      }
+    }
+    
+    // Fallback to vocals if no stem is audible
     return map.get('vocals') ?? null;
   }, []);
 
@@ -409,7 +419,8 @@ function GlobalPlayerInner({
    * Sync non-master elements within the active source to master's current time.
    *
    * In raw mode: This is a no-op since there's only the master element.
-   * In separated mode: Syncs all non-vocal tracks to the vocal track's position.
+   * In separated mode: Syncs all non-master tracks to the master's position.
+   * The master is chosen as the first audible stem (or vocals if none are audible).
    *
    * This is called right before play to ensure all tracks start from the same
    * exact position, preventing audible drifts or timing misaligns.
@@ -542,7 +553,8 @@ function GlobalPlayerInner({
         //    can occur when browsers clamp a seek to the nearest decodable frame.
         //
         //    In raw mode: This is a no-op (only master exists).
-        //    In separated: This syncs all stems to vocals' position.
+        //    In separated: This syncs all non-master stems to the master's position.
+        //    (Master is the first audible stem, or vocals if none are audible.)
         syncAudioTracks();
 
         // 4. Wait until every track has buffered enough data at the seek position.
@@ -697,7 +709,8 @@ function GlobalPlayerInner({
       //  2. When master resumes, re-sync position and restart all
       //
       // In raw mode: This is a no-op (only master exists).
-      // In separated: This keeps non-vocal stems in lock-step with vocals.
+      // In separated: This keeps non-master stems in lock-step with the master
+      // (which is an audible stem, or vocals if none are audible).
 
       const pauseNonMaster = (): void => {
         if (getMasterRef.current() !== el) return;
@@ -722,7 +735,7 @@ function GlobalPlayerInner({
 
         // Sync and restart non-master elements of the same active source.
         // In raw mode: This is a no-op (only master exists).
-        // In separated: This re-syncs all stems to vocals position and restarts.
+        // In separated: This re-syncs all stems to master position and restarts.
         const activeEls = getActiveElementsRef.current();
         const nonMasterEls = activeEls.filter((a) => a !== el);
         nonMasterEls.forEach((a) => {
@@ -806,14 +819,46 @@ function GlobalPlayerInner({
   // Sync UI time when tab becomes visible again
   // Browsers throttle timeupdate events while the tab is hidden, so the UI
   // can fall out of sync. This effect re-syncs currentTime when the user
-  // comes back to the tab.
+  // comes back to the tab, and also re-syncs all audio elements to ensure
+  // they stay in lock-step (especially important in separated mode).
+  //
+  // Note: When a stem (especially vocals) is muted (volume=0), browsers may
+  // pause or freeze playback when the tab becomes hidden. When the tab returns,
+  // we must explicitly resume playback to prevent time from becoming stale.
   useEffect(() => {
     const handleVisibilityChange = (): void => {
       if (document.hidden) return; // Tab is hidden, do nothing
-      // Tab is now visible – sync currentTime from the master element
-      const master = getMaster();
-      if (master && isFinite(master.currentTime)) {
-        setCurrentTime(master.currentTime);
+      
+      // Tab is now visible – sync currentTime and all audio elements
+      const master = getMasterRef.current();
+      if (!master || !isFinite(master.currentTime)) return;
+
+      // Update state with current master position
+      setCurrentTime(master.currentTime);
+
+      // In separated mode, hard-sync all non-master elements to master position
+      // This prevents drift that can accumulate while the tab is hidden
+      const activeElements = getActiveElementsRef.current();
+      activeElements.forEach((el) => {
+        if (el === master) return;
+        if (Math.abs(el.currentTime - master.currentTime) > 0.05) {
+          el.currentTime = master.currentTime;
+        }
+      });
+
+      // If music should be playing, ensure master (and all other elements) are
+      // actively playing. Browsers may pause muted elements when the tab is hidden,
+      // so we must resume playback explicitly even if the element thinks it's playing.
+      if (isPlayingRef.current) {
+        void Promise.all(
+          activeElements.map((el) =>
+            el.play().catch((e: unknown) => {
+              console.warn('[GlobalPlayer] Resume failed after tab visibility:', e);
+            }),
+          ),
+        ).then(() => {
+          applyVolumesRef.current();
+        });
       }
     };
 
@@ -821,7 +866,7 @@ function GlobalPlayerInner({
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [getMaster]);
+  }, []); // No dependencies – register once, always use latest refs
 
   // ── Controls ─────────────────────────────────────────────────────────────
 
