@@ -15,9 +15,8 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 
 import { type Song } from '@/lib/api/types';
-import { type UploadSongInput } from '@/lib/api/songs';
-import { songsApi } from '@/lib/api';
-import { ApiError } from '@/lib/api/types';
+import { getFirebaseAuth } from '@/lib/firebase/auth';
+import { updateSongDoc } from '@/lib/firebase/songs';
 import { validateSongMetadata } from '@/lib/api/song-creation';
 
 // ---------------------------------------------------------------------------
@@ -105,7 +104,7 @@ export function SongEditDialog({
     }
 
     // Prepare update payload (only include changed fields)
-    const updates: Partial<UploadSongInput> = {};
+    const updates: { title?: string; author?: string } = {};
     if (trimmedTitle !== song.title) {
       updates.title = trimmedTitle;
     }
@@ -116,22 +115,19 @@ export function SongEditDialog({
     // Attempt update
     setIsLoading(true);
     try {
-      await songsApi.updateSong(song.id, updates);
+      const currentUser = getFirebaseAuth().currentUser;
+      if (!currentUser) {
+        throw new Error('No authenticated user');
+      }
+
+      await updateSongDoc(currentUser.uid, song.id, updates);
 
       // Success — close dialog (global state will update via Firestore listener)
       onClose();
     } catch (err) {
-      // Handle different error types
-      if (err instanceof ApiError) {
-        setError(
-          t('errors.updateFailed', {
-            message: err.message,
-            statusCode: err.statusCode,
-          }),
-        );
-      } else {
-        setError(t('errors.unexpected'));
-      }
+      const message =
+        err instanceof Error ? err.message : t('errors.unexpected');
+      setError(message);
     } finally {
       setIsLoading(false);
     }
