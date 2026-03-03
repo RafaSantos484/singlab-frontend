@@ -1,13 +1,17 @@
 /**
  * @module lib/api
  *
- * Pre-wired API client singletons for all singlab-api resources.
+ * Pre-wired API client singletons for singlab-api resources.
+ *
+ * The backend now acts solely as a stateless mediator between the
+ * frontend and external APIs (e.g. PoYo stem separation). All Firebase
+ * data and file operations are handled directly by the frontend.
  *
  * Usage (client components / hooks only):
  * ```ts
- * import { songsApi } from '@/lib/api';
+ * import { separationsApi } from '@/lib/api';
  *
- * const created = await songsApi.uploadSong(file, { title, author });
+ * const task = await separationsApi.requestSeparation(audioUrl, title);
  * ```
  *
  * The underlying `ApiClient` automatically:
@@ -18,8 +22,6 @@
 
 import { getCurrentUserIdToken } from '@/lib/firebase/auth';
 import { ApiClient } from './client';
-import { SongsApi } from './songs';
-import { UsersApi } from './users';
 import { SeparationsApi } from './separations';
 
 // ---------------------------------------------------------------------------
@@ -32,11 +34,7 @@ const apiClient = new ApiClient(getCurrentUserIdToken);
 // Resource APIs
 // ---------------------------------------------------------------------------
 
-export const songsApi = new SongsApi(apiClient);
 export const separationsApi = new SeparationsApi(apiClient);
-
-/** Public API instance — user creation does not require authentication. */
-export const usersApi = new UsersApi();
 
 // ---------------------------------------------------------------------------
 // Re-exports for consumers
@@ -45,10 +43,6 @@ export const usersApi = new UsersApi();
 export { ApiClient } from './client';
 export type { TokenProvider } from './client';
 
-export { SongsApi } from './songs';
-export type { UploadSongInput } from './songs';
-
-export { UsersApi } from './users';
 export { SeparationsApi } from './separations';
 
 export { ApiError } from './types';
