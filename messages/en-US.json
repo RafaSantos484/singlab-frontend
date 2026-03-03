@@ -126,7 +126,8 @@
     },
     "error": {
       "title": "Submission failed",
-      "tryAgain": "Please try again. If the problem persists, contact support."
+      "tryAgain": "Please try again. If the problem persists, contact support.",
+      "generic": "An unexpected error occurred. Please try again."
     }
   },
   "StemUploadForm": {
@@ -251,6 +252,12 @@
       "processing": "Separating audio…",
       "failed": "Separation failed: {errorMessage}",
       "provider": "Provider:"
+    },
+    "SeparationDialog": {
+      "success": {
+        "poyo": "Separation submitted successfully. Processing will begin shortly and take a few minutes to complete.",
+        "local": "Stems uploaded successfully. Your adjusted tracks are ready to use in the player."
+      }
     }
   },
   "Validation": {

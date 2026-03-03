@@ -376,7 +376,6 @@ function SongCardItem({
   onEdit,
 }: SongCardItemProps): React.ReactElement {
   const t = useTranslations('Dashboard');
-  const tAll = useTranslations();
   const tSep = useTranslations('Separation');
   const tPlayer = useTranslations('Player');
   const { songsStemUploading } = useGlobalState();
@@ -440,8 +439,8 @@ function SongCardItem({
   const handleSeparationSuccess = (provider: 'poyo' | 'local'): void => {
     const message =
       provider === 'poyo'
-        ? tAll('SeparationDialog.success.poyo')
-        : tAll('SeparationDialog.success.local');
+        ? tPlayer('SeparationDialog.success.poyo')
+        : tPlayer('SeparationDialog.success.local');
     setSeparationSuccessMessage(message);
     setShowSeparationSuccessSnackbar(true);
   };

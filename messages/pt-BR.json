@@ -125,7 +125,8 @@
     },
     "error": {
       "title": "Falha no envio",
-      "tryAgain": "Por favor, tente novamente. Se o problema persistir, contacte o suporte."
+      "tryAgain": "Por favor, tente novamente. Se o problema persistir, contacte o suporte.",
+      "generic": "Ocorreu um erro inesperado. Por favor, tente novamente."
     }
   },
   "StemUploadForm": {
@@ -249,6 +250,12 @@
       "processing": "Separando áudio…",
       "failed": "Falha na separação: {errorMessage}",
       "provider": "Provedor:"
+    },
+    "SeparationDialog": {
+      "success": {
+        "poyo": "Separação enviada com sucesso. O processamento iniciará em breve e levará alguns minutos para ser concluído.",
+        "local": "Faixas enviadas com sucesso. Suas faixas ajustadas estão prontas para usar no player."
+      }
     }
   },
   "Validation": {
