@@ -147,3 +147,21 @@ export async function updateSeparationStems(
     'separatedSongInfo.stems': stems,
   });
 }
+
+/**
+ * Deletes all separation information (provider data and stems) from a song.
+ *
+ * This allows the user to request separation again from a different provider.
+ * Note: Storage cleanup (stem files) must be handled separately.
+ *
+ * @param userId - Firebase Auth UID of the song owner.
+ * @param songId - Song document ID.
+ */
+export async function deleteSeparatedSongInfo(
+  userId: string,
+  songId: string,
+): Promise<void> {
+  await updateDoc(songDocRef(userId, songId), {
+    separatedSongInfo: null,
+  });
+}

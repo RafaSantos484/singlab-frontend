@@ -84,6 +84,10 @@
     "noSearchResults": "Nenhuma música encontrada para \"{query}\"",
     "addSongAriaLabel": "adicionar música",
     "nowPlaying": "Tocando agora",
+    "deleteStemsButton": "Deletar faixas separadas",
+    "deleteStemsTitle": "Deletar separação de faixas",
+    "deleteStemsMessage": "Tem certeza de que deseja deletar as faixas separadas? Você poderá solicitar uma nova separação de qualquer provedor depois.",
+    "cancelButton": "Cancelar",
     "tooltips": {
       "playSong": "Tocar música",
       "editSong": "Editar música"
@@ -104,8 +108,52 @@
     "failed": "Falha na separação: {errorMessage}",
     "tryAgain": "Tentar novamente",
     "tryingAgain": "Tentando novamente…"
+  },  "SeparationDialog": {
+    "title": "Separação de Faixas",
+    "providerLabel": "Selecione o provedor",
+    "poyo": "Separação por IA (PoYo)",
+    "local": "Upload Manual",
+    "submitButton": "Separar",
+    "cancelButton": "Cancelar",
+    "info": {
+      "poyo": "Envie o áudio para um serviço de IA para separação automática. O processamento leva alguns minutos e será cobrado créditos da sua conta PoYo.",
+      "local": "Envie faixas separadas diretamente. Você pode usar qualquer serviço externo e enviar os resultados."
+    },
+    "success": {
+      "poyo": "Separação enviada com sucesso. O processamento iniciará em breve e levará alguns minutos para ser concluído.",
+      "local": "Faixas enviadas com sucesso. Suas faixas ajustadas estão prontas para usar no player."
+    },
+    "error": {
+      "title": "Falha no envio",
+      "tryAgain": "Por favor, tente novamente. Se o problema persistir, contacte o suporte."
+    }
   },
-  "SongCreate": {
+  "StemUploadForm": {
+    "title": "Enviar Faixas Separadas",
+    "description": "Adicione pelo menos 2 faixas: vocal (obrigatória) e pelo menos um outro tipo.",
+    "addStemButton": "Adicionar Faixa",
+    "submitButton": "Enviar Faixas",
+    "cancelButton": "Cancelar",
+    "uploadingButton": "Enviando faixas…",
+    "convertingButton": "Convertendo para MP3{progress, select, 0 {} other { ({progress}%)}}",
+    "stemConverting": "Convertendo para MP3{progress, select, 0 {} other { ({progress}%)}}",
+    "stemUploading": "Enviando…",
+    "typeLabel": "Tipo de Faixa",
+    "fileLabel": "Arquivo de Áudio",
+    "removeButton": "Remover",
+    "requiredLabel": "Obrigatória",
+    "selectTypeLabel": "Selecione o tipo",
+    "validation": {
+      "minStems": "Mínimo 2 faixas necessárias (vocal + uma outra)",
+      "vocalsRequired": "Faixa de vocal é obrigatória",
+      "typeMissing": "Selecione um tipo de faixa",
+      "fileMissing": "Selecione um arquivo",
+      "bothMissing": "Selecione um tipo e um arquivo",
+      "duplicateType": "Este tipo de faixa já foi adicionado",
+      "conversionFailed": "Falha ao converter arquivo para MP3: {message}",
+      "uploadFailed": "Falha ao enviar faixas: {message}"
+    }
+  },  "SongCreate": {
     "title": "Enviar Nova Música",
     "infoMessage": "Selecione o arquivo primeiro, depois preencha Título e Artista. Tentaremos detectar os metadados automaticamente.",
     "chooseFileButton": "Escolher Arquivo de Áudio",
@@ -193,6 +241,13 @@
       "piano": "Piano",
       "guitar": "Guitarra",
       "other": "Outros"
+    },
+    "Separation": {
+      "startButton": "Iniciar separação de faixas",
+      "stemsReady": "Faixas prontas. Selecione-as no player abaixo.",
+      "processing": "Separando áudio…",
+      "failed": "Falha na separação: {errorMessage}",
+      "provider": "Provedor:"
     }
   },
   "Validation": {

@@ -69,6 +69,8 @@ Components are split into two groups:
           Uses `useSeparationStatus` hook to manage the separation lifecycle.
      - `SongDeleteButton` — reusable confirmation dialog for deleting songs with
           loading state, accessibility features, and error handling.
+     - `SeparationDialog` — provider selector (`poyo` or `local`) for separation requests.
+     - `StemUploadForm` — manual stem upload workflow (vocals required + at least one extra stem).
      - `SongCreateDialog` — upload workflow with:
           * File picker + drag-and-drop support
           * Audio format validation (MIME type + extension fallback)
@@ -164,8 +166,13 @@ Protected endpoints
 
 ### Stem Separation Processing Flow
 
+Two provider paths are supported: `poyo` (async backend-proxied AI task) and
+`local` (immediate manual stem upload).
+
+#### `poyo` provider flow
+
 ```
-[User clicks "Request Separation" on song card]
+[User opens SeparationDialog and selects provider = poyo]
      │
      │ 1. Get signed audio URL from Storage
      │ 2. POST /separations/submit { audioUrl, title }
@@ -178,7 +185,7 @@ Protected endpoints
      │
      │ updateSeparatedSongInfo() writes to song doc
      ▼
-[useSeparationStatus polls status every 5s]
+[useSeparationStatus polls status every 60s]
      │
      │ GET /separations/status?taskId=xxx
      │ Backend fetches status from PoYo API
@@ -206,6 +213,36 @@ Protected endpoints
      │ Real-time listener updates song.separatedSongInfo.stems
      ▼
 [Stems available in GlobalPlayer]
+```
+
+#### `local` provider flow
+
+```
+[User opens SeparationDialog and selects provider = local]
+     │
+     │ Fills StemUploadForm (vocals required + at least one other stem)
+     │ Client validates files and converts to MP3 when required
+     ▼
+[Client uploads stems directly to Firebase Storage]
+     │
+     │ uploadSeparationStem() for each selected stem
+     ▼
+[Frontend writes local separation data to Firestore]
+     │
+     │ updateSeparatedSongInfo() with provider='local' and stems paths
+     ▼
+[Stems immediately available in GlobalPlayer]
+```
+
+#### Stem reset flow
+
+```
+[User clicks "Delete stems" on song card]
+     │
+     │ Deletes stem files from Storage
+     │ Sets separatedSongInfo=null in Firestore
+     ▼
+[Song becomes eligible for a new separation request]
 ```
 
 ## State Management
@@ -261,7 +298,7 @@ Song Cards (dashboard)
     │
     ├─→ useSeparationStatus(song)
     │       ├─→ Fetch separation status via separationsApi
-    │       ├─→ Poll backend every 5s while processing
+     │       ├─→ Poll backend every 60s while processing (poyo provider)
     │       └─→ Display UI (request pending/progress/finished/failed)
     │
     │ dispatch({ type: 'PLAYER_LOAD_SONG', payload: songId })
@@ -276,8 +313,8 @@ GlobalPlayer (component)
     │       └─→ Fetch/refresh signed URL for raw audio
     │
     ├─→ Unified Multi-Track Audio Engine
-    │       ├─→ All tracks (raw + stems) always play simultaneously
-    │       ├─→ Stem selection only changes volume (0 for deselected, base volume for selected)
+     │       ├─→ Loads only active source tracks (raw OR stems)
+     │       ├─→ Stem selection changes volume (0 for deselected, base volume for selected)
      │       ├─→ playbackSource: 'raw' or 'separated'
      │       │   ├─→ raw mode: single audio element, simple transport
      │       │   └─→ separated mode: multi-stem playback with vocals as master

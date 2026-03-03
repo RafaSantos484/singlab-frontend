@@ -3,11 +3,14 @@ import type {
   SeparationProviderName,
   SeparatedSongInfo,
   PoyoSeparationTaskDetails,
+  LocalSeparationProviderData,
 } from '@/lib/api/types';
 import { PoyoSeparationAdapter } from './poyoAdapter';
+import { LocalSeparationAdapter } from './localAdapter';
 import type { SeparationProviderAdapter } from './adapter';
 
 const poyoAdapter = new PoyoSeparationAdapter();
+const localAdapter = new LocalSeparationAdapter();
 
 /** Resolve an adapter for the given provider name. */
 export function getSeparationAdapter(
@@ -16,6 +19,8 @@ export function getSeparationAdapter(
   switch (provider) {
     case 'poyo':
       return poyoAdapter as SeparationProviderAdapter<PoyoSeparationTaskDetails>;
+    case 'local':
+      return localAdapter as SeparationProviderAdapter<LocalSeparationProviderData>;
     default:
       throw new Error(`Unsupported separation provider: ${provider}`);
   }

@@ -93,11 +93,10 @@ export function useSeparationStatus(song: Song): UseSeparationStatusResult {
     setIsRefreshing(true);
     setError(null);
     try {
-      const providerData =
-        await separationsApi.refreshSeparationStatus(
-          normalized.taskId,
-          normalized.provider,
-        );
+      const providerData = await separationsApi.refreshSeparationStatus(
+        normalized.taskId,
+        normalized.provider,
+      );
 
       if (providerData) {
         // Write updated provider data to Firestore
@@ -135,16 +134,13 @@ export function useSeparationStatus(song: Song): UseSeparationStatusResult {
       setIsRequesting(true);
       setError(null);
       try {
-        const audioUrl = await getStorageDownloadUrl(
-          song.rawSongInfo.path,
-        );
+        const audioUrl = await getStorageDownloadUrl(song.rawSongInfo.path);
 
-        const providerData =
-          await separationsApi.requestSeparation(
-            audioUrl,
-            song.title,
-            provider,
-          );
+        const providerData = await separationsApi.requestSeparation(
+          audioUrl,
+          song.title,
+          provider,
+        );
 
         if (providerData) {
           // Persist provider task data to Firestore
@@ -160,6 +156,7 @@ export function useSeparationStatus(song: Song): UseSeparationStatusResult {
             ? err.message
             : 'Unable to start stem separation';
         setError(message);
+        throw new Error(message);
       } finally {
         setIsRequesting(false);
       }

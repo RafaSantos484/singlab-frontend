@@ -181,207 +181,207 @@ export function SongEditDialog({
       }}
     >
       <Box component="form" onSubmit={handleFormSubmit}>
-      <DialogTitle
-        sx={{
-          fontSize: '1.5rem',
-          fontWeight: 600,
-          background: 'linear-gradient(135deg, #a78bfa 0%, #c4b5fd 100%)',
-          backgroundClip: 'text',
-          textFillColor: 'transparent',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          color: 'transparent',
-          borderBottom: '1px solid rgba(168, 85, 247, 0.2)',
-          pb: 2,
-        }}
-      >
-        {t('title')}
-      </DialogTitle>
+        <DialogTitle
+          sx={{
+            fontSize: '1.5rem',
+            fontWeight: 600,
+            background: 'linear-gradient(135deg, #a78bfa 0%, #c4b5fd 100%)',
+            backgroundClip: 'text',
+            textFillColor: 'transparent',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            color: 'transparent',
+            borderBottom: '1px solid rgba(168, 85, 247, 0.2)',
+            pb: 2,
+          }}
+        >
+          {t('title')}
+        </DialogTitle>
 
-      <DialogContent sx={{ pt: 3, pb: 2 }}>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {/* Error alert */}
-          {error && (
-            <Alert
-              severity="error"
-              sx={{
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                color: '#fca5a5',
-                border: '1px solid rgba(239, 68, 68, 0.3)',
-                '& .MuiAlert-icon': {
+        <DialogContent sx={{ pt: 3, pb: 2 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {/* Error alert */}
+            {error && (
+              <Alert
+                severity="error"
+                sx={{
+                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
                   color: '#fca5a5',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  '& .MuiAlert-icon': {
+                    color: '#fca5a5',
+                  },
+                }}
+              >
+                {error}
+              </Alert>
+            )}
+
+            {/* Helper text */}
+            <Alert
+              severity="info"
+              sx={{
+                backgroundColor: 'rgba(129, 140, 248, 0.1)',
+                color: '#c7d2fe',
+                border: '1px solid rgba(129, 140, 248, 0.3)',
+                '& .MuiAlert-icon': {
+                  color: '#c7d2fe',
                 },
               }}
             >
-              {error}
+              {t('infoMessage')}
             </Alert>
-          )}
 
-          {/* Helper text */}
-          <Alert
-            severity="info"
+            {/* Title field */}
+            <TextField
+              label={t('titleLabel')}
+              value={title}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                // Clear error when user starts typing
+                if (fieldErrors.title) {
+                  setFieldErrors((prev) => ({ ...prev, title: undefined }));
+                }
+              }}
+              error={!!fieldErrors.title}
+              helperText={
+                fieldErrors.title
+                  ? tV(fieldErrors.title as Parameters<typeof tV>[0])
+                  : undefined
+              }
+              fullWidth
+              disabled={isLoading}
+              placeholder={t('titlePlaceholder')}
+              inputProps={{
+                maxLength: 255,
+              }}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  color: 'rgb(243, 232, 255)',
+                  borderColor: 'rgba(168, 85, 247, 0.3)',
+                  '&:hover fieldset': {
+                    borderColor: 'rgba(168, 85, 247, 0.6)',
+                  },
+                  '&.Mui-focused fieldset': {
+                    borderColor: 'rgba(168, 85, 247, 1)',
+                  },
+                },
+                '& .MuiInputBase-input::placeholder': {
+                  color: 'rgba(243, 232, 255, 0.5)',
+                  opacity: 1,
+                },
+                '& .MuiInputLabel-root': {
+                  color: 'rgba(243, 232, 255, 0.7)',
+                  '&.Mui-focused': {
+                    color: 'rgba(168, 85, 247, 1)',
+                  },
+                },
+                '& .MuiFormHelperText-root': {
+                  color: 'rgba(252, 165, 165, 1)',
+                },
+              }}
+            />
+
+            {/* Author field */}
+            <TextField
+              label={t('authorLabel')}
+              value={author}
+              onChange={(e) => {
+                setAuthor(e.target.value);
+                if (fieldErrors.author) {
+                  setFieldErrors((prev) => ({ ...prev, author: undefined }));
+                }
+              }}
+              error={!!fieldErrors.author}
+              helperText={
+                fieldErrors.author
+                  ? tV(fieldErrors.author as Parameters<typeof tV>[0])
+                  : undefined
+              }
+              fullWidth
+              disabled={isLoading}
+              placeholder={t('authorPlaceholder')}
+              inputProps={{
+                maxLength: 255,
+              }}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  color: 'rgb(243, 232, 255)',
+                  borderColor: 'rgba(168, 85, 247, 0.3)',
+                  '&:hover fieldset': {
+                    borderColor: 'rgba(168, 85, 247, 0.6)',
+                  },
+                  '&.Mui-focused fieldset': {
+                    borderColor: 'rgba(168, 85, 247, 1)',
+                  },
+                },
+                '& .MuiInputBase-input::placeholder': {
+                  color: 'rgba(243, 232, 255, 0.5)',
+                  opacity: 1,
+                },
+                '& .MuiInputLabel-root': {
+                  color: 'rgba(243, 232, 255, 0.7)',
+                  '&.Mui-focused': {
+                    color: 'rgba(168, 85, 247, 1)',
+                  },
+                },
+                '& .MuiFormHelperText-root': {
+                  color: 'rgba(252, 165, 165, 1)',
+                },
+              }}
+            />
+          </Box>
+        </DialogContent>
+
+        <DialogActions
+          sx={{
+            gap: 1,
+            p: 2,
+            borderTop: '1px solid rgba(168, 85, 247, 0.2)',
+          }}
+        >
+          <Button
+            onClick={handleDialogClose}
+            disabled={isLoading}
             sx={{
-              backgroundColor: 'rgba(129, 140, 248, 0.1)',
-              color: '#c7d2fe',
-              border: '1px solid rgba(129, 140, 248, 0.3)',
-              '& .MuiAlert-icon': {
-                color: '#c7d2fe',
+              color: 'rgba(243, 232, 255, 0.7)',
+              '&:hover': {
+                backgroundColor: 'rgba(168, 85, 247, 0.1)',
               },
             }}
           >
-            {t('infoMessage')}
-          </Alert>
+            {t('cancelButton')}
+          </Button>
 
-          {/* Title field */}
-          <TextField
-            label={t('titleLabel')}
-            value={title}
-            onChange={(e) => {
-              setTitle(e.target.value);
-              // Clear error when user starts typing
-              if (fieldErrors.title) {
-                setFieldErrors((prev) => ({ ...prev, title: undefined }));
-              }
-            }}
-            error={!!fieldErrors.title}
-            helperText={
-              fieldErrors.title
-                ? tV(fieldErrors.title as Parameters<typeof tV>[0])
-                : undefined
-            }
-            fullWidth
-            disabled={isLoading}
-            placeholder={t('titlePlaceholder')}
-            inputProps={{
-              maxLength: 255,
-            }}
+          <Button
+            type="submit"
+            disabled={isLoading || !title.trim() || !author.trim()}
+            variant="contained"
             sx={{
-              '& .MuiOutlinedInput-root': {
-                color: 'rgb(243, 232, 255)',
-                borderColor: 'rgba(168, 85, 247, 0.3)',
-                '&:hover fieldset': {
-                  borderColor: 'rgba(168, 85, 247, 0.6)',
-                },
-                '&.Mui-focused fieldset': {
-                  borderColor: 'rgba(168, 85, 247, 1)',
-                },
+              background: 'linear-gradient(135deg, #a78bfa 0%, #c4b5fd 100%)',
+              color: '#1a0e2e',
+              fontWeight: 600,
+              textTransform: 'none',
+              fontSize: '0.95rem',
+              '&:hover': {
+                background: 'linear-gradient(135deg, #b8a3e0 0%, #d4c4ff 100%)',
               },
-              '& .MuiInputBase-input::placeholder': {
+              '&.Mui-disabled': {
+                background: 'rgba(168, 85, 247, 0.3)',
                 color: 'rgba(243, 232, 255, 0.5)',
-                opacity: 1,
-              },
-              '& .MuiInputLabel-root': {
-                color: 'rgba(243, 232, 255, 0.7)',
-                '&.Mui-focused': {
-                  color: 'rgba(168, 85, 247, 1)',
-                },
-              },
-              '& .MuiFormHelperText-root': {
-                color: 'rgba(252, 165, 165, 1)',
               },
             }}
-          />
-
-          {/* Author field */}
-          <TextField
-            label={t('authorLabel')}
-            value={author}
-            onChange={(e) => {
-              setAuthor(e.target.value);
-              if (fieldErrors.author) {
-                setFieldErrors((prev) => ({ ...prev, author: undefined }));
-              }
-            }}
-            error={!!fieldErrors.author}
-            helperText={
-              fieldErrors.author
-                ? tV(fieldErrors.author as Parameters<typeof tV>[0])
-                : undefined
-            }
-            fullWidth
-            disabled={isLoading}
-            placeholder={t('authorPlaceholder')}
-            inputProps={{
-              maxLength: 255,
-            }}
-            sx={{
-              '& .MuiOutlinedInput-root': {
-                color: 'rgb(243, 232, 255)',
-                borderColor: 'rgba(168, 85, 247, 0.3)',
-                '&:hover fieldset': {
-                  borderColor: 'rgba(168, 85, 247, 0.6)',
-                },
-                '&.Mui-focused fieldset': {
-                  borderColor: 'rgba(168, 85, 247, 1)',
-                },
-              },
-              '& .MuiInputBase-input::placeholder': {
-                color: 'rgba(243, 232, 255, 0.5)',
-                opacity: 1,
-              },
-              '& .MuiInputLabel-root': {
-                color: 'rgba(243, 232, 255, 0.7)',
-                '&.Mui-focused': {
-                  color: 'rgba(168, 85, 247, 1)',
-                },
-              },
-              '& .MuiFormHelperText-root': {
-                color: 'rgba(252, 165, 165, 1)',
-              },
-            }}
-          />
-        </Box>
-      </DialogContent>
-
-      <DialogActions
-        sx={{
-          gap: 1,
-          p: 2,
-          borderTop: '1px solid rgba(168, 85, 247, 0.2)',
-        }}
-      >
-        <Button
-          onClick={handleDialogClose}
-          disabled={isLoading}
-          sx={{
-            color: 'rgba(243, 232, 255, 0.7)',
-            '&:hover': {
-              backgroundColor: 'rgba(168, 85, 247, 0.1)',
-            },
-          }}
-        >
-          {t('cancelButton')}
-        </Button>
-
-        <Button
-          type="submit"
-          disabled={isLoading || !title.trim() || !author.trim()}
-          variant="contained"
-          sx={{
-            background: 'linear-gradient(135deg, #a78bfa 0%, #c4b5fd 100%)',
-            color: '#1a0e2e',
-            fontWeight: 600,
-            textTransform: 'none',
-            fontSize: '0.95rem',
-            '&:hover': {
-              background: 'linear-gradient(135deg, #b8a3e0 0%, #d4c4ff 100%)',
-            },
-            '&.Mui-disabled': {
-              background: 'rgba(168, 85, 247, 0.3)',
-              color: 'rgba(243, 232, 255, 0.5)',
-            },
-          }}
-        >
-          {isLoading ? (
-            <>
-              <CircularProgress size={20} sx={{ mr: 1, color: '#1a0e2e' }} />
-              {t('savingButton')}
-            </>
-          ) : (
-            t('saveButton')
-          )}
-        </Button>
-      </DialogActions>
+          >
+            {isLoading ? (
+              <>
+                <CircularProgress size={20} sx={{ mr: 1, color: '#1a0e2e' }} />
+                {t('savingButton')}
+              </>
+            ) : (
+              t('saveButton')
+            )}
+          </Button>
+        </DialogActions>
       </Box>
     </Dialog>
   );

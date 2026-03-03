@@ -12,6 +12,7 @@ import {
   CircularProgress,
   IconButton,
   Slider,
+  Snackbar,
   Stack,
   ToggleButton,
   ToggleButtonGroup,
@@ -37,6 +38,7 @@ import type {
 } from '@/lib/api/types';
 import { normalizeSeparationInfo } from '@/lib/separations';
 import { useStorageDownloadUrls } from '@/lib/hooks/useStorageDownloadUrls';
+import { SeparationDialog } from './SeparationDialog';
 
 // ---------------------------------------------------------------------------
 // Types & Constants
@@ -277,6 +279,15 @@ function GlobalPlayerInner({
   const [duration, setDuration] = useState(0);
   /** Non-null while the seek slider is being dragged; drives the displayed time. */
   const [seekingTime, setSeekingTime] = useState<number | null>(null);
+
+  // ── Separation dialog state ──────────────────────────────────────────────
+
+  const [isSeparationDialogOpen, setIsSeparationDialogOpen] = useState(false);
+  const [separationSuccessMessage, setSeparationSuccessMessage] = useState<
+    string | null
+  >(null);
+  const [showSeparationSuccessSnackbar, setShowSeparationSuccessSnackbar] =
+    useState(false);
 
   // ── Refs ─────────────────────────────────────────────────────────────────
 
@@ -897,6 +908,22 @@ function GlobalPlayerInner({
   );
 
   /**
+   * Handle successful separation submission.
+   * Shows a provider-specific success message.
+   */
+  const handleSeparationSuccess = useCallback(
+    (provider: 'poyo' | 'local'): void => {
+      const message =
+        provider === 'poyo'
+          ? t('SeparationDialog.success.poyo')
+          : t('SeparationDialog.success.local');
+      setSeparationSuccessMessage(message);
+      setShowSeparationSuccessSnackbar(true);
+    },
+    [t],
+  );
+
+  /**
    * Switch between raw and separated source.
    *
    * Raw and separated modes are completely independent:
@@ -938,30 +965,27 @@ function GlobalPlayerInner({
     [getActiveElements, playbackSource],
   );
 
-  const toggleStem = useCallback(
-    async (stem: StemKey): Promise<void> => {
-      // Ignore if currently syncing (UI should be disabled anyway)
-      if (isSyncingRef.current) return;
+  const toggleStem = useCallback(async (stem: StemKey): Promise<void> => {
+    // Ignore if currently syncing (UI should be disabled anyway)
+    if (isSyncingRef.current) return;
 
-      setSelectedStems((prev) => {
-        if (prev.includes(stem)) {
-          return prev.length === 1 ? prev : prev.filter((s) => s !== stem);
-        }
-        return [...prev, stem];
-      });
-
-      // After toggling a stem, if music is playing, re-sync all tracks.
-      // This prevents drift since a stem's latency may differ when muted vs unmuted.
-      if (isPlayingRef.current && playbackSourceRef.current === 'separated') {
-        const master = getMasterRef.current();
-        if (master && isFinite(master.currentTime)) {
-          // Re-sync all tracks to master's current position, then resume
-          await prepareAtRef.current(master.currentTime, true);
-        }
+    setSelectedStems((prev) => {
+      if (prev.includes(stem)) {
+        return prev.length === 1 ? prev : prev.filter((s) => s !== stem);
       }
-    },
-    [],
-  );
+      return [...prev, stem];
+    });
+
+    // After toggling a stem, if music is playing, re-sync all tracks.
+    // This prevents drift since a stem's latency may differ when muted vs unmuted.
+    if (isPlayingRef.current && playbackSourceRef.current === 'separated') {
+      const master = getMasterRef.current();
+      if (master && isFinite(master.currentTime)) {
+        // Re-sync all tracks to master's current position, then resume
+        await prepareAtRef.current(master.currentTime, true);
+      }
+    }
+  }, []);
 
   const setPreset = useCallback(
     async (preset: 'vocals' | 'instrumental' | 'all'): Promise<void> => {
@@ -1312,8 +1336,81 @@ function GlobalPlayerInner({
               </Stack>
             </Stack>
           )}
+
+          {/* Separation section */}
+          <Box
+            sx={{
+              pt: 2,
+              borderTop: '1px solid rgba(168, 85, 247, 0.2)',
+            }}
+          >
+            {!hasSeparatedAudio && (
+              <Button
+                variant="outlined"
+                onClick={() => setIsSeparationDialogOpen(true)}
+                fullWidth
+                disabled={!isPlayerReady || isLoading}
+              >
+                {t('Separation.startButton')}
+              </Button>
+            )}
+            {hasSeparatedAudio && separation && (
+              <Stack spacing={1}>
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                  {(() => {
+                    if (separation.status === 'finished') {
+                      return t('Separation.stemsReady');
+                    }
+                    if (separation.status === 'processing') {
+                      return `${t('Separation.processing')} (${separation.provider})`;
+                    }
+                    return `${t('Separation.failed', { errorMessage: separation.errorMessage || 'Unknown error' })}`;
+                  })()}
+                </Typography>
+                {separation.status !== 'finished' && (
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      gap: 1,
+                    }}
+                  >
+                    <CircularProgress size={16} />
+                    <Typography
+                      variant="caption"
+                      sx={{ color: 'text.secondary' }}
+                    >
+                      {t('Separation.provider')} {separation.provider}
+                    </Typography>
+                  </Box>
+                )}
+              </Stack>
+            )}
+          </Box>
         </Stack>
       </CardContent>
+
+      {/* Separation Dialog */}
+      <SeparationDialog
+        open={isSeparationDialogOpen}
+        onClose={() => setIsSeparationDialogOpen(false)}
+        onSuccess={handleSeparationSuccess}
+        song={song}
+      />
+
+      {/* Separation Success Snackbar */}
+      <Snackbar
+        open={showSeparationSuccessSnackbar}
+        autoHideDuration={6000}
+        onClose={() => setShowSeparationSuccessSnackbar(false)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Alert
+          severity="success"
+          onClose={() => setShowSeparationSuccessSnackbar(false)}
+        >
+          {separationSuccessMessage}
+        </Alert>
+      </Snackbar>
     </Card>
   );
 }

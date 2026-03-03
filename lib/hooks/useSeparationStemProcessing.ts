@@ -72,11 +72,7 @@ export function useSeparationStemProcessing(): {
 
       try {
         // Write stem paths directly to Firestore
-        await updateSeparationStems(
-          currentUser.uid,
-          songId,
-          stemsData,
-        );
+        await updateSeparationStems(currentUser.uid, songId, stemsData);
       } catch (error) {
         // Rollback: delete uploaded stems if Firestore write fails
         console.error(

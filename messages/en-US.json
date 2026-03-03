@@ -84,6 +84,10 @@
     "noSearchResults": "No songs found matching \"{query}\"",
     "addSongAriaLabel": "add song",
     "nowPlaying": "Now Playing",
+    "deleteStemsButton": "Delete stems",
+    "deleteStemsTitle": "Delete stem separation",
+    "deleteStemsMessage": "Are you sure you want to delete the separated stems? You will be able to request a new separation from any provider afterwards.",
+    "cancelButton": "Cancel",
     "tooltips": {
       "playSong": "Play song",
       "editSong": "Edit song"
@@ -104,6 +108,52 @@
     "failed": "Separation failed: {errorMessage}",
     "tryAgain": "Try again",
     "tryingAgain": "Trying again…"
+  },
+  "SeparationDialog": {
+    "title": "Stem Separation",
+    "providerLabel": "Select provider",
+    "poyo": "AI Separation (PoYo)",
+    "local": "Manual Upload",
+    "submitButton": "Separate",
+    "cancelButton": "Cancel",
+    "info": {
+      "poyo": "Submit audio to an AI service for automatic separation. Processing takes a few minutes and will charge your PoYo account credits.",
+      "local": "Upload separated stems directly. You can use any external service and upload the results."
+    },
+    "success": {
+      "poyo": "Separation submitted successfully. Processing will begin shortly and take a few minutes to complete.",
+      "local": "Stems uploaded successfully. Your adjusted tracks are ready to use in the player."
+    },
+    "error": {
+      "title": "Submission failed",
+      "tryAgain": "Please try again. If the problem persists, contact support."
+    }
+  },
+  "StemUploadForm": {
+    "title": "Upload Separated Stems",
+    "description": "Add at least 2 stems: vocals (required) and at least one other type.",
+    "addStemButton": "Add Stem",
+    "submitButton": "Upload Stems",
+    "cancelButton": "Cancel",
+    "uploadingButton": "Uploading stems…",
+    "convertingButton": "Converting to MP3{progress, select, 0 {} other { ({progress}%)}}",
+    "stemConverting": "Converting to MP3{progress, select, 0 {} other { ({progress}%)}}",
+    "stemUploading": "Uploading…",
+    "typeLabel": "Stem Type",
+    "fileLabel": "Audio File",
+    "removeButton": "Remove",
+    "requiredLabel": "Required",
+    "selectTypeLabel": "Select type",
+    "validation": {
+      "minStems": "At least 2 stems required (vocals + one other)",
+      "vocalsRequired": "Vocals stem is required",
+      "typeMissing": "Please select a stem type",
+      "fileMissing": "Please select a file",
+      "bothMissing": "Please select a type and a file",
+      "duplicateType": "This stem type is already added",
+      "conversionFailed": "Failed to convert file to MP3: {message}",
+      "uploadFailed": "Failed to upload stems: {message}"
+    }
   },
   "SongCreate": {
     "title": "Upload New Song",
@@ -193,6 +243,13 @@
       "piano": "Piano",
       "guitar": "Guitar",
       "other": "Other"
+    },
+    "Separation": {
+      "startButton": "Start stem separation",
+      "stemsReady": "Stems ready. Select them in the player below.",
+      "processing": "Separating audio…",
+      "failed": "Separation failed: {errorMessage}",
+      "provider": "Provider:"
     }
   },
   "Validation": {
