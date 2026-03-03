@@ -70,6 +70,11 @@ export default function DashboardPage(): React.ReactElement | null {
     setMounted(true);
   }, []);
 
+  /**
+   * Filters and sorts songs based on search query and sort order.
+   * Songs are filtered by title and author matching.
+   * The currently playing song is treated like any other song (no special positioning).
+   */
   const filteredAndSortedSongs = useMemo(() => {
     if (!mounted) return [];
 
