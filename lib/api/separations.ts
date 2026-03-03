@@ -1,76 +1,75 @@
 import { type ApiClient } from './client';
 import {
   type ApiSuccessResponse,
-  type ApiMessageSuccessResponse,
   type PoyoSeparationTaskDetails,
   type SeparationProviderName,
 } from './types';
 
 /**
  * API client for stem separation operations.
+ *
+ * The backend acts as a stateless mediator between the frontend and
+ * external separation providers (e.g. PoYo). It does not persist any
+ * data — the frontend is responsible for writing results to Firestore.
  */
 export class SeparationsApi {
   constructor(private readonly client: ApiClient) {}
 
   /**
-   * Submit a separation request for the given song.
+   * Submit a separation request to the configured provider.
    *
-   * The backend persists provider-specific task data on the song document.
-   * The response echoes the provider payload, but the real source of truth
-   * is the Firestore listener which will update `separatedSongInfo` shortly
-   * after submission.
+   * The frontend provides the audio URL and song title directly.
+   * The backend forwards the request to the provider and returns
+   * the raw task metadata (task_id, status, etc.).
+   *
+   * After receiving the response, the frontend is responsible for
+   * persisting the task data to the song's Firestore document.
+   *
+   * @param audioUrl - Public URL of the audio file to separate.
+   * @param title - Song title for provider metadata.
+   * @param provider - Optional provider identifier (defaults to 'poyo').
+   * @returns Provider-specific task metadata.
    */
   async requestSeparation(
-    songId: string,
+    audioUrl: string,
+    title: string,
     provider?: SeparationProviderName,
   ): Promise<PoyoSeparationTaskDetails | null> {
-    const query = provider ? `?provider=${provider}` : '';
     const res = await this.client.post<
       ApiSuccessResponse<PoyoSeparationTaskDetails | null>
-    >(`/songs/${songId}/separations${query}`, {});
+    >('/separations/submit', {
+      audioUrl,
+      title,
+      provider,
+    });
 
     return res.data;
   }
 
   /**
-   * Refresh the separation status for a song.
+   * Retrieve the current status of a separation task from the provider.
    *
-   * This triggers the backend to pull the latest provider status and update
-   * the song document in Firestore. The returned payload mirrors the provider
-   * detail, but callers should rely on the Firestore listener for the
-   * canonical state.
+   * The frontend provides the task ID. The backend fetches the latest
+   * detail from the provider and returns it as-is.
+   *
+   * After receiving the response, the frontend is responsible for
+   * updating the song's Firestore document with the new provider data.
+   *
+   * @param taskId - Provider-specific task identifier.
+   * @param provider - Optional provider identifier (defaults to 'poyo').
+   * @returns Provider-specific task detail including status and stem URLs.
    */
   async refreshSeparationStatus(
-    songId: string,
+    taskId: string,
     provider?: SeparationProviderName,
   ): Promise<PoyoSeparationTaskDetails | null> {
-    const query = provider ? `?provider=${provider}` : '';
+    const params = new URLSearchParams({ taskId });
+    if (provider) params.set('provider', provider);
+
     const res = await this.client.get<
       ApiSuccessResponse<PoyoSeparationTaskDetails | null>
-    >(`/songs/${songId}/separations/status${query}`);
+    >(`/separations/status?${params.toString()}`);
 
     return res.data;
-  }
-
-  /**
-   * Update the stems for a completed separation task.
-   *
-   * Called after uploading stems to Firebase Storage. Persists the stem
-   * storage paths to the song document.
-   *
-   * @param songId - Song document ID.
-   * @param stemPaths - Record of stem names to storage paths.
-   * @param provider - Optional provider identifier.
-   */
-  async updateSeparationStems(
-    songId: string,
-    stemPaths: Record<string, string>,
-    provider?: SeparationProviderName,
-  ): Promise<void> {
-    const query = provider ? `?provider=${provider}` : '';
-    await this.client.patch<ApiMessageSuccessResponse>(
-      `/songs/${songId}/separations/stems${query}`,
-      { stems: stemPaths },
-    );
   }
 }

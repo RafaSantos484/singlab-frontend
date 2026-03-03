@@ -26,13 +26,17 @@ singing practice app. The corresponding backend is `singlab-api` (NestJS +
 Firebase Functions).
 
 **Stack**: Next.js 16, React 19, TypeScript 5, Tailwind CSS 4, Jest + React
-Testing Library, Firebase Auth (client SDK), ESLint + Prettier, **next-intl 4** (i18n)
+Testing Library, Firebase Auth + Firestore + Storage (client SDK), ESLint +
+Pretters, **next-intl 4** (i18n)
 
 **Key Concepts**:
-- Users upload audio (file or URL) → backend processes it asynchronously
-- Frontend polls job status until AI processing completes
+- Users upload audio (file or URL) → frontend saves to Storage + Firestore
+- Frontend requests stem separation via backend proxy (stateless gateway to PoYo AI)
+- Frontend polls separation status and writes results to Firestore
 - Three tracks become available: original, vocal-only, instrumental
 - Karaoke player lets users practice singing over the instrumental
+- **Frontend is fully responsible for all Firebase data and file operations**
+- Backend only proxies external AI service requests (no Firestore/Storage access)
 
 **Key Paths**:
 - Pages/layouts: `app/` (Next.js App Router)
@@ -40,8 +44,10 @@ Testing Library, Firebase Auth (client SDK), ESLint + Prettier, **next-intl 4** 
 - Shared utils, API client, hooks: `lib/`
 - Tests: co-located `__tests__/` folders or `*.spec.tsx` siblings
 
-**Related Repo**: `singlab-api` — NestJS backend; authentication uses Firebase
-ID tokens passed as `Authorization: Bearer <token>` headers.
+**Related Repo**: `singlab-api` — NestJS backend acting as a **stateless
+gateway** to external AI services. Only two routes: `POST /separations/submit`
+and `GET /separations/status`. Authentication uses Firebase ID tokens passed as
+`Authorization: Bearer <token>` headers.
 
 ## Code Style Rules
 
@@ -286,9 +292,17 @@ All colors/spacing come from `lib/theme/muiTheme.ts`:
 - Auth context provides `currentUser` and `idToken` across the app
 - Pass `idToken` as `Authorization: Bearer <token>` to `singlab-api`
 
+### Firebase Data & Storage
+- All Firestore CRUD operations are handled directly by the frontend
+- Song documents: `lib/firebase/songs.ts` (create, update, delete)
+- User documents: `lib/firebase/users.ts` (create user profile)
+- Storage uploads: `lib/storage/` (raw audio, separated stems)
+- The backend does **not** access Firestore or Cloud Storage
+
 ### API Client
-- Centralize all API calls in `lib/api/`
-- Use typed response interfaces matching `singlab-api` DTOs
+- `lib/api/` contains only the separation proxy client (submit, status)
+- No song or user API endpoints — those operate directly via Firebase
+- Use typed response interfaces matching backend DTOs
 - Handle loading, error, and success states explicitly
 
 ### State Management

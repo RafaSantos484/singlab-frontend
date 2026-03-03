@@ -51,7 +51,7 @@ interface SongCreateDialogProps {
  * - Automatic metadata extraction from audio tags (title, artist)
  * - Client-side MP3 conversion using FFmpeg WASM (for any audio/video format)
  * - Text fields for title and author with real-time validation
- * - Multi-phase progress tracking (converting → uploading → registering)
+ * - Multi-phase progress tracking (converting → uploading → saving)
  * - Loading and error states with granular error messages
  * - Accessible keyboard navigation (ESC to close, TAB order)
  * - Field auto-fill from extracted metadata, with manual override
@@ -721,7 +721,7 @@ export function SongCreateDialog({
                   })
                 : uploadPhase === 'uploading'
                   ? t('uploadingFileButton')
-                  : uploadPhase === 'registering'
+                  : uploadPhase === 'saving'
                     ? t('registeringButton')
                     : t('uploadingButton')}
             </>
