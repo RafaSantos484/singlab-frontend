@@ -28,6 +28,8 @@ const FFMPEG_CORE_BASE = `https://unpkg.com/@ffmpeg/core@${FFMPEG_CORE_VERSION}/
 
 let ffmpeg: FFmpeg | null = null;
 let loadPromise: Promise<void> | null = null;
+let conversionQueue: Promise<void> = Promise.resolve();
+let fsFileCounter = 0;
 
 export class Mp3ConversionError extends Error {
   constructor(message: string) {
@@ -72,6 +74,24 @@ async function ensureLoaded(): Promise<void> {
   }
 }
 
+/**
+ * Runs conversion tasks one at a time because FFmpeg WASM instance + virtual FS
+ * are shared singleton resources and are not safe for concurrent write/exec/read.
+ */
+async function runConversionExclusive<T>(task: () => Promise<T>): Promise<T> {
+  const runTask = conversionQueue.then(task, task);
+  conversionQueue = runTask.then(
+    (): void => undefined,
+    (): void => undefined,
+  );
+  return runTask;
+}
+
+function createFsToken(): string {
+  fsFileCounter += 1;
+  return `${Date.now()}-${fsFileCounter}`;
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -95,76 +115,79 @@ export async function convertToMp3(
     return file;
   }
 
-  await ensureLoaded();
+  return runConversionExclusive(async (): Promise<File> => {
+    await ensureLoaded();
 
-  const instance = ffmpeg!;
+    const instance = ffmpeg!;
 
-  // Wire up progress events
-  const handleProgress = ({ progress }: { progress: number }): void => {
-    onProgress?.(Math.round(progress * 100));
-  };
-  instance.on('progress', handleProgress);
+    // Wire up progress events
+    const handleProgress = ({ progress }: { progress: number }): void => {
+      onProgress?.(Math.round(progress * 100));
+    };
+    instance.on('progress', handleProgress);
 
-  // Derive a safe input filename preserving the original extension
-  const ext = file.name.includes('.')
-    ? file.name.slice(file.name.lastIndexOf('.'))
-    : '';
-  const inputName = `input${ext}`;
-  const outputName = 'output.mp3';
+    // Derive safe unique input/output filenames in shared virtual FS
+    const ext = file.name.includes('.')
+      ? file.name.slice(file.name.lastIndexOf('.'))
+      : '';
+    const fsToken = createFsToken();
+    const inputName = `input-${fsToken}${ext}`;
+    const outputName = `output-${fsToken}.mp3`;
 
-  try {
-    // Write input to virtual FS
-    await instance.writeFile(inputName, await fetchFile(file));
-
-    // Transcode to MP3 (strip video, variable-bitrate ~192kbps)
-    await instance.exec([
-      '-i',
-      inputName,
-      '-vn', // drop video stream
-      '-acodec',
-      'libmp3lame',
-      '-q:a',
-      '2', // VBR quality 2 ≈ 190 kbps
-      outputName,
-    ]);
-
-    // Read output
-    const data = await instance.readFile(outputName);
-    // FileData is `Uint8Array | string`; FFmpeg binary output is always Uint8Array.
-    // `Uint8Array.from()` copies the data with a fresh ArrayBuffer, satisfying
-    // strict TypeScript's BlobPart constraint.
-    const raw =
-      typeof data === 'string'
-        ? new TextEncoder().encode(data)
-        : Uint8Array.from(data);
-    const blob = new Blob([raw], { type: 'audio/mpeg' });
-
-    // Build output filename: replace the original extension with .mp3
-    const baseName = file.name.includes('.')
-      ? file.name.slice(0, file.name.lastIndexOf('.'))
-      : file.name;
-    const mp3Name = `${baseName}.mp3`;
-
-    return new File([blob], mp3Name, { type: 'audio/mpeg' });
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : 'Unknown FFmpeg conversion error';
-    throw new Mp3ConversionError(message);
-  } finally {
-    instance.off('progress', handleProgress);
-
-    // Clean up virtual FS to free memory
     try {
-      await instance.deleteFile(inputName);
-    } catch {
-      // Ignore – file may not exist if exec failed before writeFile settled
+      // Write input to virtual FS
+      await instance.writeFile(inputName, await fetchFile(file));
+
+      // Transcode to MP3 (strip video, variable-bitrate ~192kbps)
+      await instance.exec([
+        '-i',
+        inputName,
+        '-vn', // drop video stream
+        '-acodec',
+        'libmp3lame',
+        '-q:a',
+        '2', // VBR quality 2 ≈ 190 kbps
+        outputName,
+      ]);
+
+      // Read output
+      const data = await instance.readFile(outputName);
+      // FileData is `Uint8Array | string`; FFmpeg binary output is always Uint8Array.
+      // `Uint8Array.from()` copies the data with a fresh ArrayBuffer, satisfying
+      // strict TypeScript's BlobPart constraint.
+      const raw =
+        typeof data === 'string'
+          ? new TextEncoder().encode(data)
+          : Uint8Array.from(data);
+      const blob = new Blob([raw], { type: 'audio/mpeg' });
+
+      // Build output filename: replace the original extension with .mp3
+      const baseName = file.name.includes('.')
+        ? file.name.slice(0, file.name.lastIndexOf('.'))
+        : file.name;
+      const mp3Name = `${baseName}.mp3`;
+
+      return new File([blob], mp3Name, { type: 'audio/mpeg' });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Unknown FFmpeg conversion error';
+      throw new Mp3ConversionError(message);
+    } finally {
+      instance.off('progress', handleProgress);
+
+      // Clean up virtual FS to free memory
+      try {
+        await instance.deleteFile(inputName);
+      } catch {
+        // Ignore – file may not exist if exec failed before writeFile settled
+      }
+      try {
+        await instance.deleteFile(outputName);
+      } catch {
+        // Ignore
+      }
     }
-    try {
-      await instance.deleteFile(outputName);
-    } catch {
-      // Ignore
-    }
-  }
+  });
 }

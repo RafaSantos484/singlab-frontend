@@ -9,6 +9,7 @@ import {
 } from 'firebase/auth';
 import { withPendingActivity } from '@/lib/async/pendingActivity';
 import { getFirebaseApp } from './app';
+import { storageUrlManager } from '@/lib/storage/StorageUrlManager';
 
 /**
  * Returns the singleton Firebase Auth instance.
@@ -142,9 +143,13 @@ export async function initiateEmailVerification(
 
 /**
  * Signs out the currently authenticated user.
+ *
+ * Clears storage URL cache to prevent cross-session data leaks.
  */
 export async function signOut(): Promise<void> {
   await withPendingActivity(async () => {
     await firebaseSignOut(getFirebaseAuth());
+    // Clear storage URL cache on session end
+    storageUrlManager.clearCache();
   });
 }
