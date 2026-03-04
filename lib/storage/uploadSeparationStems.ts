@@ -4,6 +4,7 @@ import { getStorage, ref, uploadBytes, deleteObject } from 'firebase/storage';
 
 import { getFirebaseApp } from '@/lib/firebase/app';
 import { withPendingActivity } from '@/lib/async/pendingActivity';
+import { storageUrlManager } from './StorageUrlManager';
 
 /**
  * Builds the canonical Cloud Storage path for a separated stem file.
@@ -48,6 +49,9 @@ export async function uploadSeparationStem(
         contentType: 'audio/mpeg',
       },
     });
+
+    // Invalidate cache to ensure fresh URL on next access
+    storageUrlManager.invalidatePath(storagePath);
 
     return storagePath;
   });
@@ -143,6 +147,8 @@ export async function deleteSeparationStems(
       const storageRef = ref(storage, storagePath);
       try {
         await deleteObject(storageRef);
+        // Clear cache entry for deleted file
+        storageUrlManager.invalidatePath(storagePath);
       } catch (error) {
         console.error(
           `Failed to delete stem ${stemName} at ${storagePath}:`,

@@ -4,6 +4,7 @@ import { getStorage, ref, uploadBytes, deleteObject } from 'firebase/storage';
 
 import { getFirebaseApp } from '@/lib/firebase/app';
 import { withPendingActivity } from '@/lib/async/pendingActivity';
+import { storageUrlManager } from './StorageUrlManager';
 
 /**
  * Builds the canonical Cloud Storage path for a raw song file.
@@ -44,6 +45,9 @@ export async function uploadRawSong(
 
     await uploadBytes(storageRef, file);
 
+    // Invalidate cache to ensure fresh URL on next access
+    storageUrlManager.invalidatePath(storagePath);
+
     return storagePath;
   });
 }
@@ -66,5 +70,8 @@ export async function deleteRawSong(
     const storageRef = ref(storage, storagePath);
 
     await deleteObject(storageRef);
+
+    // Clear cache entry for deleted file
+    storageUrlManager.invalidatePath(storagePath);
   });
 }

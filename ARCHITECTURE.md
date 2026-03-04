@@ -89,13 +89,13 @@ Shared utilities used across the app:
 | `lib/api/` | Typed HTTP client for backend separation endpoints only (30s timeout, logging) |
 | `lib/api/song-creation.ts` | Three-step song upload: validation → FFmpeg MP3 conversion → Storage upload → Firestore save with rollback |
 | `lib/api/separations.ts` | API client for stem separation proxy (submit, status) |
-| `lib/audio/convertToMp3.ts` | Client-side audio/video → MP3 conversion using FFmpeg WASM (singleton, lazy-loaded from CDN) |
+| `lib/audio/convertToMp3.ts` | Client-side audio/video → MP3 conversion using FFmpeg WASM (singleton, lazy-loaded from CDN). Queue-based concurrency control serializes all conversion operations to prevent shared WASM instance and virtual FS collisions. Unique file tokens prevent path conflicts. |
 | `lib/async/` | Pending activity tracking for navigation guards (prevents leaving during uploads) |
 | `lib/firebase/` | Firebase app initialization (singleton), auth helpers, Firestore CRUD (songs, users), Storage utilities |
 | `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`, `useSeparationStatus`, `useStemAutoProcessor`, etc.) |
 | `lib/separations/` | Adapter pattern for provider-agnostic separation normalization and stem URL extraction |
-| `lib/storage/` | Firebase Storage upload utilities (raw songs and separated stems) with rollback support |
-| `lib/storage/StorageUrlManager.ts` | Centralized Firebase Storage download URL caching with TTL (1 day) based expiration, deduplication of concurrent requests, and automatic refresh on expiry. Ensures fast URL access for real-time playback switching without redundant Firebase calls. |
+| `lib/storage/` | Firebase Storage upload utilities (raw songs and separated stems) with rollback support. Automatically invalidates cache after upload/delete operations. |
+| `lib/storage/StorageUrlManager.ts` | Centralized Firebase Storage download URL caching with TTL (1 day) based expiration, deduplication of concurrent requests, and automatic refresh on expiry. Supports selective path invalidation on upload/delete and full cache clearing on sign-out. Ensures fast URL access for real-time playback switching without redundant Firebase calls or stale URLs. |
 | `lib/store/` | Global state — `GlobalStateProvider` (React Context + useReducer) manages auth, songs, and player state |
 | `lib/theme/muiTheme.ts` | Centralized MUI theme tokens and component defaults |
 | `lib/validation/` | Zod-based validation schemas and functions (sign-in, user creation) |
@@ -280,9 +280,9 @@ The GlobalPlayer component supports two completely independent playback modes:
      Simple, no synchronization complexity.
 
 2. **Separated Mode** — Plays isolated stems (vocals, bass, drums, piano, guitar, other).
-     - Vocals is mandatory and serves as the master (source of truth for playback position)
-     - All other stems stay in lock-step with vocals before and during playback
-     - Volume is shared across all stems; disabling a stem mutes it but keeps it playing in sync
+     - Master track is chosen dynamically: the first audible (non-muted) stem serves as the source of truth for playback position; if no stems are audible, vocals is the fallback master
+     - All other stems stay in lock-step with the master before and during playback
+     - Volume is shared across all stems; disabling a stem mutes it but keeps it playing in sync with the master
      - Transport controls (play, pause, seek, volume) affect all stems equally
 
 Raw and separated modes are completely independent:
@@ -358,9 +358,10 @@ GlobalPlayer (component)
   1. **Two independent playback modes** — Raw mode plays a single audio element.
      Separated mode plays multiple stem elements with vocals as the master track.
      Modes are completely independent; switching mode is a full audio rebuild.
-  2. **Master-slave model (separated mode only)** — Vocals is the mandatory master
-     track that drives playback position. All other stems follow vocals' position
-     and maintain perfect lock-step synchronization. In raw mode, there is only
+  2. **Master-slave model (separated mode only)** — The first audible (unmuted) stem
+     serves as the master track that drives playback position. All other stems follow
+     the master's position and maintain perfect lock-step synchronization. If no stems
+     are audible (all muted), vocals is the fallback master. In raw mode, there is only
      one element (the raw audio), so no synchronization is needed.
   3. **Event-driven synchronization via `prepareAt`** — Every play/resume/seek
      calls `prepareAt(time, autoResume)` which: pauses all tracks; seeks each to
@@ -386,6 +387,9 @@ GlobalPlayer (component)
        `StorageUrlManager` with 1-day TTL expiration. This ensures fast mode
        switching without redundant Firebase API calls. Concurrent requests for the
        same path are deduplicated, and expired URLs are automatically refreshed.
+       Cache entries are invalidated after upload/delete operations to prevent
+       serving stale URLs. Full cache is cleared on sign-out to prevent cross-session
+       data leaks.
   
   Supports playback source selection (raw vs. separated), dynamic stem selection
   with preset mixes (vocals-only, instrumental, all stems), and volume control.
@@ -428,6 +432,11 @@ GlobalPlayer (component)
   recovers. A 5-second timeout prevents indefinitely stuck states.
 - **Seamless Stem Switching** — All tracks always play, so switching stems is a
   pure volume change—no cold-start delays or playback interruption.
+- **Mute-Resilient Playback** — Even when all stems are muted (volume=0), the master
+  track is automatically chosen as the first audible stem, ensuring reliable
+  synchronization. Browsers may pause muted audio elements when tabs are hidden,
+  so this dynamic selection prevents time drift when users return to the tab while
+  stems are muted.
 - **Race-condition-free UI** — `isSyncing` disables all transport controls for
   the duration of any sync operation. A play-attempt counter cancels stale async
   operations on rapid user input or song switches.

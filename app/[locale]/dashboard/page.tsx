@@ -70,6 +70,11 @@ export default function DashboardPage(): React.ReactElement | null {
     setMounted(true);
   }, []);
 
+  /**
+   * Filters and sorts songs based on search query and sort order.
+   * Songs are filtered by title and author matching.
+   * The currently playing song is treated like any other song (no special positioning).
+   */
   const filteredAndSortedSongs = useMemo(() => {
     if (!mounted) return [];
 
@@ -78,7 +83,6 @@ export default function DashboardPage(): React.ReactElement | null {
     let filtered = songs;
     if (normalizedQuery) {
       filtered = songs.filter((song) => {
-        if (song.id === currentSongId) return true;
         const titleMatch = song.title.toLowerCase().includes(normalizedQuery);
         const authorMatch = song.author.toLowerCase().includes(normalizedQuery);
         return titleMatch || authorMatch;
@@ -91,18 +95,8 @@ export default function DashboardPage(): React.ReactElement | null {
       return sortOrder === 'newest' ? dateB - dateA : dateA - dateB;
     });
 
-    if (currentSongId) {
-      const playingIndex = sorted.findIndex(
-        (song) => song.id === currentSongId,
-      );
-      if (playingIndex > 0) {
-        const [playingSong] = sorted.splice(playingIndex, 1);
-        sorted.unshift(playingSong);
-      }
-    }
-
     return sorted;
-  }, [songs, searchQuery, sortOrder, currentSongId, mounted]);
+  }, [songs, searchQuery, sortOrder, mounted]);
 
   if (!mounted || isLoading) {
     return (
@@ -382,7 +376,6 @@ function SongCardItem({
   onEdit,
 }: SongCardItemProps): React.ReactElement {
   const t = useTranslations('Dashboard');
-  const tAll = useTranslations();
   const tSep = useTranslations('Separation');
   const tPlayer = useTranslations('Player');
   const { songsStemUploading } = useGlobalState();
@@ -446,8 +439,8 @@ function SongCardItem({
   const handleSeparationSuccess = (provider: 'poyo' | 'local'): void => {
     const message =
       provider === 'poyo'
-        ? tAll('SeparationDialog.success.poyo')
-        : tAll('SeparationDialog.success.local');
+        ? tPlayer('SeparationDialog.success.poyo')
+        : tPlayer('SeparationDialog.success.local');
     setSeparationSuccessMessage(message);
     setShowSeparationSuccessSnackbar(true);
   };
