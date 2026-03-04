@@ -89,13 +89,13 @@ Shared utilities used across the app:
 | `lib/api/` | Typed HTTP client for backend separation endpoints only (30s timeout, logging) |
 | `lib/api/song-creation.ts` | Three-step song upload: validation → FFmpeg MP3 conversion → Storage upload → Firestore save with rollback |
 | `lib/api/separations.ts` | API client for stem separation proxy (submit, status) |
-| `lib/audio/convertToMp3.ts` | Client-side audio/video → MP3 conversion using FFmpeg WASM (singleton, lazy-loaded from CDN) |
+| `lib/audio/convertToMp3.ts` | Client-side audio/video → MP3 conversion using FFmpeg WASM (singleton, lazy-loaded from CDN). Queue-based concurrency control serializes all conversion operations to prevent shared WASM instance and virtual FS collisions. Unique file tokens prevent path conflicts. |
 | `lib/async/` | Pending activity tracking for navigation guards (prevents leaving during uploads) |
 | `lib/firebase/` | Firebase app initialization (singleton), auth helpers, Firestore CRUD (songs, users), Storage utilities |
 | `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`, `useSeparationStatus`, `useStemAutoProcessor`, etc.) |
 | `lib/separations/` | Adapter pattern for provider-agnostic separation normalization and stem URL extraction |
-| `lib/storage/` | Firebase Storage upload utilities (raw songs and separated stems) with rollback support |
-| `lib/storage/StorageUrlManager.ts` | Centralized Firebase Storage download URL caching with TTL (1 day) based expiration, deduplication of concurrent requests, and automatic refresh on expiry. Ensures fast URL access for real-time playback switching without redundant Firebase calls. |
+| `lib/storage/` | Firebase Storage upload utilities (raw songs and separated stems) with rollback support. Automatically invalidates cache after upload/delete operations. |
+| `lib/storage/StorageUrlManager.ts` | Centralized Firebase Storage download URL caching with TTL (1 day) based expiration, deduplication of concurrent requests, and automatic refresh on expiry. Supports selective path invalidation on upload/delete and full cache clearing on sign-out. Ensures fast URL access for real-time playback switching without redundant Firebase calls or stale URLs. |
 | `lib/store/` | Global state — `GlobalStateProvider` (React Context + useReducer) manages auth, songs, and player state |
 | `lib/theme/muiTheme.ts` | Centralized MUI theme tokens and component defaults |
 | `lib/validation/` | Zod-based validation schemas and functions (sign-in, user creation) |
@@ -387,6 +387,9 @@ GlobalPlayer (component)
        `StorageUrlManager` with 1-day TTL expiration. This ensures fast mode
        switching without redundant Firebase API calls. Concurrent requests for the
        same path are deduplicated, and expired URLs are automatically refreshed.
+       Cache entries are invalidated after upload/delete operations to prevent
+       serving stale URLs. Full cache is cleared on sign-out to prevent cross-session
+       data leaks.
   
   Supports playback source selection (raw vs. separated), dynamic stem selection
   with preset mixes (vocals-only, instrumental, all stems), and volume control.
