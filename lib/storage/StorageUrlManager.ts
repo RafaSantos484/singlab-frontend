@@ -90,6 +90,18 @@ class StorageUrlManager {
   }
 
   /**
+   * Invalidate a specific path from the cache.
+   *
+   * Call this after upload/delete operations to ensure fresh URLs on next access.
+   *
+   * @param path - Firebase Storage path to invalidate
+   */
+  public invalidatePath(path: string): void {
+    this.urlCache.delete(path);
+    this.inFlightRequests.delete(path);
+  }
+
+  /**
    * Clear all cached URLs. Useful for logout or testing.
    */
   public clearCache(): void {
