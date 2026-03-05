@@ -61,6 +61,13 @@ All notable changes to the SingLab Frontend will be documented in this file.
   percentage values.
 
 ### Added
+- **Singing Practice Mode (V1)** — Eligible songs (finished separation with
+  vocals stem) now show a `Practice` action on the dashboard card. Practice
+  opens a full-screen experience with live vocals pitch visualization, scrolling
+  30s timeline, 6-semitone Y-axis with hysteresis, current note + cents readout,
+  silence/unvoiced markers, and i18n coverage (`en-US`, `pt-BR`). The mode
+  synchronizes with GlobalPlayer playback state and requests separated
+  instrumental playback to avoid audible doubled vocals.
 - **Client-side MP3 conversion** (`lib/audio/convertToMp3.ts`) — FFmpeg WASM
   integration for converting any audio/video format to MP3 in the browser. Loaded
   lazily from CDN (single-threaded, no COOP/COEP headers required). Supports:

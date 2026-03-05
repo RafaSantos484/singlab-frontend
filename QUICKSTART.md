@@ -54,6 +54,20 @@ npm run dev
 
 Local app: http://localhost:3000
 
+## 4.1 (Optional) Enable Storage CORS for Practice pitch chart
+
+If you want live pitch analysis in Singing Practice Mode with stems loaded from
+Firebase Storage, configure CORS on the storage bucket.
+
+```bash
+cp cors.example.json cors.json
+# Edit cors.json and replace origins with your local/prod origins
+gcloud storage buckets update gs://<your-storage-bucket> --cors-file=cors.json
+```
+
+If CORS is not configured, playback still works and only waveform analysis is
+disabled.
+
 ## 5. (Optional) Start the backend locally
 
 The frontend communicates with `singlab-api`. To run it locally, follow the

@@ -30,6 +30,7 @@ stateless proxy between the frontend and external AI services.
   - `local`: upload stems directly from client and persist stem paths to Firestore
   - Delete existing stems and re-request separation from another provider
 - Karaoke playback with vocal / instrumental stem toggle
+- Singing Practice Mode with live pitch timeline and player-synced controls
 - Event-driven audio player state synchronization (responds to media keys)
 - Song deletion with confirmation dialog
 - Lyrics display synchronized with playback (planned)
@@ -183,6 +184,21 @@ The frontend drives a two-phase song upload and stem processing pipeline:
 | `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` | Firebase storage bucket |
 | `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID` | Firebase messaging sender ID |
 | `NEXT_PUBLIC_FIREBASE_APP_ID` | Firebase app ID |
+
+## Firebase Storage CORS (Practice Pitch Analysis)
+
+Practice mode pitch analysis reads waveform data from vocals stems through the
+Web Audio API. For remote Firebase Storage files, CORS must allow your app
+origin.
+
+1. Copy `cors.example.json` to `cors.json` and update allowed origins.
+2. Apply the policy to your bucket:
+
+```bash
+gcloud storage buckets update gs://<your-storage-bucket> --cors-file=cors.json
+```
+
+Without this, playback still works but the live pitch chart is unavailable.
 
 ## License
 
