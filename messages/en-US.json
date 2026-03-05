@@ -264,6 +264,46 @@
     "stemLoadError": "Failed to load or decode stem \u201c{stem}\u201d.",
     "stemsUnavailableError": "Stems unavailable. Check the separation."
   },
+  "Practice": {
+    "entryButton": "Practice",
+    "entryAriaLabel": "Open singing practice mode",
+    "dialogAriaLabel": "Singing practice mode",
+    "closeAriaLabel": "Close singing practice mode",
+    "title": "Singing Practice Mode",
+    "status": {
+      "syncing": "Syncing with player...",
+      "waitingPlayback": "Waiting for playback",
+      "analyzing": "Analyzing vocals",
+      "unvoiced": "Silence or unvoiced",
+      "corsBlocked": "Pitch analysis unavailable"
+    },
+    "currentNoteLabel": "Current note",
+    "currentDeviationLabel": "Deviation",
+    "playButton": "Play",
+    "pauseButton": "Pause",
+    "playButtonAriaLabel": "Resume playback",
+    "pauseButtonAriaLabel": "Pause playback",
+    "noPitch": "No pitch",
+    "noDeviation": "N/A",
+    "corsBlockedMessage": "Pitch analysis is blocked by storage CORS settings for this vocals file. Playback still works, but the chart cannot read waveform data.",
+    "unavailableMessage": "Practice mode is available only when separation is finished and a vocals stem is present.",
+    "chartAriaLabel": "Live pitch chart",
+    "controls": {
+      "window": "Time window",
+      "window15": "15s",
+      "window30": "30s",
+      "window45": "45s",
+      "verticalWindow": "Vertical range",
+      "semitones6": "6 semitones",
+      "semitones12": "12 semitones",
+      "semitones18": "18 semitones",
+      "semitones24": "24 semitones",
+      "instrumental": "Instrumental",
+      "dynamicAxis": "Dynamic Y-axis",
+      "showNoteLabels": "Show note labels",
+      "verticalScrollHint": "Turn off Dynamic Y-axis, then use the mouse wheel over the chart to scroll notes vertically."
+    }
+  },
   "Validation": {
     "email": {
       "invalid": "Invalid email format",
