@@ -28,7 +28,10 @@ import { useTranslations } from 'next-intl';
 import { convertToMp3, Mp3ConversionError } from '@/lib/audio/convertToMp3';
 import { validateSongFile, InvalidFileError } from '@/lib/api/song-creation';
 import type { SeparationStemName } from '@/lib/api/types';
-import { uploadSeparationStem, deleteSeparationStems } from '@/lib/storage/uploadSeparationStems';
+import {
+  uploadSeparationStem,
+  deleteSeparationStems,
+} from '@/lib/storage/uploadSeparationStems';
 import { getFirebaseAuth } from '@/lib/firebase/auth';
 import { updateSeparatedSongInfo } from '@/lib/firebase/songs';
 
@@ -404,10 +407,11 @@ export const StemUploadForm = forwardRef<
                   gap: 2,
                   alignItems: 'flex-start',
                   p: 2,
-                  border: `1px solid ${progress
-                    ? 'rgba(168, 85, 247, 0.5)'
-                    : 'rgba(168, 85, 247, 0.2)'
-                    }`,
+                  border: `1px solid ${
+                    progress
+                      ? 'rgba(168, 85, 247, 0.5)'
+                      : 'rgba(168, 85, 247, 0.2)'
+                  }`,
                   borderRadius: '8px',
                   bgcolor: 'rgba(30, 27, 75, 0.5)',
                 }}
@@ -500,8 +504,8 @@ export const StemUploadForm = forwardRef<
                   >
                     {progress.phase === 'converting'
                       ? t('stemConverting', {
-                        progress: Math.round(progress.progress),
-                      })
+                          progress: Math.round(progress.progress),
+                        })
                       : t('stemUploading')}
                   </Typography>
                   <LinearProgress

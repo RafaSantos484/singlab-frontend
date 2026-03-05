@@ -1233,7 +1233,14 @@ function GlobalPlayerInner({
       currentTime: player.currentTime,
       duration: player.duration,
     });
-  }, [song.id, mode, player.currentTime, player.duration, player.isLoaded, player.isPlaying]);
+  }, [
+    song.id,
+    mode,
+    player.currentTime,
+    player.duration,
+    player.isLoaded,
+    player.isPlaying,
+  ]);
 
   // Separation info needed for the bottom status section
   const separation = useMemo<NormalizedSeparationInfo | null>(
