@@ -5,6 +5,24 @@ All notable changes to the SingLab Frontend will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- **GlobalPlayer refactored to headless dual-engine architecture**: Replaced
+  monolithic component with two independent headless engines (`RawPlayerEngine`
+  and `SeparatedPlayerEngine`). Both engines always mounted; `active` prop toggles
+  which one controls audio. Inactive engine's elements pause but don't destroy,
+  preserving playhead position across mode switches. Introduces unified `PlayerState`
+  interface for intent/reality contract reducing scattered state variables.
+- **Multi-stem synchronization via requestAnimationFrame drift correction**: Replaced
+  event-driven `prepareAt` + `syncAudioTracks` pattern with continuous RAF loop
+  that monitors inter-stem time drift and applies micro-corrections using playback-rate
+  adjustments (soft threshold: apply ±0.05 rate adjustment for <0.03s drift) or
+  direct seeking (hard threshold: seek to leader when drift >0.25s). This approach
+  is more resilient to browser timing jitter and handles tab visibility transitions.
+- **Dynamic leader election in separated mode**: Master stem elected once per stem-pool
+  change (not dynamically based on mute state). Prefers vocals, falls back through
+  STEM_ORDER for consistency.
+- **Per-stem volume normalization**: Uses square-root balancing (`volume / sqrt(audibleCount)`)
+  to ensure correct perceived loudness when mixing multiple stems. Solves "too loud
+  when all stems unmuted" issue.
 - **Deterministic multi-track synchronization in GlobalPlayer**: Replaced
   arbitrary fixed delays with event-driven synchronization. `prepareAt` now
   seeks all tracks to the exact same `currentTime` (avoiding `fastSeek` whose

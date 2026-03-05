@@ -258,7 +258,11 @@
         "poyo": "Separation submitted successfully. Processing will begin shortly and take a few minutes to complete.",
         "local": "Stems uploaded successfully. Your adjusted tracks are ready to use in the player."
       }
-    }
+    },
+    "separationNotAvailableTooltip": "Separation not available for this song",
+    "audioLoadError": "Failed to load or decode the audio.",
+    "stemLoadError": "Failed to load or decode stem \u201c{stem}\u201d.",
+    "stemsUnavailableError": "Stems unavailable. Check the separation."
   },
   "Validation": {
     "email": {
