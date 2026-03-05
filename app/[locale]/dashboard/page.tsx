@@ -46,6 +46,7 @@ import { DashboardLayout } from '@/components/layout';
 import type { SeparationStemName, Song } from '@/lib/api/types';
 import { useSeparationStatus } from '@/lib/hooks/useSeparationStatus';
 import { GlobalPlayer } from '@/components/features/GlobalPlayer';
+import { SingingPracticeDialog } from '@/components/features/SingingPracticeDialog';
 import { deleteSeparatedSongInfo } from '@/lib/firebase/songs';
 import { deleteSeparationStems } from '@/lib/storage/uploadSeparationStems';
 import { getFirebaseAuth } from '@/lib/firebase/auth';
@@ -378,9 +379,12 @@ function SongCardItem({
   const t = useTranslations('Dashboard');
   const tSep = useTranslations('Separation');
   const tPlayer = useTranslations('Player');
+  const tPractice = useTranslations('Practice');
   const { songsStemUploading } = useGlobalState();
+  const dispatch = useGlobalStateDispatch();
   const [isSeparationDialogOpen, setIsSeparationDialogOpen] = useState(false);
   const [isDeleteStemsDialogOpen, setIsDeleteStemsDialogOpen] = useState(false);
+  const [isPracticeDialogOpen, setIsPracticeDialogOpen] = useState(false);
   const [isDeletingStemsLoading, setIsDeletingStemsLoading] = useState(false);
   const [showSeparationSuccessSnackbar, setShowSeparationSuccessSnackbar] =
     useState(false);
@@ -399,6 +403,8 @@ function SongCardItem({
   const isFinished = separation?.status === 'finished';
   const isFailed = separation?.status === 'failed';
   const isUploadingStems = songsStemUploading.has(song.id);
+  const vocalsStemUrl = stemUrls.vocals ?? null;
+  const isPracticeAvailable = isFinished && Boolean(vocalsStemUrl);
 
   const availableStems = isFinished
     ? Object.entries(stemUrls)
@@ -443,6 +449,11 @@ function SongCardItem({
         : tPlayer('SeparationDialog.success.local');
     setSeparationSuccessMessage(message);
     setShowSeparationSuccessSnackbar(true);
+  };
+
+  const handleOpenPractice = (): void => {
+    dispatch({ type: 'PLAYER_LOAD_SONG', payload: song.id });
+    setIsPracticeDialogOpen(true);
   };
 
   return (
@@ -686,6 +697,17 @@ function SongCardItem({
                 >
                   {t('deleteStemsButton')}
                 </Button>
+                {isPracticeAvailable ? (
+                  <Button
+                    size="small"
+                    variant="contained"
+                    onClick={handleOpenPractice}
+                    sx={{ alignSelf: 'flex-start' }}
+                    aria-label={tPractice('entryAriaLabel')}
+                  >
+                    {tPractice('entryButton')}
+                  </Button>
+                ) : null}
               </Stack>
             )}
 
@@ -765,6 +787,14 @@ function SongCardItem({
           {separationSuccessMessage}
         </Alert>
       </Snackbar>
+
+      <SingingPracticeDialog
+        open={isPracticeDialogOpen}
+        onClose={() => setIsPracticeDialogOpen(false)}
+        song={song}
+        vocalsUrl={vocalsStemUrl}
+        isEligible={isPracticeAvailable}
+      />
     </Card>
   );
 }

@@ -182,9 +182,14 @@ import type {
 } from '@/lib/api/types';
 import { useSongRawUrl } from '@/lib/hooks/useSongRawUrl';
 import { useStorageDownloadUrls } from '@/lib/hooks/useStorageDownloadUrls';
+import {
+  emitGlobalPlayerSnapshot,
+  subscribePracticeCommands,
+} from '@/lib/player/practiceSync';
 import { normalizeSeparationInfo } from '@/lib/separations';
 import { useGlobalState, useGlobalStateDispatch } from '@/lib/store';
 import { SeparationDialog } from './SeparationDialog';
+import { SingingPracticeDialog } from './SingingPracticeDialog';
 
 // ---------------------------------------------------------------------------
 // Constants & primitives
@@ -1195,6 +1200,7 @@ function GlobalPlayerInner({
   song,
 }: GlobalPlayerInnerProps): React.ReactElement {
   const t = useTranslations('Player');
+  const tPractice = useTranslations('Practice');
   const dispatch = useGlobalStateDispatch();
   const { playbackStatus } = useGlobalState();
 
@@ -1214,6 +1220,20 @@ function GlobalPlayerInner({
   >(null);
   const [showSeparationSuccessSnackbar, setShowSeparationSuccessSnackbar] =
     useState(false);
+  const [isPracticeDialogOpen, setIsPracticeDialogOpen] = useState(false);
+  const desiredPracticeInstrumentalRef = useRef<boolean | null>(null);
+
+  // Broadcast minimal playback state so Practice mode can stay in sync.
+  useEffect(() => {
+    emitGlobalPlayerSnapshot({
+      songId: song.id,
+      mode,
+      isPlaying: player.isPlaying,
+      isLoaded: player.isLoaded,
+      currentTime: player.currentTime,
+      duration: player.duration,
+    });
+  }, [song.id, mode, player.currentTime, player.duration, player.isLoaded, player.isPlaying]);
 
   // Separation info needed for the bottom status section
   const separation = useMemo<NormalizedSeparationInfo | null>(
@@ -1223,7 +1243,7 @@ function GlobalPlayerInner({
   const isSeparationFinished = separation?.status === 'finished';
 
   // Stem availability (for the UI selector and presets)
-  const { availableStems } = useSongStemsUrl(song);
+  const { availableStems, urls: stemUrls } = useSongStemsUrl(song);
 
   const availableOrdered = useMemo<StemKey[]>(
     () => STEM_ORDER.filter((s) => availableStems.includes(s)),
@@ -1234,6 +1254,8 @@ function GlobalPlayerInner({
     isSeparationFinished &&
     availableStems.includes('vocals') &&
     availableStems.length >= 2;
+  const vocalsStemUrl = stemUrls.vocals ?? null;
+  const isPracticeAvailable = hasSeparatedAudio && Boolean(vocalsStemUrl);
 
   // ---------------------------------------------------------------------------
   // Stem enable / disable helpers
@@ -1279,6 +1301,36 @@ function GlobalPlayerInner({
     },
     [availableOrdered, countEnabled],
   );
+
+  const setInstrumentalEnabled = useCallback(
+    (enabled: boolean): void => {
+      setStemsEnabled(() => {
+        const next: Partial<Record<StemKey, boolean>> = {};
+        availableOrdered.forEach((stem) => {
+          if (stem === 'vocals') {
+            next[stem] = true;
+            return;
+          }
+
+          next[stem] = enabled;
+        });
+        return next;
+      });
+    },
+    [availableOrdered],
+  );
+
+  useEffect(() => {
+    if (!availableOrdered.length) {
+      return;
+    }
+
+    if (desiredPracticeInstrumentalRef.current === null) {
+      return;
+    }
+
+    setInstrumentalEnabled(desiredPracticeInstrumentalRef.current);
+  }, [availableOrdered, setInstrumentalEnabled]);
 
   const handleToggleStem = useCallback(
     (stem: StemKey): void => {
@@ -1377,6 +1429,52 @@ function GlobalPlayerInner({
     },
     [t],
   );
+
+  const handleOpenPractice = useCallback((): void => {
+    setMode('separated');
+    setInstrumentalEnabled(true);
+    setIsPracticeDialogOpen(true);
+  }, [setInstrumentalEnabled]);
+
+  // Allow external features (Practice mode) to request separated instrumental playback.
+  useEffect(() => {
+    const unsubscribe = subscribePracticeCommands((command) => {
+      if (command.songId !== song.id) {
+        return;
+      }
+
+      if (command.type === 'practice-set-instrumental') {
+        desiredPracticeInstrumentalRef.current = command.enabled;
+        setMode('separated');
+        setInstrumentalEnabled(command.enabled);
+        return;
+      }
+
+      if (command.type === 'practice-set-playing') {
+        setMode('separated');
+        setPlayer((p) => ({
+          ...p,
+          isPlaying: command.playing,
+          isSeeking: false,
+        }));
+        return;
+      }
+
+      if (command.type !== 'practice-start') {
+        return;
+      }
+
+      setMode('separated');
+      setInstrumentalEnabled(true);
+      setPlayer((p) => ({
+        ...p,
+        isPlaying: true,
+        isSeeking: false,
+      }));
+    });
+
+    return unsubscribe;
+  }, [song.id, setInstrumentalEnabled]);
 
   // ---------------------------------------------------------------------------
   // Derived UI state
@@ -1523,6 +1621,16 @@ function GlobalPlayerInner({
                 </span>
               </Tooltip>
             </ToggleButtonGroup>
+            {isPracticeAvailable ? (
+              <Button
+                size="small"
+                variant="contained"
+                onClick={handleOpenPractice}
+                aria-label={tPractice('entryAriaLabel')}
+              >
+                {tPractice('entryButton')}
+              </Button>
+            ) : null}
           </Box>
 
           {/* Main transport row */}
@@ -1761,6 +1869,14 @@ function GlobalPlayerInner({
         onClose={() => setIsSeparationDialogOpen(false)}
         onSuccess={handleSeparationSuccess}
         song={song}
+      />
+
+      <SingingPracticeDialog
+        open={isPracticeDialogOpen}
+        onClose={() => setIsPracticeDialogOpen(false)}
+        song={song}
+        vocalsUrl={vocalsStemUrl}
+        isEligible={isPracticeAvailable}
       />
 
       <Snackbar
