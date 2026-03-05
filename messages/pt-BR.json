@@ -256,7 +256,11 @@
         "poyo": "Separação enviada com sucesso. O processamento iniciará em breve e levará alguns minutos para ser concluído.",
         "local": "Faixas enviadas com sucesso. Suas faixas ajustadas estão prontas para usar no player."
       }
-    }
+    },
+    "separationNotAvailableTooltip": "Separação não disponível para esta música",
+    "audioLoadError": "Falha ao carregar ou decodificar o áudio.",
+    "stemLoadError": "Falha ao carregar ou decodificar a faixa \u201c{stem}\u201d.",
+    "stemsUnavailableError": "Faixas indisponíveis. Verifique a separação."
   },
   "Validation": {
     "email": {

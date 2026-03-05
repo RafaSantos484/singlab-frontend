@@ -274,22 +274,36 @@ playback and separated stem playback with dynamic stem selection.
 
 ### Design Overview
 
-The GlobalPlayer component supports two completely independent playback modes:
+The `GlobalPlayer` component delegates audio engine responsibility to two headless
+sub-engines (`RawPlayerEngine` and `SeparatedPlayerEngine`) that are always mounted
+and toggled via an `active` prop. Each engine reads intent from a unified
+`PlayerState` interface (isPlaying, currentTime, isSeeking) and writes back
+observed reality (isLoaded, isBuffering, duration, error).
 
-1. **Raw Mode** — Plays the original audio file as-is with a single audio element.
-     Simple, no synchronization complexity.
+**Two playback modes:**
 
-2. **Separated Mode** — Plays isolated stems (vocals, bass, drums, piano, guitar, other).
-     - Master track is chosen dynamically: the first audible (non-muted) stem serves as the source of truth for playback position; if no stems are audible, vocals is the fallback master
-     - All other stems stay in lock-step with the master before and during playback
-     - Volume is shared across all stems; disabling a stem mutes it but keeps it playing in sync with the master
-     - Transport controls (play, pause, seek, volume) affect all stems equally
+1. **Raw Mode** (`RawPlayerEngine`) — Plays the original audio file with a single
+   `HTMLAudioElement`. Simple, no synchronization complexity.
 
-Raw and separated modes are completely independent:
-- Each mode is built on-demand; the inactive mode never loads data (no memory waste)
-- Switching between modes triggers a complete audio rebuild (old elements disposed, new ones created)
-- This acts as an automatic song restart from 0 on the new source
-- Raw and separated URLs are cached centrally via `StorageUrlManager` with 1-day TTL, so mode switches are instant
+2. **Separated Mode** (`SeparatedPlayerEngine`) — Plays isolated stems (vocals,
+   bass, drums, piano, guitar, other) with multi-stem synchronization:
+   - A "leader" stem is elected dynamically from the enabled set and serves as the
+     source of truth for playback position
+   - All other stems stay synchronized via a `requestAnimationFrame` loop that
+     monitors drift and applies micro-corrections using playback-rate adjustments
+     (soft correction: ±0.05x) and hard re-seeking (when drift exceeds 0.25s)
+   - Per-stem muting via `stemsEnabled` map changes which stems are audible
+   - Transport controls (play, pause, seek, volume) affect all stems equally
+
+**Key architectural properties:**
+
+- Both engines are always mounted; only one is active at a time (active prop)
+- The inactive engine's audio elements are paused but not destroyed, preserving
+  playhead position across mode switches
+- Each engine is headless (returns `null`) and communicates solely via PlayerState
+- Audio URL changes are handled per-engine without requiring full element rebuild
+- Drift correction runs continuously while active, playing, and not seeking
+- Volume is normalized across audible stems to compensate for increased mixing
 
 ### Architecture
 
@@ -298,7 +312,7 @@ Song Cards (dashboard)
     │
     ├─→ useSeparationStatus(song)
     │       ├─→ Fetch separation status via separationsApi
-     │       ├─→ Poll backend every 60s while processing (poyo provider)
+    │       ├─→ Poll backend every 60s while processing (poyo provider)
     │       └─→ Display UI (request pending/progress/finished/failed)
     │
     │ dispatch({ type: 'PLAYER_LOAD_SONG', payload: songId })
@@ -309,91 +323,171 @@ Global State (useReducer)
     ▼
 GlobalPlayer (component)
     │
-    ├─→ useSongRawUrl(currentSong)
-    │       └─→ Fetch/refresh signed URL for raw audio
+    ├─→ PlayerState (unified intent/state contract)
+    │       ├─→ Intent: isPlaying, currentTime, isSeeking
+    │       └─→ Observed: isLoaded, isBuffering, duration, hasSource, error
     │
-    ├─→ Unified Multi-Track Audio Engine
-     │       ├─→ Loads only active source tracks (raw OR stems)
-     │       ├─→ Stem selection changes volume (0 for deselected, base volume for selected)
-     │       ├─→ playbackSource: 'raw' or 'separated'
-     │       │   ├─→ raw mode: single audio element, simple transport
-     │       │   └─→ separated mode: multi-stem playback with vocals as master
-     │       ├─→ In separated mode: all non-vocal tracks stay synced to vocals' position
-     │       ├─→ Stem selection changes which stems are audible (volume 0 = muted but still playing)
-    │       ├─→ Deterministic synchronization on every play/resume/seek:
-    │       │   └─→ prepareAt(time, autoResume):
-    │       │         1. Pause all tracks
-    │       │         2. Seek all to exactly `time` (currentTime, not fastSeek)
-    │       │         3. syncAudioTracks() – aligns non-master tracks to master's
-    │       │            settled frame (corrects sub-frame browser clamping)
-    │       │         4. waitForAllTracksReady() – waits for all elements to reach
-    │       │            readyState ≥ HAVE_FUTURE_DATA via 'canplay' events
-    │       │            (5 s timeout safety net; stale attempts are cancelled)
-     │       │         5. play() all active-track elements simultaneously
-    │       │   Raises isSyncing=true for the whole operation, disabling all UI
-    │       ├─→ Seek-scrub split: onChange only updates display + silently pauses;
-    │       │   onChangeCommitted triggers prepareAt for the committed position
-    │       ├─→ Buffering stall recovery: 'waiting'/'stalled' on master pauses
-    │       │   non-master tracks; 'playing' re-syncs and restarts them
-     │       └─→ Mode switch (raw ↔ separated):
-     │           1. Cancel any in-flight sync operations
-     │           2. Pause current audio elements
-     │           3. Update playbackSource state
-     │           4. trackKey changes → rebuild effect fires
-     │           5. Rebuild disposes old elements, creates new ones for new mode
-     │           6. Auto-play from 0 with cached URLs (instant mode switch)
+    ├─→ RawPlayerEngine
+    │       ├─→ active=true when mode='raw'
+    │       ├─→ Reads: player.isPlaying, player.isSeeking, player.volume, etc.
+    │       ├─→ Writes: player.isLoaded, player.duration, player.currentTime, etc.
+    │       ├─→ Lifecycle: mount once, swap src on URL change
+    │       ├─→ Events: autoplay on canplaythrough; pause when inactive
+    │       └─→ No sync logic (single element)
     │
-    └─→ Event handlers
+    ├─→ SeparatedPlayerEngine
+    │       ├─→ active=true when mode='separated'
+    │       ├─→ useSongStemsUrl hook provides stem URLs and availability
+    │       ├─→ Build/rebuild audio elements as stem pool changes
+    │       ├─→ Re-elect leader when stemsEnabled set changes
+    │       ├─→ requestAnimationFrame drift-correction loop:
+    │       │   └─→ Every 180ms: measure drift of each stem vs. leader
+    │       │       ├─→ Hard threshold (0.25s) → seek all to leader.currentTime
+    │       │       ├─→ Soft threshold (0.03s) → adjust playbackRate by ±0.05x
+    │       │       └─→ Below threshold → reset playbackRate to 1.0
+    │       ├─→ Per-stem volume normalization: masterVolume / sqrt(audibleCount)
+    │       └─→ Recovery after tab hide: re-align stems on visibility change
+    │
+    ├─→ Mode Switch (raw ↔ separated)
+    │       ├─→ Pause both engines (only active one has audio)
+    │       ├─→ Update mode state
+    │       ├─→ Trigger setPreset('instrumental') for separated mode
+    │       └─→ Resume playback from current time
+    │
+    ├─→ UI Layer
+    │       ├─→ Transport: play/pause/stop buttons
+    │       ├─→ Seek slider: onChange updates UI; onChangeCommitted commits seek
+    │       ├─→ Volume slider
+    │       ├─→ Stem selector (separated mode only): per-stem toggle + presets
+    │       ├─→ Separation status panel
+    │       └─→ Error alerts with user-friendly messages
+    │
+    └─→ Event handlers & state updates
             └─→ dispatch({ type: 'PLAYER_SET_STATUS', ... })
 ```
 
 ### Key Components
 
+- **`GlobalPlayer` (`components/features/GlobalPlayer.tsx`)** — Composite component
+  that manages the player UI and delegates audio engine responsibility to two
+  headless engines. All player state is unified in a `PlayerState` interface
+  that both engines read from and write to.
 
-- **`GlobalPlayer` (`components/features/GlobalPlayer.tsx`)** — Single audio
-  player component that manages multi-track synchronization for seamless playback
-  of raw audio and separated stems.
-  
+  **Public API:**
+  - `GlobalPlayer()` — Top-level component that reads `currentSongId` from global
+    state and returns a `GlobalPlayerInner` wrapper (or empty fragment if no song selected)
+  - `GlobalPlayerInner({ song })` — Renders the player UI and mounts both engines
+
+  **State Management:**
+  - `player: PlayerState` — Unified state contract with intent (isPlaying, isSeeking,
+    currentTime) and observed reality (isLoaded, isBuffering, duration, error, hasSource)
+  - `mode: 'raw' | 'separated'` — Which engine is active
+  - `stemsEnabled: Record<StemKey, boolean>` — Per-stem mute/unmute state
+  - `player.volume` — Master volume [0..1]
+  - `player.isMuted` — Mute toggle flag
+
+  **Key Hooks:**
+  - `useSongRawUrl(song)` — Fetch and cache raw audio URL with refresh logic
+  - `useSongStemsUrl(song)` — Fetch and cache all stem URLs; returns available stems
+  - `useStorageDownloadUrls(paths)` — Centralized URL resolution via StorageUrlManager
+
   **Design Principles:**
-  1. **Two independent playback modes** — Raw mode plays a single audio element.
-     Separated mode plays multiple stem elements with vocals as the master track.
-     Modes are completely independent; switching mode is a full audio rebuild.
-  2. **Master-slave model (separated mode only)** — The first audible (unmuted) stem
-     serves as the master track that drives playback position. All other stems follow
-     the master's position and maintain perfect lock-step synchronization. If no stems
-     are audible (all muted), vocals is the fallback master. In raw mode, there is only
-     one element (the raw audio), so no synchronization is needed.
-  3. **Event-driven synchronization via `prepareAt`** — Every play/resume/seek
-     calls `prepareAt(time, autoResume)` which: pauses all tracks; seeks each to
-     the exact same `currentTime` (avoiding `fastSeek` whose keyframe snapping
-     varies per file); calls `syncAudioTracks()` to correct any sub-frame browser
-     clamping; then waits for all elements to be buffered at that position
-     (`readyState ≥ HAVE_FUTURE_DATA`) via `'canplay'` events before starting
-     simultaneous playback. A 5-second timeout acts as a safety net.
-  4. **`isSyncing` gate** — While `prepareAt` is running, all transport controls
-     (play, stop, seek slider, source toggle, stem presets) are disabled and a
-     spinner is shown, preventing conflicting user interactions.
-  5. **Seek-scrub split** — The seek slider uses `onChange` to update only the
-     displayed time (audio is silently paused during the drag), and
-     `onChangeCommitted` to trigger the full `prepareAt` sync at the committed
-     position. Avoids a buffer-fetch on every pixel of movement.
-  6. **Buffering stall recovery** — `'waiting'`/`'stalled'` events on the master
-     track pause all non-master tracks to prevent them drifting ahead. The
-     master's `'playing'` event re-syncs and restarts them automatically.
-  7. **Play-attempt tracking** — A monotonically increasing counter cancels stale
-     in-flight syncs if the user quickly switches songs or issues conflicting
-     commands.
-  8. **URL caching strategy** — Raw audio and stem URLs are cached centrally via
-       `StorageUrlManager` with 1-day TTL expiration. This ensures fast mode
-       switching without redundant Firebase API calls. Concurrent requests for the
-       same path are deduplicated, and expired URLs are automatically refreshed.
-       Cache entries are invalidated after upload/delete operations to prevent
-       serving stale URLs. Full cache is cleared on sign-out to prevent cross-session
-       data leaks.
-  
-  Supports playback source selection (raw vs. separated), dynamic stem selection
-  with preset mixes (vocals-only, instrumental, all stems), and volume control.
-  All controls are disabled during loading/buffering/syncing for better UX.
+  1. **Engine isolation** — `RawPlayerEngine` and `SeparatedPlayerEngine` are
+     completely independent. Only one is active; the other is paused but mounted.
+  2. **Unified state contract** — Both engines read intent from `player` and write
+     observed state back via `setPlayer`. UI depends on `PlayerState`, not implementation.
+  3. **Headless design** — Engines return `null` (no DOM). All rendering is in
+     `GlobalPlayerInner` and responds to `PlayerState` changes.
+  4. **URL-driven updates** — Each engine responds to URL changes by updating
+     element `src` without full rebuild (except SeparatedPlayerEngine, which rebuilds
+     when the stem pool changes).
+  5. **Drift correction (separated mode only)** — A `requestAnimationFrame` loop
+     continuously monitors time drift and applies corrective micro-adjustments
+     using playback-rate changes (soft) or immediate seeking (hard).
+
+- **`RawPlayerEngine({ song, player, setPlayer, active })`** — Headless engine for
+  single-track playback.
+
+  **Lifecycle:**
+  - Mount: create one `HTMLAudioElement` and attach all event listeners
+  - URL changes: update element `src` and reset load state
+  - Volume/mute changes: sync to element
+  - Play/pause intent: respond to `player.isPlaying` and `player.isLoaded`
+  - Seeking: apply on `isSeeking` transition to `false`
+  - Deactivation: pause element
+
+  **Event Handlers:**
+  - `loadedmetadata` — Update `duration` and `isLoaded`
+  - `canplaythrough` — Auto-play if `intendedPlayRef.current`
+  - `timeupdate` — Sync `player.currentTime` (unless seeking)
+  - `play`/`pause`/`ended` — Sync play state
+  - `waiting`/`playing` — Manage `isBuffering`
+  - `error` — Set error message with user-friendly text
+
+  **Key Refs:**
+  - `audioRef` — The single audio element
+  - `activeRef`, `isSeekingRef`, `intendedPlayRef` — Stable references for closures
+
+- **`SeparatedPlayerEngine({ song, player, setPlayer, active, stemsEnabled })`**
+  — Headless engine for multi-stem playback with synchronization.
+
+  **Lifecycle:**
+  - Mount: set up refs and drift-correction RAF loop
+  - Stem pool changes (URL changes): rebuild audio elements, re-elect leader
+  - Leader election changes: update `leaderKeyRef`
+  - Volume/mute/stemsEnabled changes: recalculate per-stem volumes and apply
+  - Play/pause intent: coordinate all stems relative to leader
+  - Seeking: align all stems and apply seek
+  - Deactivation: pause all stems
+
+  **Drift Correction Loop (`requestAnimationFrame`):**
+  - Runs every 180ms when active, playing, and not seeking
+  - Measures drift between each stem and leader: `diff = leader.currentTime - stem.currentTime`
+  - Hard threshold (0.25s) → direct seek: `stem.currentTime = leader.currentTime`
+  - Soft threshold (0.03s) → rate adjustment: `stem.playbackRate = 1 + clamp(diff * 2, ±0.05)`
+  - Below threshold → reset rate to 1.0
+  - On cleanup: ensure all stem playback rates are reset to 1.0
+
+  **Per-Stem Volume Normalization:**
+  - Base volume: `masterVolume = player.isMuted ? 0 : player.volume`
+  - Audible count: stems with `stemsEnabled[key] !== false`
+  - Per-stem volume: `baseVolume / sqrt(audibleCount)` (square-root law for
+    perceived loudness when mixing multiple sources)
+  - Muted stems: `audio.muted = true` (zero volume + muted flag)
+
+  **Key Refs:**
+  - `audiosRef` — Map of StemKey → HTMLAudioElement
+  - `leaderKeyRef` — Currently elected leader stem
+  - `leaderAudioRef` — The leader audio element for quick access
+  - `playerRef`, `stemsEnabledRef` — Stable references for RAF callback
+  - `durationsRef` — Per-stem duration tracking
+  - `waitingSetRef` — Set of stems currently buffering
+
+  **Helper Functions:**
+  - `chooseLeaderKey(keys, enabledMap)` — Elect next leader from available/enabled
+  - `computeUiDuration()` — Minimum duration across all stems (UI display)
+  - `applyVolumes()` — Recalculate and apply volumes to all stems
+  - `alignAllToTime(target, eps)` — Seek all stems to target time (within tolerance)
+  - `playAll()` — Simultaneously play leader then all followers
+
+  **Tab Visibility Recovery:**
+  - On `visibilitychange` → `visible`: re-align stems if drift > 0.03s, then resume
+
+- **`useSongStemsUrl(song)`** — Custom hook that resolves all available stem
+  download URLs for a song.
+
+  **Returns:**
+  - `urls` — Map of StemKey → signed URL (or undefined if not available)
+  - `availableStems` — Array of stem keys with available download URLs
+  - `isRefreshing` — Loading state for URL refresh
+  - `error` — Error message if stems finished but are unavailable
+
+  **Logic:**
+  - Normalizes `song.separatedSongInfo` into a typed `NormalizedSeparationInfo`
+  - Only loads URLs if separation status is 'finished'
+  - Uses `useStorageDownloadUrls` to fetch signed URLs
+  - Filters available stems by URL availability
+  - Returns stable keys for React dependency arrays
 
 - **Song Cards (`SongCardItem`)** — Display song metadata, play/edit/delete buttons,
   and separation status panel. The separation panel shows:
@@ -422,29 +516,41 @@ GlobalPlayer (component)
 
 ### Benefits
 
-- **Deterministic Synchronization** — All tracks are seeked to exactly the same
-  `currentTime` (no `fastSeek` keyframe snapping). `syncAudioTracks()` corrects
-  any residual sub-frame clamping before buffering begins, and playback starts only
-  once every track has confirmed it is buffered at that position via `'canplay'`
-  events.
-- **Stall-Resilient Buffering** — Network stalls on the master track pause
-  non-master tracks immediately; they are re-synced and restarted when the master
-  recovers. A 5-second timeout prevents indefinitely stuck states.
-- **Seamless Stem Switching** — All tracks always play, so switching stems is a
-  pure volume change—no cold-start delays or playback interruption.
-- **Mute-Resilient Playback** — Even when all stems are muted (volume=0), the master
-  track is automatically chosen as the first audible stem, ensuring reliable
-  synchronization. Browsers may pause muted audio elements when tabs are hidden,
-  so this dynamic selection prevents time drift when users return to the tab while
-  stems are muted.
-- **Race-condition-free UI** — `isSyncing` disables all transport controls for
-  the duration of any sync operation. A play-attempt counter cancels stale async
-  operations on rapid user input or song switches.
-- **Single Source of Truth** — Unified track map and master reference point;
-  global state manages visibility and user intentions.
-- **Persistent Controls** — Player always visible while song is loaded.
-- **Clean Architecture** — Clear separation of concerns (cards fire PLAYER_LOAD_SONG,
-  player manages audio engine and UI).
+- **Modular Engine Design** — Separation of concerns between UI (`GlobalPlayerInner`)
+  and audio logic (`RawPlayerEngine`, `SeparatedPlayerEngine`). Each engine is
+  independently testable and can be swapped/extended without affecting the other.
+
+- **Unified State Contract** — `PlayerState` provides a single, well-documented
+  interface for intent (what the user wants) and reality (what the browser is doing).
+  Eliminates scattered state variables and makes the component's behavior predictable.
+
+- **Headless Engines** — Engines return `null` and communicate only via callbacks;
+  no DOM rendering logic in engines. Simplifies testing and allows flexible UI rendering.
+
+- **Continuous Drift Correction (separated mode)** — `requestAnimationFrame` loop
+  with playback-rate micro-adjustments handles accumulated browser timing jitter
+  without disrupting user experience. Sub-0.03s drift is corrected automatically;
+  larger drifts are corrected via fast-seeking.
+
+- **Fast Mode Switching** — Both engines stay mounted; switching mode is a pure
+  `active` prop toggle. No element destruction/recreation; playback resumes instantly
+  from current position on the new mode's audio source.
+
+- **Per-Stem Volume Mixing** — Square-root normalization ensures balanced loudness
+  when mixing multiple stems without clipping. Solves the "too loud when all stems
+  are unmuted" problem.
+
+- **Resilient Tab Visibility Recovery** — Detects and recovers from browser-imposed
+  pauses when the tab is hidden. Stems are re-aligned on visibility change if drift > 0.03s.
+
+- **Robust Error Handling** — Distinct error messages for raw audio load failures
+  vs. individual stem load failures, with proper i18n support.
+
+- **Persistent Controls** — Player always visible while song is loaded. Controls
+  gracefully disable during loading/buffering to prevent undefined behavior.
+
+- **Single Source of Truth** — Unified player state and centralized engine logic;
+  no duplicate state or conflicting intentions.
 
 ## Styling
 
