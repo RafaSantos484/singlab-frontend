@@ -184,12 +184,11 @@ import { useSongRawUrl } from '@/lib/hooks/useSongRawUrl';
 import { useStorageDownloadUrls } from '@/lib/hooks/useStorageDownloadUrls';
 import {
   emitGlobalPlayerSnapshot,
-  subscribePracticeCommands,
+  requestPracticeDialogOpen,
 } from '@/lib/player/practiceSync';
 import { normalizeSeparationInfo } from '@/lib/separations';
 import { useGlobalState, useGlobalStateDispatch } from '@/lib/store';
 import { SeparationDialog } from './SeparationDialog';
-import { SingingPracticeDialog } from './SingingPracticeDialog';
 
 // ---------------------------------------------------------------------------
 // Constants & primitives
@@ -1220,10 +1219,8 @@ function GlobalPlayerInner({
   >(null);
   const [showSeparationSuccessSnackbar, setShowSeparationSuccessSnackbar] =
     useState(false);
-  const [isPracticeDialogOpen, setIsPracticeDialogOpen] = useState(false);
-  const desiredPracticeInstrumentalRef = useRef<boolean | null>(null);
 
-  // Broadcast minimal playback state so Practice mode can stay in sync.
+  // Broadcast minimal playback state for practice-related listeners.
   useEffect(() => {
     emitGlobalPlayerSnapshot({
       songId: song.id,
@@ -1308,36 +1305,6 @@ function GlobalPlayerInner({
     },
     [availableOrdered, countEnabled],
   );
-
-  const setInstrumentalEnabled = useCallback(
-    (enabled: boolean): void => {
-      setStemsEnabled(() => {
-        const next: Partial<Record<StemKey, boolean>> = {};
-        availableOrdered.forEach((stem) => {
-          if (stem === 'vocals') {
-            next[stem] = true;
-            return;
-          }
-
-          next[stem] = enabled;
-        });
-        return next;
-      });
-    },
-    [availableOrdered],
-  );
-
-  useEffect(() => {
-    if (!availableOrdered.length) {
-      return;
-    }
-
-    if (desiredPracticeInstrumentalRef.current === null) {
-      return;
-    }
-
-    setInstrumentalEnabled(desiredPracticeInstrumentalRef.current);
-  }, [availableOrdered, setInstrumentalEnabled]);
 
   const handleToggleStem = useCallback(
     (stem: StemKey): void => {
@@ -1438,50 +1405,9 @@ function GlobalPlayerInner({
   );
 
   const handleOpenPractice = useCallback((): void => {
-    setMode('separated');
-    setInstrumentalEnabled(true);
-    setIsPracticeDialogOpen(true);
-  }, [setInstrumentalEnabled]);
-
-  // Allow external features (Practice mode) to request separated instrumental playback.
-  useEffect(() => {
-    const unsubscribe = subscribePracticeCommands((command) => {
-      if (command.songId !== song.id) {
-        return;
-      }
-
-      if (command.type === 'practice-set-instrumental') {
-        desiredPracticeInstrumentalRef.current = command.enabled;
-        setMode('separated');
-        setInstrumentalEnabled(command.enabled);
-        return;
-      }
-
-      if (command.type === 'practice-set-playing') {
-        setMode('separated');
-        setPlayer((p) => ({
-          ...p,
-          isPlaying: command.playing,
-          isSeeking: false,
-        }));
-        return;
-      }
-
-      if (command.type !== 'practice-start') {
-        return;
-      }
-
-      setMode('separated');
-      setInstrumentalEnabled(true);
-      setPlayer((p) => ({
-        ...p,
-        isPlaying: true,
-        isSeeking: false,
-      }));
-    });
-
-    return unsubscribe;
-  }, [song.id, setInstrumentalEnabled]);
+    dispatch({ type: 'PLAYER_STOP' });
+    requestPracticeDialogOpen(song.id);
+  }, [dispatch, song.id]);
 
   // ---------------------------------------------------------------------------
   // Derived UI state
@@ -1876,14 +1802,6 @@ function GlobalPlayerInner({
         onClose={() => setIsSeparationDialogOpen(false)}
         onSuccess={handleSeparationSuccess}
         song={song}
-      />
-
-      <SingingPracticeDialog
-        open={isPracticeDialogOpen}
-        onClose={() => setIsPracticeDialogOpen(false)}
-        song={song}
-        vocalsUrl={vocalsStemUrl}
-        isEligible={isPracticeAvailable}
       />
 
       <Snackbar

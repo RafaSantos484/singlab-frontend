@@ -31,11 +31,19 @@ export type PracticeCommand =
   | PracticeSetInstrumentalCommand
   | PracticeSetPlayingCommand;
 
+export interface PracticeDialogOpenRequest {
+  songId: string;
+}
+
 type SnapshotSubscriber = (snapshot: GlobalPlayerSnapshot) => void;
 type CommandSubscriber = (command: PracticeCommand) => void;
+type PracticeDialogOpenSubscriber = (
+  request: PracticeDialogOpenRequest,
+) => void;
 
 const snapshotSubscribers = new Set<SnapshotSubscriber>();
 const commandSubscribers = new Set<CommandSubscriber>();
+const practiceDialogOpenSubscribers = new Set<PracticeDialogOpenSubscriber>();
 
 /**
  * Subscribes to global player state snapshots emitted by GlobalPlayer.
@@ -114,5 +122,28 @@ export function requestPracticePlaying(songId: string, playing: boolean): void {
 
   commandSubscribers.forEach((listener) => {
     listener(command);
+  });
+}
+
+/**
+ * Subscribes to requests to open Practice dialog for a song.
+ */
+export function subscribePracticeDialogOpenRequests(
+  listener: PracticeDialogOpenSubscriber,
+): () => void {
+  practiceDialogOpenSubscribers.add(listener);
+  return (): void => {
+    practiceDialogOpenSubscribers.delete(listener);
+  };
+}
+
+/**
+ * Requests opening Practice dialog for the provided song.
+ */
+export function requestPracticeDialogOpen(songId: string): void {
+  const request: PracticeDialogOpenRequest = { songId };
+
+  practiceDialogOpenSubscribers.forEach((listener) => {
+    listener(request);
   });
 }

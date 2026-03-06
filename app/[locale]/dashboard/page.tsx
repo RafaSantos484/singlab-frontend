@@ -50,6 +50,7 @@ import { SingingPracticeDialog } from '@/components/features/SingingPracticeDial
 import { deleteSeparatedSongInfo } from '@/lib/firebase/songs';
 import { deleteSeparationStems } from '@/lib/storage/uploadSeparationStems';
 import { getFirebaseAuth } from '@/lib/firebase/auth';
+import { subscribePracticeDialogOpenRequests } from '@/lib/player/practiceSync';
 
 // ---------------------------------------------------------------------------
 // Page
@@ -452,9 +453,21 @@ function SongCardItem({
   };
 
   const handleOpenPractice = (): void => {
-    dispatch({ type: 'PLAYER_LOAD_SONG', payload: song.id });
+    dispatch({ type: 'PLAYER_STOP' });
     setIsPracticeDialogOpen(true);
   };
+
+  useEffect(() => {
+    const unsubscribe = subscribePracticeDialogOpenRequests((request) => {
+      if (request.songId !== song.id) {
+        return;
+      }
+
+      setIsPracticeDialogOpen(true);
+    });
+
+    return unsubscribe;
+  }, [song.id]);
 
   return (
     <Card
