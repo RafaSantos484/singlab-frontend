@@ -17,8 +17,10 @@ import {
   Typography,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
+import Forward10Icon from '@mui/icons-material/Forward10';
 import PauseIcon from '@mui/icons-material/Pause';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import Replay10Icon from '@mui/icons-material/Replay10';
 import { useTranslations } from 'next-intl';
 
 import type { SeparationStemName, Song } from '@/lib/api/types';
@@ -79,7 +81,6 @@ interface PitchPoint {
 
 interface PracticeReadout {
   noteLabel: string | null;
-  cents: number | null;
 }
 
 interface SingingPracticeDialogProps {
@@ -268,6 +269,28 @@ function detectPitchFromFrame(
   return { frequency, correlation: bestCorrelation };
 }
 
+function drawRoundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): void {
+  // Canvas 2D has no built-in rounded-rectangle primitive in all targets.
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
 /** Draw a smooth line using quadratic segments per continuous chunk. */
 function drawSmoothPath(
   context: CanvasRenderingContext2D,
@@ -309,6 +332,7 @@ function drawPracticeCanvas(
   timeWindowSeconds: number,
   visibleRangeSemitones: number,
   showNoteLabels: boolean,
+  hoverX: number | null,
 ): void {
   const context = canvas.getContext('2d');
   if (!context) return;
@@ -408,6 +432,69 @@ function drawPracticeCanvas(
   context.lineTo(currentX, height);
   context.stroke();
   context.setLineDash([]);
+
+  // Hover inspection overlay.
+  if (hoverX !== null) {
+    context.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+    context.lineWidth = 1;
+    context.setLineDash([3, 4]);
+    context.beginPath();
+    context.moveTo(hoverX, 0);
+    context.lineTo(hoverX, height);
+    context.stroke();
+    context.setLineDash([]);
+
+    // Find the pitch point closest to hovered time within ±0.5 s.
+    const hoveredTime = minTime + (hoverX / width) * timeWindowSeconds;
+    let closestPoint: PitchPoint | null = null;
+    let closestDist = 0.5;
+    for (const point of visiblePoints) {
+      if (point.midi !== null) {
+        const dist = Math.abs(point.time - hoveredTime);
+        if (dist < closestDist) {
+          closestDist = dist;
+          closestPoint = point;
+        }
+      }
+    }
+
+    if (closestPoint !== null && closestPoint.midi !== null) {
+      const label = midiToNoteLabel(closestPoint.midi);
+      const noteY = yFromMidi(closestPoint.midi);
+      const dotX = xFromTime(closestPoint.time);
+
+      // Highlight point on the curve.
+      context.fillStyle = 'rgba(129, 140, 248, 1)';
+      context.beginPath();
+      context.arc(dotX, noteY, 4, 0, Math.PI * 2);
+      context.fill();
+
+      // Tooltip pill.
+      const fontSize = 13;
+      context.font = `bold ${fontSize}px sans-serif`;
+      const textW = context.measureText(label).width;
+      const padX = 8;
+      const padY = 5;
+      const boxW = textW + padX * 2;
+      const boxH = fontSize + padY * 2;
+      const rawBoxX = hoverX + 10;
+      const boxX = Math.min(rawBoxX, width - boxW - 4);
+      const rawBoxY = noteY - boxH / 2;
+      const boxY = Math.max(2, Math.min(rawBoxY, height - boxH - 2));
+
+      context.fillStyle = 'rgba(30, 27, 75, 0.92)';
+      drawRoundRect(context, boxX, boxY, boxW, boxH, 5);
+      context.fill();
+
+      context.strokeStyle = 'rgba(129, 140, 248, 0.85)';
+      context.lineWidth = 1;
+      drawRoundRect(context, boxX, boxY, boxW, boxH, 5);
+      context.stroke();
+
+      context.fillStyle = 'rgba(226, 232, 240, 1)';
+      context.fillText(label, boxX + padX, boxY + padY + fontSize - 1);
+    }
+  }
 }
 
 export function SingingPracticeDialog({
@@ -431,7 +518,6 @@ export function SingingPracticeDialog({
   const [showNoteLabels, setShowNoteLabels] = useState(true);
   const [readout, setReadout] = useState<PracticeReadout>({
     noteLabel: null,
-    cents: null,
   });
   const [isAudioLoaded, setIsAudioLoaded] = useState(false);
   const [blockedSourceKey, setBlockedSourceKey] = useState<string | null>(null);
@@ -452,6 +538,7 @@ export function SingingPracticeDialog({
   const gapSamplesRef = useRef(0);
   const instrumentalEnabledRef = useRef(isInstrumentalEnabled);
   const lastDisplayCentsRef = useRef<number | null>(null);
+  const hoverXRef = useRef<number | null>(null);
 
   const stemPaths = useMemo(
     () => song.separatedSongInfo?.stems?.paths ?? null,
@@ -526,7 +613,7 @@ export function SingingPracticeDialog({
       const semitoneDelta =
         Math.sign(rawDelta) * clamp(Math.abs(rawDelta), 0.35, 3);
       centerMidiRef.current = clamp(
-        centerMidiRef.current + semitoneDelta,
+        centerMidiRef.current - semitoneDelta,
         minCenter,
         maxCenter,
       );
@@ -677,7 +764,7 @@ export function SingingPracticeDialog({
       lastSmoothedPitchRef.current = null;
       gapSamplesRef.current = 0;
       lastDisplayCentsRef.current = null;
-      setReadout({ noteLabel: null, cents: null });
+      setReadout({ noteLabel: null });
       centerMidiRef.current = 60;
       setIsAudioLoaded(false);
     };
@@ -891,10 +978,9 @@ export function SingingPracticeDialog({
 
             setReadout({
               noteLabel: midiToNoteLabel(displayMidi),
-              cents: Math.round(cents),
             });
           } else {
-            setReadout({ noteLabel: null, cents: null });
+            setReadout({ noteLabel: null });
             lastDisplayCentsRef.current = null;
           }
 
@@ -920,6 +1006,7 @@ export function SingingPracticeDialog({
           windowSeconds,
           visibleRangeSemitones,
           showNoteLabels,
+          hoverXRef.current,
         );
       }
 
@@ -969,6 +1056,53 @@ export function SingingPracticeDialog({
     readout.noteLabel,
     t,
   ]);
+
+  const handleSeekBy = (deltaSec: number): void => {
+    const audioElement = audioRef.current;
+    if (!audioElement) {
+      return;
+    }
+
+    const { duration } = audioElement;
+    if (!isFinite(duration) || duration <= 0) {
+      return;
+    }
+
+    const from = audioElement.currentTime;
+    const target = Math.max(0, Math.min(duration, from + deltaSec));
+    audioElement.currentTime = target;
+
+    backingAudioRefs.current.forEach((element) => {
+      try {
+        element.currentTime = target;
+      } catch {
+        // no-op
+      }
+    });
+
+    if (deltaSec < 0) {
+      // Backward seek: remove only the points in the interval being revisited
+      // (target - 0.5s buffer … from) so the old curve doesn't overlap the new
+      // one when the playhead replays that segment.
+      const clearFrom = Math.max(0, target - 0.5);
+      pointsRef.current = pointsRef.current.filter(
+        (point) => point.time < clearFrom,
+      );
+
+      // Reset smoothing state so the detector starts fresh at the new position.
+      pitchHistoryRef.current = [];
+      emaPitchRef.current = null;
+      lastSmoothedPitchRef.current = null;
+      gapSamplesRef.current = 0;
+      lastDisplayCentsRef.current = null;
+      setReadout({ noteLabel: null });
+    } else {
+      // Forward seek: insert a null sentinel at the departure point so the
+      // canvas renderer breaks the line segment instead of drawing a straight
+      // line from the last visible note all the way to the next new sample.
+      pointsRef.current.push({ time: from, midi: null });
+    }
+  };
 
   const handleTogglePracticePlayback = async (): Promise<void> => {
     const nextPlaying = !isPracticePlaying;
@@ -1040,50 +1174,66 @@ export function SingingPracticeDialog({
             gap: 1.5,
           }}
         >
-          <Box
-            sx={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              gap: 1.5,
-            }}
+          <Stack
+            direction="row"
+            spacing={1.5}
+            alignItems="center"
+            sx={{ flexWrap: 'wrap' }}
           >
-            <Chip label={statusLabel} color="primary" variant="outlined" />
+            <Box sx={{ minWidth: 220 }}>
+              <Chip
+                label={statusLabel}
+                color="primary"
+                variant="outlined"
+                sx={{ width: '100%' }}
+              />
+            </Box>
 
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={handleTogglePracticePlayback}
-              startIcon={isPracticePlaying ? <PauseIcon /> : <PlayArrowIcon />}
-              aria-label={
-                isPracticePlaying
-                  ? t('pauseButtonAriaLabel')
-                  : t('playButtonAriaLabel')
-              }
-            >
-              {isPracticePlaying ? t('pauseButton') : t('playButton')}
-            </Button>
+            <Stack direction="row" spacing={0.5} alignItems="center">
+              <IconButton
+                size="small"
+                onClick={() => handleSeekBy(-10)}
+                aria-label={t('seekBack10AriaLabel')}
+              >
+                <Replay10Icon />
+              </IconButton>
 
-            <Stack direction="row" spacing={1.5} alignItems="center">
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleTogglePracticePlayback}
+                startIcon={
+                  isPracticePlaying ? <PauseIcon /> : <PlayArrowIcon />
+                }
+                aria-label={
+                  isPracticePlaying
+                    ? t('pauseButtonAriaLabel')
+                    : t('playButtonAriaLabel')
+                }
+              >
+                {isPracticePlaying ? t('pauseButton') : t('playButton')}
+              </Button>
+
+              <IconButton
+                size="small"
+                onClick={() => handleSeekBy(10)}
+                aria-label={t('seekForward10AriaLabel')}
+              >
+                <Forward10Icon />
+              </IconButton>
+            </Stack>
+
+            <Stack direction="row" spacing={1} alignItems="center">
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
                 {t('currentNoteLabel')}
               </Typography>
-              <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                {readout.noteLabel ?? t('noPitch')}
-              </Typography>
+              <Box sx={{ minWidth: 70, textAlign: 'center' }}>
+                <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                  {readout.noteLabel ?? t('noPitch')}
+                </Typography>
+              </Box>
             </Stack>
-
-            <Stack direction="row" spacing={1.5} alignItems="center">
-              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                {t('currentDeviationLabel')}
-              </Typography>
-              <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                {readout.cents === null
-                  ? t('noDeviation')
-                  : `${readout.cents > 0 ? '+' : ''}${readout.cents}c`}
-              </Typography>
-            </Stack>
-          </Box>
+          </Stack>
 
           <Box
             sx={{
@@ -1201,6 +1351,13 @@ export function SingingPracticeDialog({
               ref={canvasRef}
               aria-label={t('chartAriaLabel')}
               style={{ width: '100%', height: '100%', display: 'block' }}
+              onMouseMove={(event) => {
+                const rect = event.currentTarget.getBoundingClientRect();
+                hoverXRef.current = event.clientX - rect.left;
+              }}
+              onMouseLeave={() => {
+                hoverXRef.current = null;
+              }}
             />
           </Box>
 
