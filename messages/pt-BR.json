@@ -273,9 +273,17 @@
       "waitingPlayback": "Aguardando reprodução",
       "analyzing": "Analisando vocal",
       "unvoiced": "Silêncio ou sem voz",
-      "corsBlocked": "Análise de pitch indisponível"
+      "corsBlocked": "Análise de pitch indisponível",
+      "microphone": {
+        "connecting": "Conectando microfone",
+        "denied": "Permissão de microfone negada",
+        "unsupported": "Microfone não suportado",
+        "unavailable": "Microfone indisponível"
+      }
     },
     "currentNoteLabel": "Nota atual",
+    "currentVocalsNoteLabel": "Vocal",
+    "currentMicrophoneNoteLabel": "Microfone",
     "playButton": "Tocar",
     "pauseButton": "Pausar",
     "playButtonAriaLabel": "Retomar reprodução",
@@ -283,9 +291,19 @@
     "seekBack10AriaLabel": "Retroceder 10 segundos",
     "seekForward10AriaLabel": "Avançar 10 segundos",
     "noPitch": "Sem nota",
+    "microphone": {
+      "connecting": "Aguardando permissão e inicialização do microfone...",
+      "denied": "O acesso ao microfone foi negado. Ative a permissão no navegador para rastrear sua voz.",
+      "unsupported": "Este navegador não suporta captura de microfone para rastreamento de pitch.",
+      "unavailable": "Não foi possível iniciar a captura do microfone. Verifique seu dispositivo e as configurações do navegador."
+    },
     "corsBlockedMessage": "A análise de pitch foi bloqueada pelas configurações de CORS do armazenamento para este arquivo vocal. A reprodução continua funcionando, mas o gráfico não consegue ler a forma de onda.",
     "unavailableMessage": "O modo de prática está disponível apenas quando a separação terminou e existe uma faixa vocal.",
     "chartAriaLabel": "Gráfico de pitch ao vivo",
+    "legend": {
+      "vocals": "Faixa vocal",
+      "microphone": "Seu microfone"
+    },
     "controls": {
       "window": "Janela de tempo",
       "window15": "15s",
@@ -297,6 +315,7 @@
       "semitones18": "18 semitons",
       "semitones24": "24 semitons",
       "instrumental": "Instrumental",
+      "microphone": "Microfone",
       "dynamicAxis": "Eixo Y dinâmico",
       "showNoteLabels": "Mostrar rótulos das notas",
       "verticalScrollHint": "Desative o Eixo Y dinâmico e use a roda do mouse sobre o gráfico para rolar as notas verticalmente."

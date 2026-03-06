@@ -275,9 +275,17 @@
       "waitingPlayback": "Waiting for playback",
       "analyzing": "Analyzing vocals",
       "unvoiced": "Silence or unvoiced",
-      "corsBlocked": "Pitch analysis unavailable"
+      "corsBlocked": "Pitch analysis unavailable",
+      "microphone": {
+        "connecting": "Connecting microphone",
+        "denied": "Microphone permission denied",
+        "unsupported": "Microphone not supported",
+        "unavailable": "Microphone unavailable"
+      }
     },
     "currentNoteLabel": "Current note",
+    "currentVocalsNoteLabel": "Vocals",
+    "currentMicrophoneNoteLabel": "Microphone",
     "playButton": "Play",
     "pauseButton": "Pause",
     "playButtonAriaLabel": "Resume playback",
@@ -285,9 +293,19 @@
     "seekBack10AriaLabel": "Seek back 10 seconds",
     "seekForward10AriaLabel": "Seek forward 10 seconds",
     "noPitch": "No pitch",
+    "microphone": {
+      "connecting": "Waiting for microphone permission and stream setup...",
+      "denied": "Microphone access was denied. Enable microphone permission in your browser to track your voice.",
+      "unsupported": "This browser does not support microphone capture for pitch tracking.",
+      "unavailable": "Unable to start microphone capture. Check your device and browser settings."
+    },
     "corsBlockedMessage": "Pitch analysis is blocked by storage CORS settings for this vocals file. Playback still works, but the chart cannot read waveform data.",
     "unavailableMessage": "Practice mode is available only when separation is finished and a vocals stem is present.",
     "chartAriaLabel": "Live pitch chart",
+    "legend": {
+      "vocals": "Vocals track",
+      "microphone": "Your microphone"
+    },
     "controls": {
       "window": "Time window",
       "window15": "15s",
@@ -299,6 +317,7 @@
       "semitones18": "18 semitones",
       "semitones24": "24 semitones",
       "instrumental": "Instrumental",
+      "microphone": "Microphone",
       "dynamicAxis": "Dynamic Y-axis",
       "showNoteLabels": "Show note labels",
       "verticalScrollHint": "Turn off Dynamic Y-axis, then use the mouse wheel over the chart to scroll notes vertically."
