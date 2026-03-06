@@ -24,24 +24,53 @@ import { useTranslations } from 'next-intl';
 import type { SeparationStemName, Song } from '@/lib/api/types';
 import { useStorageDownloadUrls } from '@/lib/hooks/useStorageDownloadUrls';
 
+/** Low-latency pitch tracking defaults */
 const DEFAULT_WINDOW_SECONDS = 30;
 const DEFAULT_VISIBLE_RANGE_SEMITONES = 12;
 const HYSTERESIS_MARGIN_SEMITONES = 1;
-const SAMPLE_INTERVAL_MS = 30;
+
+/** Faster sampling lowers perceived tracking delay */
+const SAMPLE_INTERVAL_MS = 15;
+
+/** Detection thresholds tuned for reliability */
 const PITCH_RMS_THRESHOLD = 0.006;
-const PITCH_CORRELATION_THRESHOLD = 0.65;
+const PITCH_CORRELATION_THRESHOLD = 0.7;
+
+/** Frequency analysis bounds */
 const MIN_FREQUENCY_HZ = 60;
 const MAX_FREQUENCY_HZ = 1100;
+
+/** Default visible MIDI window */
 const MIN_VISIBLE_MIDI = 36; // C2
 const MAX_VISIBLE_MIDI = 84; // C6
+
+/** Keep downsampling for lower CPU usage */
 const DOWNSAMPLE_FACTOR = 2;
 
-// Smoothing controls for the practice curve.
-const MEDIAN_WINDOW_SIZE = 9;
-const EMA_ALPHA = 0.35;
-const MAX_SEMITONES_PER_SAMPLE = 1.2;
+/** Low-latency smoothing controls */
+/** Median filter window sized to reject outliers with minimal lag (~75ms) */
+const MEDIAN_WINDOW_SIZE = 5;
+
+/** Dynamic EMA limits based on detection confidence */
+const EMA_ALPHA_FAST = 0.55; // high confidence: responsive and stable
+const EMA_ALPHA_SLOW = 0.28; // low confidence: stronger smoothing
+
+/** Pitch velocity clamp in semitones/second to avoid jagged jumps */
+const MAX_SEMITONES_PER_SECOND = 32;
+
+/** Hold last note briefly through short detection gaps */
 const GAP_HOLD_SAMPLES = 2;
-const MAX_PITCH_HISTORY_SAMPLES = 32;
+
+/** Pitch history buffer size */
+const MAX_PITCH_HISTORY_SAMPLES = 24;
+
+/** Outlier rejection: discard large low-confidence jumps */
+const OUTLIER_REJECTION_SEMITONES = 1.8;
+const HIGH_CONFIDENCE_CORRELATION = 0.93;
+
+/** Sticky cents deadband and quantization for steadier display */
+const STICKY_CENTS_DEADBAND = 8; // ±8 cents
+const CENTS_QUANTIZATION_STEP = 5; // quantize in 5-cent steps
 
 interface PitchPoint {
   time: number;
@@ -80,6 +109,21 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+function mapRange(
+  value: number,
+  inMin: number,
+  inMax: number,
+  outMin: number,
+  outMax: number,
+): number {
+  const t = clamp((value - inMin) / (inMax - inMin), 0, 1);
+  return lerp(outMin, outMax, t);
+}
+
 function getCenterBounds(visibleRangeSemitones: number): {
   minCenter: number;
   maxCenter: number;
@@ -110,26 +154,28 @@ function midiToNoteLabel(midi: number): string {
 function exponentialMovingAverage(
   previous: number | null,
   value: number,
+  alpha: number,
 ): number {
   if (previous === null) {
     return value;
   }
-
-  return EMA_ALPHA * value + (1 - EMA_ALPHA) * previous;
+  return alpha * value + (1 - alpha) * previous;
 }
 
-function limitPitchDelta(currentValue: number, previousValue: number): number {
+function limitPitchDelta(
+  currentValue: number,
+  previousValue: number,
+  maxSemitonesPerSample: number,
+): number {
   const delta = currentValue - previousValue;
-  if (Math.abs(delta) <= MAX_SEMITONES_PER_SAMPLE) {
+  if (Math.abs(delta) <= maxSemitonesPerSample) {
     return currentValue;
   }
-
-  return previousValue + Math.sign(delta) * MAX_SEMITONES_PER_SAMPLE;
+  return previousValue + Math.sign(delta) * maxSemitonesPerSample;
 }
 
 function appendPitchHistory(history: number[], value: number | null): void {
   history.push(value ?? Number.NaN);
-
   if (history.length > MAX_PITCH_HISTORY_SAMPLES) {
     history.shift();
   }
@@ -151,10 +197,11 @@ function getMedianFromRecentValid(
   return recentValid[Math.floor(recentValid.length / 2)] ?? null;
 }
 
+/** Returns frequency and best correlation for adaptive smoothing */
 function detectPitchFromFrame(
   frame: Float32Array<ArrayBuffer>,
   sampleRate: number,
-): number | null {
+): { frequency: number; correlation: number } | null {
   const downsampledLength = Math.floor(frame.length / DOWNSAMPLE_FACTOR);
   if (downsampledLength < 64) {
     return null;
@@ -181,12 +228,14 @@ function detectPitchFromFrame(
   let bestLag = -1;
   let bestCorrelation = 0;
 
+  // Normalized autocorrelation over the full downsampled window.
   for (let lag = minLag; lag <= maxLag; lag += 1) {
     let sum = 0;
     let energyA = 0;
     let energyB = 0;
 
-    for (let i = 0; i < downsampledLength - lag; i += 1) {
+    const limit = downsampledLength - lag;
+    for (let i = 0; i < limit; i += 1) {
       const a = downsampled[i];
       const b = downsampled[i + lag];
       sum += a * b;
@@ -216,7 +265,40 @@ function detectPitchFromFrame(
     return null;
   }
 
-  return frequency;
+  return { frequency, correlation: bestCorrelation };
+}
+
+/** Draw a smooth line using quadratic segments per continuous chunk. */
+function drawSmoothPath(
+  context: CanvasRenderingContext2D,
+  pts: { x: number; y: number }[],
+): void {
+  if (pts.length === 0) return;
+  if (pts.length === 1) {
+    context.beginPath();
+    context.arc(pts[0].x, pts[0].y, 1.5, 0, Math.PI * 2);
+    context.fill();
+    return;
+  }
+
+  context.beginPath();
+  context.moveTo(pts[0].x, pts[0].y);
+
+  for (let i = 1; i < pts.length - 1; i += 1) {
+    const xc = (pts[i].x + pts[i + 1].x) / 2;
+    const yc = (pts[i].y + pts[i + 1].y) / 2;
+    context.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
+  }
+
+  // Final segment to the last point.
+  const last = pts.length - 1;
+  context.quadraticCurveTo(
+    pts[last - 1].x,
+    pts[last - 1].y,
+    pts[last].x,
+    pts[last].y,
+  );
+  context.stroke();
 }
 
 function drawPracticeCanvas(
@@ -257,6 +339,7 @@ function drawPracticeCanvas(
   const yFromMidi = (midi: number): number =>
     height - ((midi - minMidi) / visibleRangeSemitones) * height;
 
+  // Horizontal guide lines and note labels.
   for (
     let midiLine = Math.floor(minMidi);
     midiLine <= Math.ceil(maxMidi);
@@ -279,30 +362,31 @@ function drawPracticeCanvas(
 
   const visiblePoints = points.filter((point) => point.time >= minTime - 0.5);
 
+  // Smoothed pitch curve.
   context.strokeStyle = 'rgba(129, 140, 248, 0.95)';
   context.lineWidth = 2;
-  context.beginPath();
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
 
-  let hasPath = false;
+  let segment: { x: number; y: number }[] = [];
   for (let i = 0; i < visiblePoints.length; i += 1) {
     const point = visiblePoints[i];
     if (point.midi === null) {
-      hasPath = false;
+      if (segment.length > 0) {
+        drawSmoothPath(context, segment);
+        segment = [];
+      }
       continue;
     }
-
     const x = xFromTime(point.time);
     const y = yFromMidi(point.midi);
-
-    if (!hasPath) {
-      context.moveTo(x, y);
-      hasPath = true;
-    } else {
-      context.lineTo(x, y);
-    }
+    segment.push({ x, y });
   }
-  context.stroke();
+  if (segment.length > 0) {
+    drawSmoothPath(context, segment);
+  }
 
+  // Gap markers where no pitch was detected.
   context.strokeStyle = 'rgba(244, 114, 182, 0.5)';
   context.lineWidth = 1;
   visiblePoints
@@ -315,6 +399,7 @@ function drawPracticeCanvas(
       context.stroke();
     });
 
+  // Time cursor.
   context.strokeStyle = 'rgba(236, 72, 153, 0.8)';
   context.setLineDash([4, 4]);
   const currentX = xFromTime(currentTime);
@@ -366,6 +451,7 @@ export function SingingPracticeDialog({
   const lastSmoothedPitchRef = useRef<number | null>(null);
   const gapSamplesRef = useRef(0);
   const instrumentalEnabledRef = useRef(isInstrumentalEnabled);
+  const lastDisplayCentsRef = useRef<number | null>(null);
 
   const stemPaths = useMemo(
     () => song.separatedSongInfo?.stems?.paths ?? null,
@@ -418,6 +504,7 @@ export function SingingPracticeDialog({
     lastSmoothedPitchRef.current = null;
     gapSamplesRef.current = 0;
     lastSampleAtRef.current = 0;
+    lastDisplayCentsRef.current = null;
   }, [open, isEligible, visibleRangeSemitones]);
 
   useEffect(() => {
@@ -494,15 +581,16 @@ export function SingingPracticeDialog({
       createAudioElement(url),
     );
 
-    // Keep media element at normal gain so analyser and monitor output
-    // always receive the same signal from the source.
+    // Keep source references for analysis and playback sync.
     audioRef.current = audioElement;
     backingAudioRefs.current = backingElements;
 
     const context = new AudioContext();
     const analyser = context.createAnalyser();
-    analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0.1;
+
+    /** Smaller analysis window reduces effective latency. */
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0; // does not affect time-domain reads
 
     const vocalsSource = context.createMediaElementSource(audioElement);
     const backingGain = context.createGain();
@@ -588,6 +676,7 @@ export function SingingPracticeDialog({
       emaPitchRef.current = null;
       lastSmoothedPitchRef.current = null;
       gapSamplesRef.current = 0;
+      lastDisplayCentsRef.current = null;
       setReadout({ noteLabel: null, cents: null });
       centerMidiRef.current = 60;
       setIsAudioLoaded(false);
@@ -644,6 +733,7 @@ export function SingingPracticeDialog({
           });
         }
 
+        // Keep backing stems aligned with the vocal track.
         backingElements.forEach((element) => {
           const drift = Math.abs(
             element.currentTime - audioElement.currentTime,
@@ -660,7 +750,8 @@ export function SingingPracticeDialog({
 
       if (audioElement && analyser && frame) {
         const now = performance.now();
-        if (now - lastSampleAtRef.current >= SAMPLE_INTERVAL_MS) {
+        const elapsedMs = now - lastSampleAtRef.current;
+        if (elapsedMs >= SAMPLE_INTERVAL_MS) {
           lastSampleAtRef.current = now;
 
           analyser.getFloatTimeDomainData(frame);
@@ -669,32 +760,68 @@ export function SingingPracticeDialog({
             return;
           }
 
-          const frequency = detectPitchFromFrame(
+          const detection = detectPitchFromFrame(
             frame,
             analyser.context.sampleRate,
           );
+
+          const frequency = detection?.frequency ?? null;
+          const correlation = detection?.correlation ?? null;
 
           const rawMidi =
             frequency !== null ? frequencyToMidi(frequency) : null;
 
           appendPitchHistory(pitchHistoryRef.current, rawMidi);
 
-          const medianMidi = getMedianFromRecentValid(
+          let medianMidi = getMedianFromRecentValid(
             pitchHistoryRef.current,
             MEDIAN_WINDOW_SIZE,
           );
 
+          // Robust outlier rejection for large low-confidence jumps.
+          if (
+            medianMidi !== null &&
+            lastSmoothedPitchRef.current !== null &&
+            correlation !== null &&
+            correlation < HIGH_CONFIDENCE_CORRELATION &&
+            Math.abs(medianMidi - lastSmoothedPitchRef.current) >
+              OUTLIER_REJECTION_SEMITONES
+          ) {
+            medianMidi = null;
+          }
+
           let smoothedMidi: number | null = null;
 
           if (medianMidi !== null) {
+            // Dynamic EMA alpha based on detection confidence.
+            const dynAlpha =
+              correlation === null
+                ? EMA_ALPHA_SLOW
+                : mapRange(
+                    correlation,
+                    0.7,
+                    0.98,
+                    EMA_ALPHA_SLOW,
+                    EMA_ALPHA_FAST,
+                  );
+
             const emaMidi = exponentialMovingAverage(
               emaPitchRef.current,
               medianMidi,
+              dynAlpha,
             );
+
+            // Delta limit proportional to real elapsed time.
+            const dtSec = Math.max(elapsedMs, SAMPLE_INTERVAL_MS) / 1000;
+            const maxSemitonesPerSample = MAX_SEMITONES_PER_SECOND * dtSec;
 
             smoothedMidi =
               lastSmoothedPitchRef.current !== null
-                ? limitPitchDelta(emaMidi, lastSmoothedPitchRef.current)
+                ? limitPitchDelta(
+                    emaMidi,
+                    lastSmoothedPitchRef.current,
+                    maxSemitonesPerSample,
+                  )
                 : emaMidi;
 
             emaPitchRef.current = emaMidi;
@@ -713,6 +840,7 @@ export function SingingPracticeDialog({
             }
           }
 
+          // Dynamic vertical axis recentering.
           if (smoothedMidi !== null && isDynamicAxis) {
             const { minCenter, maxCenter } = getCenterBounds(
               visibleRangeSemitones,
@@ -742,20 +870,38 @@ export function SingingPracticeDialog({
             );
           }
 
+          // Sticky deadband plus cents quantization for stable rendering.
+          let displayMidi: number | null = null;
           if (smoothedMidi !== null) {
             const nearestMidi = Math.round(smoothedMidi);
-            const cents = Math.round((smoothedMidi - nearestMidi) * 100);
+            let cents = (smoothedMidi - nearestMidi) * 100;
+            if (lastDisplayCentsRef.current !== null) {
+              const deltaCents = cents - lastDisplayCentsRef.current;
+              if (Math.abs(deltaCents) < STICKY_CENTS_DEADBAND) {
+                cents = lastDisplayCentsRef.current;
+              }
+            }
+            // Quantize cents in fixed 5-cent increments.
+            cents =
+              Math.round(cents / CENTS_QUANTIZATION_STEP) *
+              CENTS_QUANTIZATION_STEP;
+            lastDisplayCentsRef.current = cents;
+
+            displayMidi = nearestMidi + cents / 100;
+
             setReadout({
-              noteLabel: midiToNoteLabel(smoothedMidi),
-              cents,
+              noteLabel: midiToNoteLabel(displayMidi),
+              cents: Math.round(cents),
             });
           } else {
             setReadout({ noteLabel: null, cents: null });
+            lastDisplayCentsRef.current = null;
           }
 
+          // Store display pitch in history for steadier curve rendering.
           pointsRef.current.push({
             time: audioElement.currentTime,
-            midi: smoothedMidi,
+            midi: displayMidi,
           });
 
           const minHistoryTime = audioElement.currentTime - windowSeconds * 1.5;
