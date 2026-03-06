@@ -27,8 +27,8 @@ import type { SeparationStemName, Song } from '@/lib/api/types';
 import { useStorageDownloadUrls } from '@/lib/hooks/useStorageDownloadUrls';
 
 /** Low-latency pitch tracking defaults */
-const DEFAULT_WINDOW_SECONDS = 30;
-const DEFAULT_VISIBLE_RANGE_SEMITONES = 12;
+const DEFAULT_WINDOW_SECONDS = 15;
+const DEFAULT_VISIBLE_RANGE_SEMITONES = 18;
 const HYSTERESIS_MARGIN_SEMITONES = 1;
 
 /** Faster sampling lowers perceived tracking delay */
@@ -80,7 +80,16 @@ interface PitchPoint {
 }
 
 interface PracticeReadout {
-  noteLabel: string | null;
+  vocalsNoteLabel: string | null;
+  microphoneNoteLabel: string | null;
+}
+
+interface PitchTrackProcessorState {
+  pitchHistory: number[];
+  emaPitch: number | null;
+  lastSmoothedPitch: number | null;
+  gapSamples: number;
+  lastDisplayCents: number | null;
 }
 
 interface SingingPracticeDialogProps {
@@ -196,6 +205,117 @@ function getMedianFromRecentValid(
 
   recentValid.sort((a, b) => a - b);
   return recentValid[Math.floor(recentValid.length / 2)] ?? null;
+}
+
+function createPitchTrackProcessorState(): PitchTrackProcessorState {
+  return {
+    pitchHistory: [],
+    emaPitch: null,
+    lastSmoothedPitch: null,
+    gapSamples: 0,
+    lastDisplayCents: null,
+  };
+}
+
+function resetPitchTrackProcessorState(state: PitchTrackProcessorState): void {
+  state.pitchHistory = [];
+  state.emaPitch = null;
+  state.lastSmoothedPitch = null;
+  state.gapSamples = 0;
+  state.lastDisplayCents = null;
+}
+
+function processPitchDetection(
+  state: PitchTrackProcessorState,
+  detection: { frequency: number; correlation: number } | null,
+  elapsedMs: number,
+): number | null {
+  const frequency = detection?.frequency ?? null;
+  const correlation = detection?.correlation ?? null;
+  const rawMidi = frequency !== null ? frequencyToMidi(frequency) : null;
+
+  appendPitchHistory(state.pitchHistory, rawMidi);
+
+  let medianMidi = getMedianFromRecentValid(
+    state.pitchHistory,
+    MEDIAN_WINDOW_SIZE,
+  );
+
+  // Robust outlier rejection for large low-confidence jumps.
+  if (
+    medianMidi !== null &&
+    state.lastSmoothedPitch !== null &&
+    correlation !== null &&
+    correlation < HIGH_CONFIDENCE_CORRELATION &&
+    Math.abs(medianMidi - state.lastSmoothedPitch) > OUTLIER_REJECTION_SEMITONES
+  ) {
+    medianMidi = null;
+  }
+
+  let smoothedMidi: number | null = null;
+
+  if (medianMidi !== null) {
+    // Dynamic EMA alpha based on detection confidence.
+    const dynAlpha =
+      correlation === null
+        ? EMA_ALPHA_SLOW
+        : mapRange(correlation, 0.7, 0.98, EMA_ALPHA_SLOW, EMA_ALPHA_FAST);
+
+    const emaMidi = exponentialMovingAverage(
+      state.emaPitch,
+      medianMidi,
+      dynAlpha,
+    );
+
+    // Delta limit proportional to real elapsed time.
+    const dtSec = Math.max(elapsedMs, SAMPLE_INTERVAL_MS) / 1000;
+    const maxSemitonesPerSample = MAX_SEMITONES_PER_SECOND * dtSec;
+
+    smoothedMidi =
+      state.lastSmoothedPitch !== null
+        ? limitPitchDelta(
+            emaMidi,
+            state.lastSmoothedPitch,
+            maxSemitonesPerSample,
+          )
+        : emaMidi;
+
+    state.emaPitch = emaMidi;
+    state.lastSmoothedPitch = smoothedMidi;
+    state.gapSamples = 0;
+  } else {
+    state.gapSamples += 1;
+    if (
+      state.gapSamples <= GAP_HOLD_SAMPLES &&
+      state.lastSmoothedPitch !== null
+    ) {
+      smoothedMidi = state.lastSmoothedPitch;
+    } else {
+      smoothedMidi = null;
+      state.emaPitch = null;
+    }
+  }
+
+  if (smoothedMidi === null) {
+    state.lastDisplayCents = null;
+    return null;
+  }
+
+  // Sticky deadband plus cents quantization for stable rendering.
+  const nearestMidi = Math.round(smoothedMidi);
+  let cents = (smoothedMidi - nearestMidi) * 100;
+  if (state.lastDisplayCents !== null) {
+    const deltaCents = cents - state.lastDisplayCents;
+    if (Math.abs(deltaCents) < STICKY_CENTS_DEADBAND) {
+      cents = state.lastDisplayCents;
+    }
+  }
+
+  // Quantize cents in fixed 5-cent increments.
+  cents = Math.round(cents / CENTS_QUANTIZATION_STEP) * CENTS_QUANTIZATION_STEP;
+  state.lastDisplayCents = cents;
+
+  return nearestMidi + cents / 100;
 }
 
 /** Returns frequency and best correlation for adaptive smoothing */
@@ -326,7 +446,8 @@ function drawSmoothPath(
 
 function drawPracticeCanvas(
   canvas: HTMLCanvasElement,
-  points: PitchPoint[],
+  vocalsPoints: PitchPoint[],
+  microphonePoints: PitchPoint[],
   currentTime: number,
   centerMidi: number,
   timeWindowSeconds: number,
@@ -384,17 +505,44 @@ function drawPracticeCanvas(
     }
   }
 
-  const visiblePoints = points.filter((point) => point.time >= minTime - 0.5);
+  const visibleVocalsPoints = vocalsPoints.filter(
+    (point) => point.time >= minTime - 0.5,
+  );
+  const visibleMicrophonePoints = microphonePoints.filter(
+    (point) => point.time >= minTime - 0.5,
+  );
 
-  // Smoothed pitch curve.
+  // Smoothed vocals pitch curve.
   context.strokeStyle = 'rgba(129, 140, 248, 0.95)';
   context.lineWidth = 2;
   context.lineCap = 'round';
   context.lineJoin = 'round';
 
   let segment: { x: number; y: number }[] = [];
-  for (let i = 0; i < visiblePoints.length; i += 1) {
-    const point = visiblePoints[i];
+  for (let i = 0; i < visibleVocalsPoints.length; i += 1) {
+    const point = visibleVocalsPoints[i];
+    if (point.midi === null) {
+      if (segment.length > 0) {
+        drawSmoothPath(context, segment);
+        segment = [];
+      }
+      continue;
+    }
+    const x = xFromTime(point.time);
+    const y = yFromMidi(point.midi);
+    segment.push({ x, y });
+  }
+  if (segment.length > 0) {
+    drawSmoothPath(context, segment);
+  }
+
+  // Smoothed microphone pitch curve.
+  context.strokeStyle = 'rgba(34, 197, 94, 0.95)';
+  context.lineWidth = 2;
+
+  segment = [];
+  for (let i = 0; i < visibleMicrophonePoints.length; i += 1) {
+    const point = visibleMicrophonePoints[i];
     if (point.midi === null) {
       if (segment.length > 0) {
         drawSmoothPath(context, segment);
@@ -413,7 +561,7 @@ function drawPracticeCanvas(
   // Gap markers where no pitch was detected.
   context.strokeStyle = 'rgba(244, 114, 182, 0.5)';
   context.lineWidth = 1;
-  visiblePoints
+  visibleVocalsPoints
     .filter((point) => point.midi === null)
     .forEach((point) => {
       const x = xFromTime(point.time);
@@ -446,54 +594,91 @@ function drawPracticeCanvas(
 
     // Find the pitch point closest to hovered time within ±0.5 s.
     const hoveredTime = minTime + (hoverX / width) * timeWindowSeconds;
-    let closestPoint: PitchPoint | null = null;
-    let closestDist = 0.5;
-    for (const point of visiblePoints) {
+    let closestVocalsPoint: PitchPoint | null = null;
+    let closestVocalsDist = 0.5;
+    for (const point of visibleVocalsPoints) {
       if (point.midi !== null) {
         const dist = Math.abs(point.time - hoveredTime);
-        if (dist < closestDist) {
-          closestDist = dist;
-          closestPoint = point;
+        if (dist < closestVocalsDist) {
+          closestVocalsDist = dist;
+          closestVocalsPoint = point;
         }
       }
     }
 
-    if (closestPoint !== null && closestPoint.midi !== null) {
-      const label = midiToNoteLabel(closestPoint.midi);
-      const noteY = yFromMidi(closestPoint.midi);
-      const dotX = xFromTime(closestPoint.time);
+    let closestMicrophonePoint: PitchPoint | null = null;
+    let closestMicrophoneDist = 0.5;
+    for (const point of visibleMicrophonePoints) {
+      if (point.midi !== null) {
+        const dist = Math.abs(point.time - hoveredTime);
+        if (dist < closestMicrophoneDist) {
+          closestMicrophoneDist = dist;
+          closestMicrophonePoint = point;
+        }
+      }
+    }
 
-      // Highlight point on the curve.
-      context.fillStyle = 'rgba(129, 140, 248, 1)';
+    const hoverItems: Array<{
+      x: number;
+      y: number;
+      label: string;
+      fillColor: string;
+      borderColor: string;
+    }> = [];
+
+    if (closestVocalsPoint !== null && closestVocalsPoint.midi !== null) {
+      hoverItems.push({
+        x: xFromTime(closestVocalsPoint.time),
+        y: yFromMidi(closestVocalsPoint.midi),
+        label: midiToNoteLabel(closestVocalsPoint.midi),
+        fillColor: 'rgba(129, 140, 248, 1)',
+        borderColor: 'rgba(129, 140, 248, 0.85)',
+      });
+    }
+
+    if (
+      closestMicrophonePoint !== null &&
+      closestMicrophonePoint.midi !== null
+    ) {
+      hoverItems.push({
+        x: xFromTime(closestMicrophonePoint.time),
+        y: yFromMidi(closestMicrophonePoint.midi),
+        label: midiToNoteLabel(closestMicrophonePoint.midi),
+        fillColor: 'rgba(34, 197, 94, 1)',
+        borderColor: 'rgba(34, 197, 94, 0.85)',
+      });
+    }
+
+    hoverItems.forEach((item, index) => {
+      context.fillStyle = item.fillColor;
       context.beginPath();
-      context.arc(dotX, noteY, 4, 0, Math.PI * 2);
+      context.arc(item.x, item.y, 4, 0, Math.PI * 2);
       context.fill();
 
-      // Tooltip pill.
       const fontSize = 13;
       context.font = `bold ${fontSize}px sans-serif`;
-      const textW = context.measureText(label).width;
+      const textW = context.measureText(item.label).width;
       const padX = 8;
       const padY = 5;
       const boxW = textW + padX * 2;
       const boxH = fontSize + padY * 2;
       const rawBoxX = hoverX + 10;
       const boxX = Math.min(rawBoxX, width - boxW - 4);
-      const rawBoxY = noteY - boxH / 2;
-      const boxY = Math.max(2, Math.min(rawBoxY, height - boxH - 2));
+      const stackedY = item.y - boxH / 2 + index * (boxH + 6);
+      const boxY = Math.max(2, Math.min(stackedY, height - boxH - 2));
 
       context.fillStyle = 'rgba(30, 27, 75, 0.92)';
       drawRoundRect(context, boxX, boxY, boxW, boxH, 5);
       context.fill();
 
-      context.strokeStyle = 'rgba(129, 140, 248, 0.85)';
+      context.strokeStyle = item.borderColor;
       context.lineWidth = 1;
       drawRoundRect(context, boxX, boxY, boxW, boxH, 5);
       context.stroke();
 
       context.fillStyle = 'rgba(226, 232, 240, 1)';
-      context.fillText(label, boxX + padX, boxY + padY + fontSize - 1);
-    }
+      context.fillText(item.label, boxX + padX, boxY + padY + fontSize - 1);
+    });
   }
 }
 
@@ -514,30 +699,43 @@ export function SingingPracticeDialog({
   );
   const [isPracticePlaying, setIsPracticePlaying] = useState(true);
   const [isInstrumentalEnabled, setIsInstrumentalEnabled] = useState(true);
+  const [isMicrophoneEnabled, setIsMicrophoneEnabled] = useState(true);
   const [isDynamicAxis, setIsDynamicAxis] = useState(true);
   const [showNoteLabels, setShowNoteLabels] = useState(true);
   const [readout, setReadout] = useState<PracticeReadout>({
-    noteLabel: null,
+    vocalsNoteLabel: null,
+    microphoneNoteLabel: null,
   });
   const [isAudioLoaded, setIsAudioLoaded] = useState(false);
   const [blockedSourceKey, setBlockedSourceKey] = useState<string | null>(null);
+  const [microphoneErrorKey, setMicrophoneErrorKey] = useState<
+    'unsupported' | 'denied' | 'unavailable' | null
+  >(null);
+  const [isMicrophoneReady, setIsMicrophoneReady] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const backingAudioRefs = useRef<HTMLAudioElement[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
+  const vocalsAnalyserRef = useRef<AnalyserNode | null>(null);
+  const microphoneAnalyserRef = useRef<AnalyserNode | null>(null);
   const backingGainRef = useRef<GainNode | null>(null);
-  const frameRef = useRef<Float32Array<ArrayBuffer> | null>(null);
-  const pointsRef = useRef<PitchPoint[]>([]);
+  const microphoneGainRef = useRef<GainNode | null>(null);
+  const vocalsFrameRef = useRef<Float32Array<ArrayBuffer> | null>(null);
+  const microphoneFrameRef = useRef<Float32Array<ArrayBuffer> | null>(null);
+  const microphoneStreamRef = useRef<MediaStream | null>(null);
+  const vocalsPointsRef = useRef<PitchPoint[]>([]);
+  const microphonePointsRef = useRef<PitchPoint[]>([]);
+  const vocalsProcessorRef = useRef<PitchTrackProcessorState>(
+    createPitchTrackProcessorState(),
+  );
+  const microphoneProcessorRef = useRef<PitchTrackProcessorState>(
+    createPitchTrackProcessorState(),
+  );
   const centerMidiRef = useRef(60);
   const lastSampleAtRef = useRef(0);
-  const pitchHistoryRef = useRef<number[]>([]);
-  const emaPitchRef = useRef<number | null>(null);
-  const lastSmoothedPitchRef = useRef<number | null>(null);
-  const gapSamplesRef = useRef(0);
   const instrumentalEnabledRef = useRef(isInstrumentalEnabled);
-  const lastDisplayCentsRef = useRef<number | null>(null);
+  const microphoneEnabledRef = useRef(isMicrophoneEnabled);
   const hoverXRef = useRef<number | null>(null);
 
   const stemPaths = useMemo(
@@ -577,6 +775,8 @@ export function SingingPracticeDialog({
 
   const isAnalysisBlockedByCors =
     analysisSourceKey !== null && blockedSourceKey === analysisSourceKey;
+  const isMicrophoneUnavailable =
+    isMicrophoneEnabled && microphoneErrorKey !== null;
 
   useEffect(() => {
     if (!open || !isEligible) {
@@ -585,13 +785,15 @@ export function SingingPracticeDialog({
 
     const { minCenter, maxCenter } = getCenterBounds(visibleRangeSemitones);
     centerMidiRef.current = clamp(centerMidiRef.current, minCenter, maxCenter);
-    pointsRef.current = [];
-    pitchHistoryRef.current = [];
-    emaPitchRef.current = null;
-    lastSmoothedPitchRef.current = null;
-    gapSamplesRef.current = 0;
+    vocalsPointsRef.current = [];
+    microphonePointsRef.current = [];
+    resetPitchTrackProcessorState(vocalsProcessorRef.current);
+    resetPitchTrackProcessorState(microphoneProcessorRef.current);
     lastSampleAtRef.current = 0;
-    lastDisplayCentsRef.current = null;
+    setReadout({
+      vocalsNoteLabel: null,
+      microphoneNoteLabel: null,
+    });
   }, [open, isEligible, visibleRangeSemitones]);
 
   useEffect(() => {
@@ -652,6 +854,8 @@ export function SingingPracticeDialog({
       return;
     }
 
+    let isDisposed = false;
+
     const createAudioElement = (src: string): HTMLAudioElement => {
       const element = new Audio();
       element.crossOrigin = 'anonymous';
@@ -673,11 +877,11 @@ export function SingingPracticeDialog({
     backingAudioRefs.current = backingElements;
 
     const context = new AudioContext();
-    const analyser = context.createAnalyser();
+    const vocalsAnalyser = context.createAnalyser();
 
     /** Smaller analysis window reduces effective latency. */
-    analyser.fftSize = 1024;
-    analyser.smoothingTimeConstant = 0; // does not affect time-domain reads
+    vocalsAnalyser.fftSize = 1024;
+    vocalsAnalyser.smoothingTimeConstant = 0; // does not affect time-domain reads
 
     const vocalsSource = context.createMediaElementSource(audioElement);
     const backingGain = context.createGain();
@@ -687,7 +891,7 @@ export function SingingPracticeDialog({
       context.createMediaElementSource(element),
     );
 
-    vocalsSource.connect(analyser);
+    vocalsSource.connect(vocalsAnalyser);
     vocalsSource.connect(context.destination);
     backingSources.forEach((source) => {
       source.connect(backingGain);
@@ -718,14 +922,79 @@ export function SingingPracticeDialog({
     audioElement.addEventListener('canplay', handleCanPlay);
     audioElement.addEventListener('ended', handleEnded);
 
+    const setupMicrophone = async (): Promise<void> => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        if (!isDisposed) {
+          setMicrophoneErrorKey('unsupported');
+          setIsMicrophoneReady(false);
+        }
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: false,
+          },
+        });
+
+        if (isDisposed) {
+          stream.getTracks().forEach((track) => {
+            track.stop();
+          });
+          return;
+        }
+
+        const microphoneSource = context.createMediaStreamSource(stream);
+        const microphoneAnalyser = context.createAnalyser();
+        const microphoneGain = context.createGain();
+
+        microphoneAnalyser.fftSize = 1024;
+        microphoneAnalyser.smoothingTimeConstant = 0;
+        microphoneGain.gain.value = microphoneEnabledRef.current ? 1 : 0;
+
+        microphoneSource.connect(microphoneAnalyser);
+        microphoneSource.connect(microphoneGain);
+        microphoneGain.connect(context.destination);
+
+        microphoneStreamRef.current = stream;
+        microphoneAnalyserRef.current = microphoneAnalyser;
+        microphoneGainRef.current = microphoneGain;
+        microphoneFrameRef.current = new Float32Array(
+          microphoneAnalyser.fftSize,
+        ) as Float32Array<ArrayBuffer>;
+
+        setMicrophoneErrorKey(null);
+        setIsMicrophoneReady(true);
+      } catch (error: unknown) {
+        if (isDisposed) {
+          return;
+        }
+
+        const isPermissionError =
+          error instanceof DOMException &&
+          (error.name === 'NotAllowedError' ||
+            error.name === 'SecurityError' ||
+            error.name === 'PermissionDeniedError');
+
+        setMicrophoneErrorKey(isPermissionError ? 'denied' : 'unavailable');
+        setIsMicrophoneReady(false);
+      }
+    };
+
+    void setupMicrophone();
+
     audioContextRef.current = context;
-    analyserRef.current = analyser;
+    vocalsAnalyserRef.current = vocalsAnalyser;
     backingGainRef.current = backingGain;
-    frameRef.current = new Float32Array(
-      analyser.fftSize,
+    vocalsFrameRef.current = new Float32Array(
+      vocalsAnalyser.fftSize,
     ) as Float32Array<ArrayBuffer>;
 
     return () => {
+      isDisposed = true;
       audioElement.removeEventListener('error', handleAudioError);
       audioElement.removeEventListener('canplay', handleCanPlay);
       audioElement.removeEventListener('ended', handleEnded);
@@ -750,23 +1019,36 @@ export function SingingPracticeDialog({
         }
       });
 
+      const microphoneStream = microphoneStreamRef.current;
+      if (microphoneStream) {
+        microphoneStream.getTracks().forEach((track) => {
+          track.stop();
+        });
+      }
+
       void context.close();
 
-      analyserRef.current = null;
+      vocalsAnalyserRef.current = null;
+      microphoneAnalyserRef.current = null;
       backingGainRef.current = null;
-      frameRef.current = null;
+      microphoneGainRef.current = null;
+      vocalsFrameRef.current = null;
+      microphoneFrameRef.current = null;
+      microphoneStreamRef.current = null;
       audioRef.current = null;
       backingAudioRefs.current = [];
       audioContextRef.current = null;
-      pointsRef.current = [];
-      pitchHistoryRef.current = [];
-      emaPitchRef.current = null;
-      lastSmoothedPitchRef.current = null;
-      gapSamplesRef.current = 0;
-      lastDisplayCentsRef.current = null;
-      setReadout({ noteLabel: null });
+      vocalsPointsRef.current = [];
+      microphonePointsRef.current = [];
+      resetPitchTrackProcessorState(vocalsProcessorRef.current);
+      resetPitchTrackProcessorState(microphoneProcessorRef.current);
+      setReadout({
+        vocalsNoteLabel: null,
+        microphoneNoteLabel: null,
+      });
       centerMidiRef.current = 60;
       setIsAudioLoaded(false);
+      setIsMicrophoneReady(false);
     };
   }, [analysisSourceKey, open, resolvedVocalsUrl, isEligible, backingStemUrls]);
 
@@ -782,6 +1064,17 @@ export function SingingPracticeDialog({
   }, [isInstrumentalEnabled]);
 
   useEffect(() => {
+    microphoneEnabledRef.current = isMicrophoneEnabled;
+
+    const microphoneGain = microphoneGainRef.current;
+    if (!microphoneGain) {
+      return;
+    }
+
+    microphoneGain.gain.value = isMicrophoneEnabled ? 1 : 0;
+  }, [isMicrophoneEnabled]);
+
+  useEffect(() => {
     if (!open || !isEligible || !resolvedVocalsUrl) {
       return;
     }
@@ -791,8 +1084,10 @@ export function SingingPracticeDialog({
     const syncAndDraw = (): void => {
       const audioElement = audioRef.current;
       const backingElements = backingAudioRefs.current;
-      const analyser = analyserRef.current;
-      const frame = frameRef.current;
+      const vocalsAnalyser = vocalsAnalyserRef.current;
+      const vocalsFrame = vocalsFrameRef.current;
+      const microphoneAnalyser = microphoneAnalyserRef.current;
+      const microphoneFrame = microphoneFrameRef.current;
       const canvas = canvasRef.current;
 
       if (audioElement) {
@@ -835,100 +1130,56 @@ export function SingingPracticeDialog({
         });
       }
 
-      if (audioElement && analyser && frame) {
+      if (audioElement && vocalsAnalyser && vocalsFrame) {
         const now = performance.now();
         const elapsedMs = now - lastSampleAtRef.current;
         if (elapsedMs >= SAMPLE_INTERVAL_MS) {
           lastSampleAtRef.current = now;
 
-          analyser.getFloatTimeDomainData(frame);
-          if (isAnalysisBlockedByCors) {
-            animationFrameId = window.requestAnimationFrame(syncAndDraw);
-            return;
-          }
-
-          const detection = detectPitchFromFrame(
-            frame,
-            analyser.context.sampleRate,
-          );
-
-          const frequency = detection?.frequency ?? null;
-          const correlation = detection?.correlation ?? null;
-
-          const rawMidi =
-            frequency !== null ? frequencyToMidi(frequency) : null;
-
-          appendPitchHistory(pitchHistoryRef.current, rawMidi);
-
-          let medianMidi = getMedianFromRecentValid(
-            pitchHistoryRef.current,
-            MEDIAN_WINDOW_SIZE,
-          );
-
-          // Robust outlier rejection for large low-confidence jumps.
-          if (
-            medianMidi !== null &&
-            lastSmoothedPitchRef.current !== null &&
-            correlation !== null &&
-            correlation < HIGH_CONFIDENCE_CORRELATION &&
-            Math.abs(medianMidi - lastSmoothedPitchRef.current) >
-              OUTLIER_REJECTION_SEMITONES
-          ) {
-            medianMidi = null;
-          }
-
-          let smoothedMidi: number | null = null;
-
-          if (medianMidi !== null) {
-            // Dynamic EMA alpha based on detection confidence.
-            const dynAlpha =
-              correlation === null
-                ? EMA_ALPHA_SLOW
-                : mapRange(
-                    correlation,
-                    0.7,
-                    0.98,
-                    EMA_ALPHA_SLOW,
-                    EMA_ALPHA_FAST,
-                  );
-
-            const emaMidi = exponentialMovingAverage(
-              emaPitchRef.current,
-              medianMidi,
-              dynAlpha,
+          let vocalsDisplayMidi: number | null = null;
+          if (!isAnalysisBlockedByCors) {
+            vocalsAnalyser.getFloatTimeDomainData(vocalsFrame);
+            const vocalsDetection = detectPitchFromFrame(
+              vocalsFrame,
+              vocalsAnalyser.context.sampleRate,
             );
-
-            // Delta limit proportional to real elapsed time.
-            const dtSec = Math.max(elapsedMs, SAMPLE_INTERVAL_MS) / 1000;
-            const maxSemitonesPerSample = MAX_SEMITONES_PER_SECOND * dtSec;
-
-            smoothedMidi =
-              lastSmoothedPitchRef.current !== null
-                ? limitPitchDelta(
-                    emaMidi,
-                    lastSmoothedPitchRef.current,
-                    maxSemitonesPerSample,
-                  )
-                : emaMidi;
-
-            emaPitchRef.current = emaMidi;
-            lastSmoothedPitchRef.current = smoothedMidi;
-            gapSamplesRef.current = 0;
+            vocalsDisplayMidi = processPitchDetection(
+              vocalsProcessorRef.current,
+              vocalsDetection,
+              elapsedMs,
+            );
           } else {
-            gapSamplesRef.current += 1;
-            if (
-              gapSamplesRef.current <= GAP_HOLD_SAMPLES &&
-              lastSmoothedPitchRef.current !== null
-            ) {
-              smoothedMidi = lastSmoothedPitchRef.current;
-            } else {
-              smoothedMidi = null;
-              emaPitchRef.current = null;
-            }
+            // Keep microphone analysis active even when vocals waveform reads
+            // are blocked by Storage CORS.
+            resetPitchTrackProcessorState(vocalsProcessorRef.current);
           }
+
+          const isMicrophoneTrackActive =
+            microphoneEnabledRef.current &&
+            microphoneErrorKey === null &&
+            microphoneAnalyser !== null &&
+            microphoneFrame !== null;
+
+          let microphoneDisplayMidi: number | null = null;
+          if (isMicrophoneTrackActive) {
+            microphoneAnalyser.getFloatTimeDomainData(microphoneFrame);
+            const microphoneDetection = detectPitchFromFrame(
+              microphoneFrame,
+              microphoneAnalyser.context.sampleRate,
+            );
+            microphoneDisplayMidi = processPitchDetection(
+              microphoneProcessorRef.current,
+              microphoneDetection,
+              elapsedMs,
+            );
+          } else {
+            resetPitchTrackProcessorState(microphoneProcessorRef.current);
+          }
+
+          const axisReferenceMidi = vocalsDisplayMidi ?? microphoneDisplayMidi;
 
           // Dynamic vertical axis recentering.
-          if (smoothedMidi !== null && isDynamicAxis) {
+          if (axisReferenceMidi !== null && isDynamicAxis) {
             const { minCenter, maxCenter } = getCenterBounds(
               visibleRangeSemitones,
             );
@@ -942,12 +1193,14 @@ export function SingingPracticeDialog({
             const lowerBoundary =
               centerMidiRef.current - visibleRangeSemitones / 2;
 
-            if (smoothedMidi > upperBoundary - hysteresisMargin) {
+            if (axisReferenceMidi > upperBoundary - hysteresisMargin) {
               centerMidiRef.current =
-                smoothedMidi - (visibleRangeSemitones / 2 - hysteresisMargin);
-            } else if (smoothedMidi < lowerBoundary + hysteresisMargin) {
+                axisReferenceMidi -
+                (visibleRangeSemitones / 2 - hysteresisMargin);
+            } else if (axisReferenceMidi < lowerBoundary + hysteresisMargin) {
               centerMidiRef.current =
-                smoothedMidi + (visibleRangeSemitones / 2 - hysteresisMargin);
+                axisReferenceMidi +
+                (visibleRangeSemitones / 2 - hysteresisMargin);
             }
 
             centerMidiRef.current = clamp(
@@ -957,41 +1210,32 @@ export function SingingPracticeDialog({
             );
           }
 
-          // Sticky deadband plus cents quantization for stable rendering.
-          let displayMidi: number | null = null;
-          if (smoothedMidi !== null) {
-            const nearestMidi = Math.round(smoothedMidi);
-            let cents = (smoothedMidi - nearestMidi) * 100;
-            if (lastDisplayCentsRef.current !== null) {
-              const deltaCents = cents - lastDisplayCentsRef.current;
-              if (Math.abs(deltaCents) < STICKY_CENTS_DEADBAND) {
-                cents = lastDisplayCentsRef.current;
-              }
-            }
-            // Quantize cents in fixed 5-cent increments.
-            cents =
-              Math.round(cents / CENTS_QUANTIZATION_STEP) *
-              CENTS_QUANTIZATION_STEP;
-            lastDisplayCentsRef.current = cents;
-
-            displayMidi = nearestMidi + cents / 100;
-
-            setReadout({
-              noteLabel: midiToNoteLabel(displayMidi),
-            });
-          } else {
-            setReadout({ noteLabel: null });
-            lastDisplayCentsRef.current = null;
-          }
-
           // Store display pitch in history for steadier curve rendering.
-          pointsRef.current.push({
+          vocalsPointsRef.current.push({
             time: audioElement.currentTime,
-            midi: displayMidi,
+            midi: vocalsDisplayMidi,
+          });
+          microphonePointsRef.current.push({
+            time: audioElement.currentTime,
+            midi: isMicrophoneTrackActive ? microphoneDisplayMidi : null,
+          });
+
+          setReadout({
+            vocalsNoteLabel:
+              vocalsDisplayMidi !== null
+                ? midiToNoteLabel(vocalsDisplayMidi)
+                : null,
+            microphoneNoteLabel:
+              isMicrophoneTrackActive && microphoneDisplayMidi !== null
+                ? midiToNoteLabel(microphoneDisplayMidi)
+                : null,
           });
 
           const minHistoryTime = audioElement.currentTime - windowSeconds * 1.5;
-          pointsRef.current = pointsRef.current.filter(
+          vocalsPointsRef.current = vocalsPointsRef.current.filter(
+            (point) => point.time >= minHistoryTime,
+          );
+          microphonePointsRef.current = microphonePointsRef.current.filter(
             (point) => point.time >= minHistoryTime,
           );
         }
@@ -1000,7 +1244,8 @@ export function SingingPracticeDialog({
       if (canvas && audioElement) {
         drawPracticeCanvas(
           canvas,
-          pointsRef.current,
+          vocalsPointsRef.current,
+          microphonePointsRef.current,
           audioElement.currentTime,
           centerMidiRef.current,
           windowSeconds,
@@ -1029,11 +1274,29 @@ export function SingingPracticeDialog({
     analysisSourceKey,
     isAnalysisBlockedByCors,
     isPracticePlaying,
+    isMicrophoneEnabled,
+    microphoneErrorKey,
   ]);
 
   const statusLabel = useMemo((): string => {
     if (isAnalysisBlockedByCors) {
       return t('status.corsBlocked');
+    }
+
+    if (isMicrophoneUnavailable) {
+      if (microphoneErrorKey === 'denied') {
+        return t('status.microphone.denied');
+      }
+
+      if (microphoneErrorKey === 'unsupported') {
+        return t('status.microphone.unsupported');
+      }
+
+      return t('status.microphone.unavailable');
+    }
+
+    if (isMicrophoneEnabled && !isMicrophoneReady) {
+      return t('status.microphone.connecting');
     }
 
     if (!isAudioLoaded) {
@@ -1044,18 +1307,38 @@ export function SingingPracticeDialog({
       return t('status.waitingPlayback');
     }
 
-    if (readout.noteLabel === null) {
+    if (readout.vocalsNoteLabel === null) {
       return t('status.unvoiced');
     }
 
     return t('status.analyzing');
   }, [
     isAnalysisBlockedByCors,
+    isMicrophoneUnavailable,
+    isMicrophoneEnabled,
+    isMicrophoneReady,
+    microphoneErrorKey,
     isAudioLoaded,
     isPracticePlaying,
-    readout.noteLabel,
+    readout.vocalsNoteLabel,
     t,
   ]);
+
+  const microphoneAlertMessage = useMemo((): string | null => {
+    if (!isMicrophoneUnavailable || microphoneErrorKey === null) {
+      return null;
+    }
+
+    if (microphoneErrorKey === 'denied') {
+      return t('microphone.denied');
+    }
+
+    if (microphoneErrorKey === 'unsupported') {
+      return t('microphone.unsupported');
+    }
+
+    return t('microphone.unavailable');
+  }, [isMicrophoneUnavailable, microphoneErrorKey, t]);
 
   const handleSeekBy = (deltaSec: number): void => {
     const audioElement = audioRef.current;
@@ -1085,22 +1368,26 @@ export function SingingPracticeDialog({
       // (target - 0.5s buffer … from) so the old curve doesn't overlap the new
       // one when the playhead replays that segment.
       const clearFrom = Math.max(0, target - 0.5);
-      pointsRef.current = pointsRef.current.filter(
+      vocalsPointsRef.current = vocalsPointsRef.current.filter(
+        (point) => point.time < clearFrom,
+      );
+      microphonePointsRef.current = microphonePointsRef.current.filter(
         (point) => point.time < clearFrom,
       );
 
       // Reset smoothing state so the detector starts fresh at the new position.
-      pitchHistoryRef.current = [];
-      emaPitchRef.current = null;
-      lastSmoothedPitchRef.current = null;
-      gapSamplesRef.current = 0;
-      lastDisplayCentsRef.current = null;
-      setReadout({ noteLabel: null });
+      resetPitchTrackProcessorState(vocalsProcessorRef.current);
+      resetPitchTrackProcessorState(microphoneProcessorRef.current);
+      setReadout({
+        vocalsNoteLabel: null,
+        microphoneNoteLabel: null,
+      });
     } else {
       // Forward seek: insert a null sentinel at the departure point so the
       // canvas renderer breaks the line segment instead of drawing a straight
       // line from the last visible note all the way to the next new sample.
-      pointsRef.current.push({ time: from, midi: null });
+      vocalsPointsRef.current.push({ time: from, midi: null });
+      microphonePointsRef.current.push({ time: from, midi: null });
     }
   };
 
@@ -1223,15 +1510,28 @@ export function SingingPracticeDialog({
               </IconButton>
             </Stack>
 
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                {t('currentNoteLabel')}
-              </Typography>
-              <Box sx={{ minWidth: 70, textAlign: 'center' }}>
-                <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                  {readout.noteLabel ?? t('noPitch')}
+            <Stack direction="row" spacing={2} alignItems="center">
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                  {t('currentVocalsNoteLabel')}
                 </Typography>
-              </Box>
+                <Box sx={{ minWidth: 70, textAlign: 'center' }}>
+                  <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                    {readout.vocalsNoteLabel ?? t('noPitch')}
+                  </Typography>
+                </Box>
+              </Stack>
+
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                  {t('currentMicrophoneNoteLabel')}
+                </Typography>
+                <Box sx={{ minWidth: 70, textAlign: 'center' }}>
+                  <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                    {readout.microphoneNoteLabel ?? t('noPitch')}
+                  </Typography>
+                </Box>
+              </Stack>
             </Stack>
           </Stack>
 
@@ -1295,6 +1595,19 @@ export function SingingPracticeDialog({
 
             <Stack direction="row" spacing={1} alignItems="center">
               <Typography variant="body2">
+                {t('controls.microphone')}
+              </Typography>
+              <Switch
+                checked={isMicrophoneEnabled}
+                onChange={(event) =>
+                  setIsMicrophoneEnabled(event.target.checked)
+                }
+                inputProps={{ 'aria-label': t('controls.microphone') }}
+              />
+            </Stack>
+
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Typography variant="body2">
                 {t('controls.dynamicAxis')}
               </Typography>
               <Switch
@@ -1338,6 +1651,20 @@ export function SingingPracticeDialog({
             </Alert>
           ) : null}
 
+          {isMicrophoneUnavailable ? (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              {microphoneAlertMessage}
+            </Alert>
+          ) : null}
+
+          {isMicrophoneEnabled &&
+          !isMicrophoneUnavailable &&
+          !isMicrophoneReady ? (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              {t('microphone.connecting')}
+            </Alert>
+          ) : null}
+
           <Box
             sx={{
               flex: 1,
@@ -1360,6 +1687,36 @@ export function SingingPracticeDialog({
               }}
             />
           </Box>
+
+          <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
+            <Stack direction="row" spacing={0.75} alignItems="center">
+              <Box
+                sx={{
+                  width: 18,
+                  height: 3,
+                  borderRadius: 999,
+                  bgcolor: 'rgba(129, 140, 248, 0.95)',
+                }}
+              />
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                {t('legend.vocals')}
+              </Typography>
+            </Stack>
+
+            <Stack direction="row" spacing={0.75} alignItems="center">
+              <Box
+                sx={{
+                  width: 18,
+                  height: 3,
+                  borderRadius: 999,
+                  bgcolor: 'rgba(34, 197, 94, 0.95)',
+                }}
+              />
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                {t('legend.microphone')}
+              </Typography>
+            </Stack>
+          </Stack>
 
           <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
             {t('controls.verticalScrollHint')}
