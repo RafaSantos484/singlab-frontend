@@ -30,7 +30,7 @@ stateless proxy between the frontend and external AI services.
   - `local`: upload stems directly from client and persist stem paths to Firestore
   - Delete existing stems and re-request separation from another provider
 - Karaoke playback with vocal / instrumental stem toggle
-- Singing Practice Mode with live pitch timeline, 10-second seek controls, hover note inspection, and player-synced playback
+- Singing Practice Mode with dual-track live pitch timeline (vocals + microphone), 10-second seek controls, hover note inspection, and player-synced playback
 - Event-driven audio player state synchronization (responds to media keys)
 - Song deletion with confirmation dialog
 - Lyrics display synchronized with playback (planned)
@@ -198,7 +198,8 @@ origin.
 gcloud storage buckets update gs://<your-storage-bucket> --cors-file=cors.json
 ```
 
-Without this, playback still works but the live pitch chart is unavailable.
+Without this, playback still works and microphone tracking remains available,
+but vocals-stem waveform analysis is unavailable.
 
 ## License
 
