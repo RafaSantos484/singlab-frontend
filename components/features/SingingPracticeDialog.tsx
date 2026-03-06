@@ -21,14 +21,8 @@ import PauseIcon from '@mui/icons-material/Pause';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { useTranslations } from 'next-intl';
 
-import type { Song } from '@/lib/api/types';
-import {
-  requestPracticeInstrumentalEnabled,
-  requestPracticeMode,
-  requestPracticePlaying,
-  subscribeGlobalPlayerSnapshots,
-  type GlobalPlayerSnapshot,
-} from '@/lib/player/practiceSync';
+import type { SeparationStemName, Song } from '@/lib/api/types';
+import { useStorageDownloadUrls } from '@/lib/hooks/useStorageDownloadUrls';
 
 const DEFAULT_WINDOW_SECONDS = 30;
 const DEFAULT_VISIBLE_RANGE_SEMITONES = 12;
@@ -40,6 +34,14 @@ const MIN_FREQUENCY_HZ = 60;
 const MAX_FREQUENCY_HZ = 1100;
 const MIN_VISIBLE_MIDI = 36; // C2
 const MAX_VISIBLE_MIDI = 84; // C6
+const DOWNSAMPLE_FACTOR = 2;
+
+// Smoothing controls for the practice curve.
+const MEDIAN_WINDOW_SIZE = 9;
+const EMA_ALPHA = 0.35;
+const MAX_SEMITONES_PER_SAMPLE = 1.2;
+const GAP_HOLD_SAMPLES = 2;
+const MAX_PITCH_HISTORY_SAMPLES = 32;
 
 interface PitchPoint {
   time: number;
@@ -105,22 +107,76 @@ function midiToNoteLabel(midi: number): string {
   return `${note}${octave}`;
 }
 
+function exponentialMovingAverage(
+  previous: number | null,
+  value: number,
+): number {
+  if (previous === null) {
+    return value;
+  }
+
+  return EMA_ALPHA * value + (1 - EMA_ALPHA) * previous;
+}
+
+function limitPitchDelta(currentValue: number, previousValue: number): number {
+  const delta = currentValue - previousValue;
+  if (Math.abs(delta) <= MAX_SEMITONES_PER_SAMPLE) {
+    return currentValue;
+  }
+
+  return previousValue + Math.sign(delta) * MAX_SEMITONES_PER_SAMPLE;
+}
+
+function appendPitchHistory(history: number[], value: number | null): void {
+  history.push(value ?? Number.NaN);
+
+  if (history.length > MAX_PITCH_HISTORY_SAMPLES) {
+    history.shift();
+  }
+}
+
+function getMedianFromRecentValid(
+  history: number[],
+  windowSize: number,
+): number | null {
+  const recentValid = history
+    .slice(-windowSize)
+    .filter((item) => Number.isFinite(item));
+
+  if (recentValid.length === 0) {
+    return null;
+  }
+
+  recentValid.sort((a, b) => a - b);
+  return recentValid[Math.floor(recentValid.length / 2)] ?? null;
+}
+
 function detectPitchFromFrame(
   frame: Float32Array<ArrayBuffer>,
   sampleRate: number,
 ): number | null {
-  let rms = 0;
-  for (let i = 0; i < frame.length; i += 1) {
-    rms += frame[i] * frame[i];
+  const downsampledLength = Math.floor(frame.length / DOWNSAMPLE_FACTOR);
+  if (downsampledLength < 64) {
+    return null;
   }
-  rms = Math.sqrt(rms / frame.length);
+
+  const downsampled = new Float32Array(downsampledLength);
+  for (let i = 0; i < downsampledLength; i += 1) {
+    downsampled[i] = frame[i * DOWNSAMPLE_FACTOR] ?? 0;
+  }
+
+  let rms = 0;
+  for (let i = 0; i < downsampledLength; i += 1) {
+    rms += downsampled[i] * downsampled[i];
+  }
+  rms = Math.sqrt(rms / downsampledLength);
 
   if (!isFinite(rms) || rms < PITCH_RMS_THRESHOLD) {
     return null;
   }
 
-  const minLag = Math.floor(sampleRate / MAX_FREQUENCY_HZ);
-  const maxLag = Math.floor(sampleRate / MIN_FREQUENCY_HZ);
+  const minLag = Math.floor(sampleRate / MAX_FREQUENCY_HZ / DOWNSAMPLE_FACTOR);
+  const maxLag = Math.floor(sampleRate / MIN_FREQUENCY_HZ / DOWNSAMPLE_FACTOR);
 
   let bestLag = -1;
   let bestCorrelation = 0;
@@ -130,9 +186,9 @@ function detectPitchFromFrame(
     let energyA = 0;
     let energyB = 0;
 
-    for (let i = 0; i < frame.length - lag; i += 1) {
-      const a = frame[i];
-      const b = frame[i + lag];
+    for (let i = 0; i < downsampledLength - lag; i += 1) {
+      const a = downsampled[i];
+      const b = downsampled[i + lag];
       sum += a * b;
       energyA += a * a;
       energyB += b * b;
@@ -151,7 +207,7 @@ function detectPitchFromFrame(
     return null;
   }
 
-  const frequency = sampleRate / bestLag;
+  const frequency = sampleRate / DOWNSAMPLE_FACTOR / bestLag;
   if (
     !isFinite(frequency) ||
     frequency < MIN_FREQUENCY_HZ ||
@@ -278,7 +334,6 @@ export function SingingPracticeDialog({
 }: SingingPracticeDialogProps): React.ReactElement {
   const t = useTranslations('Practice');
 
-  const [snapshot, setSnapshot] = useState<GlobalPlayerSnapshot | null>(null);
   const [windowSeconds, setWindowSeconds] = useState<number>(
     DEFAULT_WINDOW_SECONDS,
   );
@@ -293,39 +348,62 @@ export function SingingPracticeDialog({
     noteLabel: null,
     cents: null,
   });
+  const [isAudioLoaded, setIsAudioLoaded] = useState(false);
   const [blockedSourceKey, setBlockedSourceKey] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const backingAudioRefs = useRef<HTMLAudioElement[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const backingGainRef = useRef<GainNode | null>(null);
   const frameRef = useRef<Float32Array<ArrayBuffer> | null>(null);
   const pointsRef = useRef<PitchPoint[]>([]);
   const centerMidiRef = useRef(60);
   const lastSampleAtRef = useRef(0);
-  const snapshotRef = useRef<GlobalPlayerSnapshot | null>(null);
+  const pitchHistoryRef = useRef<number[]>([]);
+  const emaPitchRef = useRef<number | null>(null);
+  const lastSmoothedPitchRef = useRef<number | null>(null);
+  const gapSamplesRef = useRef(0);
+  const instrumentalEnabledRef = useRef(isInstrumentalEnabled);
+
+  const stemPaths = useMemo(
+    () => song.separatedSongInfo?.stems?.paths ?? null,
+    [song.separatedSongInfo?.stems?.paths],
+  );
+
+  const { urls: stemUrls } = useStorageDownloadUrls(stemPaths);
+
+  const resolvedVocalsUrl = useMemo(
+    () => vocalsUrl ?? stemUrls.vocals ?? null,
+    [vocalsUrl, stemUrls.vocals],
+  );
+
+  const backingStemUrls = useMemo(
+    () =>
+      (Object.entries(stemUrls) as Array<[SeparationStemName, string]>).reduce<
+        string[]
+      >((acc, [stem, url]) => {
+        if (!url || stem === 'vocals') {
+          return acc;
+        }
+
+        acc.push(url);
+        return acc;
+      }, []),
+    [stemUrls],
+  );
 
   const analysisSourceKey = useMemo((): string | null => {
-    if (!vocalsUrl || !isEligible || !open) {
+    if (!resolvedVocalsUrl || !isEligible || !open) {
       return null;
     }
 
-    return `${song.id}|${vocalsUrl}`;
-  }, [isEligible, open, song.id, vocalsUrl]);
+    return `${song.id}|${resolvedVocalsUrl}|${backingStemUrls.join('|')}`;
+  }, [backingStemUrls, isEligible, open, resolvedVocalsUrl, song.id]);
 
   const isAnalysisBlockedByCors =
     analysisSourceKey !== null && blockedSourceKey === analysisSourceKey;
-
-  useEffect(() => {
-    const unsubscribe = subscribeGlobalPlayerSnapshots((nextSnapshot) => {
-      if (nextSnapshot.songId !== song.id) return;
-      setSnapshot(nextSnapshot);
-      setIsPracticePlaying(nextSnapshot.isPlaying);
-      snapshotRef.current = nextSnapshot;
-    });
-
-    return unsubscribe;
-  }, [song.id]);
 
   useEffect(() => {
     if (!open || !isEligible) {
@@ -335,31 +413,12 @@ export function SingingPracticeDialog({
     const { minCenter, maxCenter } = getCenterBounds(visibleRangeSemitones);
     centerMidiRef.current = clamp(centerMidiRef.current, minCenter, maxCenter);
     pointsRef.current = [];
+    pitchHistoryRef.current = [];
+    emaPitchRef.current = null;
+    lastSmoothedPitchRef.current = null;
+    gapSamplesRef.current = 0;
     lastSampleAtRef.current = 0;
-
-    requestPracticeMode(song.id);
-  }, [open, isEligible, song.id, visibleRangeSemitones]);
-
-  useEffect(() => {
-    if (!open || !isEligible || !snapshot) {
-      return;
-    }
-
-    // Apply persisted external params whenever the player confirms separated mode.
-    if (snapshot.songId === song.id && snapshot.mode === 'separated') {
-      requestPracticeInstrumentalEnabled(song.id, isInstrumentalEnabled);
-      requestPracticePlaying(song.id, isPracticePlaying);
-    }
-  }, [
-    open,
-    isEligible,
-    snapshot,
-    snapshot?.songId,
-    snapshot?.mode,
-    song.id,
-    isInstrumentalEnabled,
-    isPracticePlaying,
-  ]);
+  }, [open, isEligible, visibleRangeSemitones]);
 
   useEffect(() => {
     if (!open) {
@@ -415,71 +474,50 @@ export function SingingPracticeDialog({
   }, [visibleRangeSemitones]);
 
   useEffect(() => {
-    if (!open || !isEligible) {
+    if (!open || !resolvedVocalsUrl || !isEligible) {
       return;
     }
 
-    requestPracticeInstrumentalEnabled(song.id, isInstrumentalEnabled);
-  }, [open, isEligible, isInstrumentalEnabled, song.id]);
+    const createAudioElement = (src: string): HTMLAudioElement => {
+      const element = new Audio();
+      element.crossOrigin = 'anonymous';
+      element.src = src;
+      element.preload = 'auto';
+      element.muted = false;
+      element.volume = 1;
+      element.setAttribute('playsinline', 'true');
+      return element;
+    };
 
-  useEffect(() => {
-    if (!open || !isEligible || !snapshot) {
-      return;
-    }
+    const audioElement = createAudioElement(resolvedVocalsUrl);
+    const backingElements = backingStemUrls.map((url) =>
+      createAudioElement(url),
+    );
 
-    if (snapshot.mode !== 'separated') {
-      requestPracticeMode(song.id);
-    }
-  }, [open, isEligible, snapshot, song.id]);
-
-  useEffect(() => {
-    if (!open || !isEligible || !snapshot) {
-      return;
-    }
-
-    if (snapshot.songId !== song.id) {
-      return;
-    }
-
-    requestPracticeInstrumentalEnabled(song.id, isInstrumentalEnabled);
-    requestPracticePlaying(song.id, isPracticePlaying);
-  }, [
-    open,
-    isEligible,
-    snapshot,
-    song.id,
-    isInstrumentalEnabled,
-    isPracticePlaying,
-  ]);
-
-  useEffect(() => {
-    if (!open || !vocalsUrl || !isEligible) {
-      return;
-    }
-
-    const audioElement = new Audio();
-    audioElement.crossOrigin = 'anonymous';
-    audioElement.src = vocalsUrl;
-    audioElement.preload = 'auto';
-    // Keep media element at normal gain so the analyser receives signal.
-    // Silence is handled by the Web Audio graph via silentGain.
-    audioElement.muted = false;
-    audioElement.volume = 1;
-    audioElement.setAttribute('playsinline', 'true');
+    // Keep media element at normal gain so analyser and monitor output
+    // always receive the same signal from the source.
     audioRef.current = audioElement;
+    backingAudioRefs.current = backingElements;
 
     const context = new AudioContext();
     const analyser = context.createAnalyser();
     analyser.fftSize = 2048;
     analyser.smoothingTimeConstant = 0.1;
 
-    const source = context.createMediaElementSource(audioElement);
-    const silentGain = context.createGain();
-    silentGain.gain.value = 0;
+    const vocalsSource = context.createMediaElementSource(audioElement);
+    const backingGain = context.createGain();
+    backingGain.gain.value = instrumentalEnabledRef.current ? 1 : 0;
 
-    source.connect(analyser);
-    analyser.connect(silentGain);
-    silentGain.connect(context.destination);
+    const backingSources = backingElements.map((element) =>
+      context.createMediaElementSource(element),
+    );
+
+    vocalsSource.connect(analyser);
+    vocalsSource.connect(context.destination);
+    backingSources.forEach((source) => {
+      source.connect(backingGain);
+    });
+    backingGain.connect(context.destination);
 
     const handleAudioError = (): void => {
       if (analysisSourceKey !== null) {
@@ -491,13 +529,23 @@ export function SingingPracticeDialog({
       setBlockedSourceKey((currentKey) =>
         currentKey === analysisSourceKey ? null : currentKey,
       );
+      setIsAudioLoaded(true);
+    };
+
+    const handleEnded = (): void => {
+      setIsPracticePlaying(false);
+      backingElements.forEach((element) => {
+        element.pause();
+      });
     };
 
     audioElement.addEventListener('error', handleAudioError);
     audioElement.addEventListener('canplay', handleCanPlay);
+    audioElement.addEventListener('ended', handleEnded);
 
     audioContextRef.current = context;
     analyserRef.current = analyser;
+    backingGainRef.current = backingGain;
     frameRef.current = new Float32Array(
       analyser.fftSize,
     ) as Float32Array<ArrayBuffer>;
@@ -505,53 +553,74 @@ export function SingingPracticeDialog({
     return () => {
       audioElement.removeEventListener('error', handleAudioError);
       audioElement.removeEventListener('canplay', handleCanPlay);
+      audioElement.removeEventListener('ended', handleEnded);
       audioElement.pause();
       audioElement.removeAttribute('src');
+      backingElements.forEach((element) => {
+        element.pause();
+        element.removeAttribute('src');
+      });
+
       try {
         audioElement.load();
       } catch {
         // no-op
       }
 
+      backingElements.forEach((element) => {
+        try {
+          element.load();
+        } catch {
+          // no-op
+        }
+      });
+
       void context.close();
 
       analyserRef.current = null;
+      backingGainRef.current = null;
       frameRef.current = null;
       audioRef.current = null;
+      backingAudioRefs.current = [];
       audioContextRef.current = null;
       pointsRef.current = [];
+      pitchHistoryRef.current = [];
+      emaPitchRef.current = null;
+      lastSmoothedPitchRef.current = null;
+      gapSamplesRef.current = 0;
       setReadout({ noteLabel: null, cents: null });
       centerMidiRef.current = 60;
+      setIsAudioLoaded(false);
     };
-  }, [analysisSourceKey, open, vocalsUrl, isEligible]);
+  }, [analysisSourceKey, open, resolvedVocalsUrl, isEligible, backingStemUrls]);
 
   useEffect(() => {
-    if (!open || !isEligible || !vocalsUrl) {
+    instrumentalEnabledRef.current = isInstrumentalEnabled;
+
+    const backingGain = backingGainRef.current;
+    if (!backingGain) {
+      return;
+    }
+
+    backingGain.gain.value = isInstrumentalEnabled ? 1 : 0;
+  }, [isInstrumentalEnabled]);
+
+  useEffect(() => {
+    if (!open || !isEligible || !resolvedVocalsUrl) {
       return;
     }
 
     let animationFrameId = 0;
 
     const syncAndDraw = (): void => {
-      const currentSnapshot = snapshotRef.current;
       const audioElement = audioRef.current;
+      const backingElements = backingAudioRefs.current;
       const analyser = analyserRef.current;
       const frame = frameRef.current;
       const canvas = canvasRef.current;
 
-      if (currentSnapshot && audioElement) {
-        const drift = Math.abs(
-          audioElement.currentTime - currentSnapshot.currentTime,
-        );
-        if (drift > 0.08) {
-          try {
-            audioElement.currentTime = currentSnapshot.currentTime;
-          } catch {
-            // no-op
-          }
-        }
-
-        if (currentSnapshot.isPlaying) {
+      if (audioElement) {
+        if (isPracticePlaying) {
           const context = audioContextRef.current;
           if (context && context.state === 'suspended') {
             void context.resume();
@@ -560,12 +629,36 @@ export function SingingPracticeDialog({
           if (audioElement.paused) {
             void audioElement.play().catch(() => undefined);
           }
+
+          backingElements.forEach((element) => {
+            if (element.paused) {
+              void element.play().catch(() => undefined);
+            }
+          });
         } else if (!audioElement.paused) {
           audioElement.pause();
+          backingElements.forEach((element) => {
+            if (!element.paused) {
+              element.pause();
+            }
+          });
         }
+
+        backingElements.forEach((element) => {
+          const drift = Math.abs(
+            element.currentTime - audioElement.currentTime,
+          );
+          if (drift > 0.08) {
+            try {
+              element.currentTime = audioElement.currentTime;
+            } catch {
+              // no-op
+            }
+          }
+        });
       }
 
-      if (currentSnapshot && analyser && frame) {
+      if (audioElement && analyser && frame) {
         const now = performance.now();
         if (now - lastSampleAtRef.current >= SAMPLE_INTERVAL_MS) {
           lastSampleAtRef.current = now;
@@ -581,12 +674,46 @@ export function SingingPracticeDialog({
             analyser.context.sampleRate,
           );
 
-          let midi: number | null = null;
-          if (frequency !== null) {
-            midi = frequencyToMidi(frequency);
+          const rawMidi =
+            frequency !== null ? frequencyToMidi(frequency) : null;
+
+          appendPitchHistory(pitchHistoryRef.current, rawMidi);
+
+          const medianMidi = getMedianFromRecentValid(
+            pitchHistoryRef.current,
+            MEDIAN_WINDOW_SIZE,
+          );
+
+          let smoothedMidi: number | null = null;
+
+          if (medianMidi !== null) {
+            const emaMidi = exponentialMovingAverage(
+              emaPitchRef.current,
+              medianMidi,
+            );
+
+            smoothedMidi =
+              lastSmoothedPitchRef.current !== null
+                ? limitPitchDelta(emaMidi, lastSmoothedPitchRef.current)
+                : emaMidi;
+
+            emaPitchRef.current = emaMidi;
+            lastSmoothedPitchRef.current = smoothedMidi;
+            gapSamplesRef.current = 0;
+          } else {
+            gapSamplesRef.current += 1;
+            if (
+              gapSamplesRef.current <= GAP_HOLD_SAMPLES &&
+              lastSmoothedPitchRef.current !== null
+            ) {
+              smoothedMidi = lastSmoothedPitchRef.current;
+            } else {
+              smoothedMidi = null;
+              emaPitchRef.current = null;
+            }
           }
 
-          if (midi !== null && isDynamicAxis) {
+          if (smoothedMidi !== null && isDynamicAxis) {
             const { minCenter, maxCenter } = getCenterBounds(
               visibleRangeSemitones,
             );
@@ -600,12 +727,12 @@ export function SingingPracticeDialog({
             const lowerBoundary =
               centerMidiRef.current - visibleRangeSemitones / 2;
 
-            if (midi > upperBoundary - hysteresisMargin) {
+            if (smoothedMidi > upperBoundary - hysteresisMargin) {
               centerMidiRef.current =
-                midi - (visibleRangeSemitones / 2 - hysteresisMargin);
-            } else if (midi < lowerBoundary + hysteresisMargin) {
+                smoothedMidi - (visibleRangeSemitones / 2 - hysteresisMargin);
+            } else if (smoothedMidi < lowerBoundary + hysteresisMargin) {
               centerMidiRef.current =
-                midi + (visibleRangeSemitones / 2 - hysteresisMargin);
+                smoothedMidi + (visibleRangeSemitones / 2 - hysteresisMargin);
             }
 
             centerMidiRef.current = clamp(
@@ -615,37 +742,34 @@ export function SingingPracticeDialog({
             );
           }
 
-          if (midi !== null) {
-            const nearestMidi = Math.round(midi);
-            const cents = Math.round((midi - nearestMidi) * 100);
+          if (smoothedMidi !== null) {
+            const nearestMidi = Math.round(smoothedMidi);
+            const cents = Math.round((smoothedMidi - nearestMidi) * 100);
             setReadout({
-              noteLabel: midiToNoteLabel(midi),
+              noteLabel: midiToNoteLabel(smoothedMidi),
               cents,
             });
           } else {
             setReadout({ noteLabel: null, cents: null });
           }
 
-          if (currentSnapshot) {
-            pointsRef.current.push({
-              time: currentSnapshot.currentTime,
-              midi,
-            });
+          pointsRef.current.push({
+            time: audioElement.currentTime,
+            midi: smoothedMidi,
+          });
 
-            const minHistoryTime =
-              currentSnapshot.currentTime - windowSeconds * 1.5;
-            pointsRef.current = pointsRef.current.filter(
-              (point) => point.time >= minHistoryTime,
-            );
-          }
+          const minHistoryTime = audioElement.currentTime - windowSeconds * 1.5;
+          pointsRef.current = pointsRef.current.filter(
+            (point) => point.time >= minHistoryTime,
+          );
         }
       }
 
-      if (canvas && currentSnapshot) {
+      if (canvas && audioElement) {
         drawPracticeCanvas(
           canvas,
           pointsRef.current,
-          currentSnapshot.currentTime,
+          audioElement.currentTime,
           centerMidiRef.current,
           windowSeconds,
           visibleRangeSemitones,
@@ -666,11 +790,12 @@ export function SingingPracticeDialog({
     isEligible,
     isDynamicAxis,
     showNoteLabels,
-    vocalsUrl,
+    resolvedVocalsUrl,
     windowSeconds,
     visibleRangeSemitones,
     analysisSourceKey,
     isAnalysisBlockedByCors,
+    isPracticePlaying,
   ]);
 
   const statusLabel = useMemo((): string => {
@@ -678,11 +803,11 @@ export function SingingPracticeDialog({
       return t('status.corsBlocked');
     }
 
-    if (!snapshot || !snapshot.isLoaded) {
+    if (!isAudioLoaded) {
       return t('status.syncing');
     }
 
-    if (!snapshot.isPlaying) {
+    if (!isPracticePlaying) {
       return t('status.waitingPlayback');
     }
 
@@ -691,12 +816,32 @@ export function SingingPracticeDialog({
     }
 
     return t('status.analyzing');
-  }, [isAnalysisBlockedByCors, readout.noteLabel, snapshot, t]);
+  }, [
+    isAnalysisBlockedByCors,
+    isAudioLoaded,
+    isPracticePlaying,
+    readout.noteLabel,
+    t,
+  ]);
 
-  const handleTogglePracticePlayback = (): void => {
+  const handleTogglePracticePlayback = async (): Promise<void> => {
     const nextPlaying = !isPracticePlaying;
     setIsPracticePlaying(nextPlaying);
-    requestPracticePlaying(song.id, nextPlaying);
+
+    const context = audioContextRef.current;
+    const audioElement = audioRef.current;
+
+    try {
+      if (context && context.state === 'suspended') {
+        await context.resume();
+      }
+
+      if (audioElement && nextPlaying && audioElement.paused) {
+        await audioElement.play();
+      }
+    } catch {
+      // no-op
+    }
   };
 
   return (
@@ -885,7 +1030,7 @@ export function SingingPracticeDialog({
             flexDirection: 'column',
           }}
         >
-          {!isEligible || !vocalsUrl ? (
+          {!isEligible || !resolvedVocalsUrl ? (
             <Alert severity="warning" sx={{ mb: 2 }}>
               {t('unavailableMessage')}
             </Alert>
