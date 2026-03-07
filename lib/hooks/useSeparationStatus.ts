@@ -15,7 +15,10 @@ import {
 } from '@/lib/separations';
 import { getFirebaseAuth } from '@/lib/firebase/auth';
 import { updateSeparatedSongInfo } from '@/lib/firebase/songs';
+import { withPendingActivity } from '@/lib/async/pendingActivity';
 import { getStorageDownloadUrl } from '@/lib/storage/getStorageDownloadUrl';
+import { buildRawSongStoragePath } from '@/lib/storage/uploadRawSong';
+import { buildStemStoragePath } from '@/lib/storage/uploadSeparationStems';
 import { useStorageDownloadUrls } from './useStorageDownloadUrls';
 
 const POLL_INTERVAL_MS = 1000 * 60; // 1 minute
@@ -71,7 +74,21 @@ export function useSeparationStatus(song: Song): UseSeparationStatusResult {
     urls: stemUrls,
     isLoading: isResolvingStemUrls,
     error: stemUrlError,
-  } = useStorageDownloadUrls(separation?.stems?.paths ?? null);
+  } = useStorageDownloadUrls(
+    useMemo(() => {
+      const currentUser = getFirebaseAuth().currentUser;
+      if (!currentUser?.uid || !separation?.stems) {
+        return null;
+      }
+
+      const next: Partial<Record<SeparationStemName, string>> = {};
+      separation.stems.forEach((stem) => {
+        next[stem] = buildStemStoragePath(currentUser.uid, song.id, stem);
+      });
+
+      return next;
+    }, [separation?.stems, song.id]),
+  );
 
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -83,85 +100,93 @@ export function useSeparationStatus(song: Song): UseSeparationStatusResult {
   }, []);
 
   const refreshStatus = useCallback(async (): Promise<void> => {
-    const currentUser = getFirebaseAuth().currentUser;
-    if (!currentUser) return;
-
-    // Need the taskId from the existing separation info
-    const normalized = normalizeSeparationInfo(song.separatedSongInfo);
-    if (!normalized?.taskId) return;
-
-    setIsRefreshing(true);
-    setError(null);
-    try {
-      const providerData = await separationsApi.refreshSeparationStatus(
-        normalized.taskId,
-        normalized.provider,
-      );
-
-      if (providerData) {
-        // Write updated provider data to Firestore
-        await updateSeparatedSongInfo(currentUser.uid, song.id, {
-          provider: normalized.provider,
-          providerData,
-          stems: song.separatedSongInfo?.stems ?? null,
-        });
-      }
-    } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'Failed to refresh separation status';
-      setError(message);
-    } finally {
-      setIsRefreshing(false);
-    }
-  }, [song.id, song.separatedSongInfo]);
-
-  const requestSeparation = useCallback(
-    async (provider?: SeparationProviderName): Promise<void> => {
+    return withPendingActivity(async (): Promise<void> => {
       const currentUser = getFirebaseAuth().currentUser;
-      if (!currentUser) {
-        setError('No authenticated user');
-        return;
-      }
+      if (!currentUser) return;
 
-      // Get a signed URL for the raw audio file
-      if (!song.rawSongInfo?.path) {
-        setError('Song has no audio file');
-        return;
-      }
+      // Need the taskId from the existing separation info
+      const normalized = normalizeSeparationInfo(song.separatedSongInfo);
+      if (!normalized?.taskId) return;
 
-      setIsRequesting(true);
+      setIsRefreshing(true);
       setError(null);
       try {
-        const audioUrl = await getStorageDownloadUrl(song.rawSongInfo.path);
-
-        const providerData = await separationsApi.requestSeparation(
-          audioUrl,
-          song.title,
-          provider,
+        const providerData = await separationsApi.refreshSeparationStatus(
+          normalized.taskId,
+          normalized.provider,
         );
 
         if (providerData) {
-          // Persist provider task data to Firestore
+          // Write updated provider data to Firestore
           await updateSeparatedSongInfo(currentUser.uid, song.id, {
-            provider: provider ?? 'poyo',
+            provider: normalized.provider,
             providerData,
-            stems: null,
+            stems: song.separatedSongInfo?.stems ?? null,
           });
         }
       } catch (err) {
         const message =
           err instanceof Error
             ? err.message
-            : 'Unable to start stem separation';
+            : 'Failed to refresh separation status';
         setError(message);
-        throw new Error(message);
       } finally {
-        setIsRequesting(false);
+        setIsRefreshing(false);
       }
+    });
+  }, [song.id, song.separatedSongInfo]);
+
+  const requestSeparation = useCallback(
+    async (provider?: SeparationProviderName): Promise<void> => {
+      return withPendingActivity(async (): Promise<void> => {
+        const currentUser = getFirebaseAuth().currentUser;
+        if (!currentUser) {
+          setError('No authenticated user');
+          return;
+        }
+
+        // Get a signed URL for the raw audio file
+        if (!song.rawSongInfo?.uploadedAt) {
+          setError('Song has no audio file');
+          return;
+        }
+
+        setIsRequesting(true);
+        setError(null);
+        try {
+          const rawStoragePath = buildRawSongStoragePath(
+            currentUser.uid,
+            song.id,
+          );
+          const audioUrl = await getStorageDownloadUrl(rawStoragePath);
+
+          const providerData = await separationsApi.requestSeparation(
+            audioUrl,
+            song.title,
+            provider,
+          );
+
+          if (providerData) {
+            // Persist provider task data to Firestore
+            await updateSeparatedSongInfo(currentUser.uid, song.id, {
+              provider: provider ?? 'poyo',
+              providerData,
+              stems: null,
+            });
+          }
+        } catch (err) {
+          const message =
+            err instanceof Error
+              ? err.message
+              : 'Unable to start stem separation';
+          setError(message);
+          throw new Error(message);
+        } finally {
+          setIsRequesting(false);
+        }
+      });
     },
-    [song.id, song.title, song.rawSongInfo?.path],
+    [song.id, song.title, song.rawSongInfo?.uploadedAt],
   );
 
   // Poll while task is in-progress

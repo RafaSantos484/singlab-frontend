@@ -3,7 +3,9 @@
 import { useEffect, useReducer, useRef } from 'react';
 
 import type { Song } from '@/lib/api/types';
+import { getFirebaseAuth } from '@/lib/firebase/auth';
 import { getStorageDownloadUrl } from '@/lib/storage/getStorageDownloadUrl';
+import { buildRawSongStoragePath } from '@/lib/storage/uploadRawSong';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -68,7 +70,11 @@ export function useSongRawUrl(song: Song): UseSongRawUrlResult {
   const refreshingRef = useRef(false);
 
   useEffect(() => {
-    if (!song.rawSongInfo?.path) return;
+    if (!song.rawSongInfo?.uploadedAt) return;
+    const currentUser = getFirebaseAuth().currentUser;
+    if (!currentUser?.uid) return;
+
+    const storagePath = buildRawSongStoragePath(currentUser.uid, song.id);
 
     // Avoid launching a second parallel request for the same song.
     if (refreshingRef.current) return;
@@ -76,7 +82,7 @@ export function useSongRawUrl(song: Song): UseSongRawUrlResult {
     refreshingRef.current = true;
     dispatch({ type: 'START_FETCH' });
 
-    getStorageDownloadUrl(song.rawSongInfo.path)
+    getStorageDownloadUrl(storagePath)
       .then((value) => {
         dispatch({ type: 'SUCCESS', payload: value });
       })
@@ -92,8 +98,8 @@ export function useSongRawUrl(song: Song): UseSongRawUrlResult {
     return () => {
       refreshingRef.current = false;
     };
-    // Re-run when the song or its storage path changes.
-  }, [song.id, song.rawSongInfo?.path]);
+    // Re-run when the song/user identity changes.
+  }, [song.id, song.rawSongInfo?.uploadedAt]);
 
   return state;
 }
