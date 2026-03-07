@@ -1,6 +1,5 @@
 import {
   getAuth,
-  getRedirectResult,
   signInWithEmailAndPassword,
   signInWithPopup,
   signInWithRedirect,
