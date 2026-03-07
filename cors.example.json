@@ -1,0 +1,13 @@
+[
+  {
+    "origin": ["http://localhost:3000", "https://YOUR-PROD-DOMAIN.com"],
+    "method": ["GET", "HEAD", "OPTIONS"],
+    "responseHeader": [
+      "Content-Type",
+      "Content-Length",
+      "Accept-Ranges",
+      "Content-Range"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]

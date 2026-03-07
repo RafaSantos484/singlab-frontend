@@ -182,6 +182,10 @@ import type {
 } from '@/lib/api/types';
 import { useSongRawUrl } from '@/lib/hooks/useSongRawUrl';
 import { useStorageDownloadUrls } from '@/lib/hooks/useStorageDownloadUrls';
+import {
+  emitGlobalPlayerSnapshot,
+  requestPracticeDialogOpen,
+} from '@/lib/player/practiceSync';
 import { normalizeSeparationInfo } from '@/lib/separations';
 import { useGlobalState, useGlobalStateDispatch } from '@/lib/store';
 import { SeparationDialog } from './SeparationDialog';
@@ -1195,6 +1199,7 @@ function GlobalPlayerInner({
   song,
 }: GlobalPlayerInnerProps): React.ReactElement {
   const t = useTranslations('Player');
+  const tPractice = useTranslations('Practice');
   const dispatch = useGlobalStateDispatch();
   const { playbackStatus } = useGlobalState();
 
@@ -1215,6 +1220,25 @@ function GlobalPlayerInner({
   const [showSeparationSuccessSnackbar, setShowSeparationSuccessSnackbar] =
     useState(false);
 
+  // Broadcast minimal playback state for practice-related listeners.
+  useEffect(() => {
+    emitGlobalPlayerSnapshot({
+      songId: song.id,
+      mode,
+      isPlaying: player.isPlaying,
+      isLoaded: player.isLoaded,
+      currentTime: player.currentTime,
+      duration: player.duration,
+    });
+  }, [
+    song.id,
+    mode,
+    player.currentTime,
+    player.duration,
+    player.isLoaded,
+    player.isPlaying,
+  ]);
+
   // Separation info needed for the bottom status section
   const separation = useMemo<NormalizedSeparationInfo | null>(
     () => normalizeSeparationInfo(song.separatedSongInfo ?? null),
@@ -1223,7 +1247,7 @@ function GlobalPlayerInner({
   const isSeparationFinished = separation?.status === 'finished';
 
   // Stem availability (for the UI selector and presets)
-  const { availableStems } = useSongStemsUrl(song);
+  const { availableStems, urls: stemUrls } = useSongStemsUrl(song);
 
   const availableOrdered = useMemo<StemKey[]>(
     () => STEM_ORDER.filter((s) => availableStems.includes(s)),
@@ -1234,6 +1258,8 @@ function GlobalPlayerInner({
     isSeparationFinished &&
     availableStems.includes('vocals') &&
     availableStems.length >= 2;
+  const vocalsStemUrl = stemUrls.vocals ?? null;
+  const isPracticeAvailable = hasSeparatedAudio && Boolean(vocalsStemUrl);
 
   // ---------------------------------------------------------------------------
   // Stem enable / disable helpers
@@ -1377,6 +1403,11 @@ function GlobalPlayerInner({
     },
     [t],
   );
+
+  const handleOpenPractice = useCallback((): void => {
+    dispatch({ type: 'PLAYER_STOP' });
+    requestPracticeDialogOpen(song.id);
+  }, [dispatch, song.id]);
 
   // ---------------------------------------------------------------------------
   // Derived UI state
@@ -1523,6 +1554,16 @@ function GlobalPlayerInner({
                 </span>
               </Tooltip>
             </ToggleButtonGroup>
+            {isPracticeAvailable ? (
+              <Button
+                size="small"
+                variant="contained"
+                onClick={handleOpenPractice}
+                aria-label={tPractice('entryAriaLabel')}
+              >
+                {tPractice('entryButton')}
+              </Button>
+            ) : null}
           </Box>
 
           {/* Main transport row */}
