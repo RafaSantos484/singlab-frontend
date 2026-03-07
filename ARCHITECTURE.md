@@ -79,6 +79,10 @@ Components are split into two groups:
           * Form validation for title/author
           * Multi-phase progress UI (converting → uploading → saving)
      - `SongEditDialog` — song metadata editing with validation and error handling.
+     - `SingingPracticeDialog` — synchronized practice experience with
+          dual pitch tracking (vocals stem + user microphone), seek controls,
+          dynamic pitch axis, and graceful fallback when Storage CORS blocks
+          vocals waveform reads.
 
 ### 3. Lib
 
