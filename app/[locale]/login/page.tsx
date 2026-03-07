@@ -307,9 +307,7 @@ export default function LoginPage(): React.ReactElement | null {
               )
             }
           >
-            {googleSubmitting
-              ? t('googleSubmittingButton')
-              : t('googleButton')}
+            {googleSubmitting ? t('googleSubmittingButton') : t('googleButton')}
           </Button>
         </Stack>
 

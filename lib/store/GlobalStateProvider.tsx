@@ -123,35 +123,39 @@ export function GlobalStateProvider({ children }: GlobalStateProviderProps) {
 
     dispatch({ type: 'USER_DOC_LOADING' });
 
-    const unsubUserProfile = onSnapshot(doc(db, 'users', uid), (snap) => {
-      if (!snap.exists()) {
+    const unsubUserProfile = onSnapshot(
+      doc(db, 'users', uid),
+      (snap) => {
+        if (!snap.exists()) {
+          dispatch({ type: 'USER_DOC_MISSING' });
+          return;
+        }
+
+        const data = snap.data();
+        const firestoreName = data['name'];
+        const firestoreEmail = data['email'];
+
+        if (typeof firestoreEmail === 'string' && firestoreEmail.trim()) {
+          dispatch({
+            type: 'AUTH_PROFILE_UPDATED',
+            payload: { email: firestoreEmail.trim() },
+          });
+        }
+
+        if (typeof firestoreName === 'string' && firestoreName.trim()) {
+          dispatch({
+            type: 'AUTH_PROFILE_UPDATED',
+            payload: { name: firestoreName.trim() },
+          });
+        }
+
+        dispatch({ type: 'USER_DOC_EXISTS' });
+      },
+      () => {
+        // Fail closed for route gating: if read fails, treat as missing profile.
         dispatch({ type: 'USER_DOC_MISSING' });
-        return;
-      }
-
-      const data = snap.data();
-      const firestoreName = data['name'];
-      const firestoreEmail = data['email'];
-
-      if (typeof firestoreEmail === 'string' && firestoreEmail.trim()) {
-        dispatch({
-          type: 'AUTH_PROFILE_UPDATED',
-          payload: { email: firestoreEmail.trim() },
-        });
-      }
-
-      if (typeof firestoreName === 'string' && firestoreName.trim()) {
-        dispatch({
-          type: 'AUTH_PROFILE_UPDATED',
-          payload: { name: firestoreName.trim() },
-        });
-      }
-
-      dispatch({ type: 'USER_DOC_EXISTS' });
-    }, () => {
-      // Fail closed for route gating: if read fails, treat as missing profile.
-      dispatch({ type: 'USER_DOC_MISSING' });
-    });
+      },
+    );
 
     return () => {
       unsubUserProfile();

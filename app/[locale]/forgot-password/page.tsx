@@ -44,10 +44,11 @@ export default function ForgotPasswordPage(): React.ReactElement | null {
   const [isSuccess, setIsSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const isFormValid =
-    email.length > 0 && Object.keys(fieldErrors).length === 0;
+  const isFormValid = email.length > 0 && Object.keys(fieldErrors).length === 0;
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+  async function handleSubmit(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
     event.preventDefault();
 
     setError(null);
