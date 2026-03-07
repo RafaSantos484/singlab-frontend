@@ -35,6 +35,8 @@
       "forgotPassword": "Esqueceu a senha?",
       "submitButton": "Entrar",
       "submittingButton": "Entrando…",
+      "googleButton": "Continuar com Google",
+      "googleSubmittingButton": "Entrando com Google…",
       "createAccount": "Criar nova conta",
       "emailVerifiedSuccess": "Conta criada! Verifique sua caixa de entrada e confirme seu e-mail antes de entrar.",
       "errors": {
@@ -43,14 +45,12 @@
         "accountDisabled": "Esta conta foi desativada.",
         "tooManyRequests": "Muitas tentativas com falha. Tente novamente mais tarde.",
         "networkError": "Erro de rede. Verifique sua conexão e tente novamente.",
+        "googlePopupClosed": "O login com Google foi cancelado.",
         "unexpected": "Ocorreu um erro inesperado. Por favor, tente novamente."
       }
     },
     "register": {
       "subtitle": "Crie sua conta",
-      "nameLabel": "Nome completo",
-      "namePlaceholder": "Maria Silva",
-      "nameAriaLabel": "Nome completo",
       "emailLabel": "E-mail",
       "emailPlaceholder": "voce@exemplo.com",
       "emailAriaLabel": "Endereço de e-mail",
@@ -66,6 +66,35 @@
       "backToSignIn": "Já tem uma conta? Entrar",
       "errors": {
         "emailAlreadyInUse": "Este endereço de e-mail já está em uso.",
+        "unexpected": "Ocorreu um erro inesperado. Por favor, tente novamente."
+      }
+    },
+    "completeProfile": {
+      "subtitle": "Complete seu perfil",
+      "emailLabel": "E-mail",
+      "emailAriaLabel": "Endereço de e-mail",
+      "nameLabel": "Nome completo",
+      "namePlaceholder": "Maria Silva",
+      "nameAriaLabel": "Nome completo",
+      "submitButton": "Continuar",
+      "submittingButton": "Salvando perfil…",
+      "errors": {
+        "unexpected": "Ocorreu um erro inesperado. Por favor, tente novamente."
+      }
+    },
+    "forgotPassword": {
+      "subtitle": "Redefina sua senha",
+      "emailLabel": "E-mail",
+      "emailPlaceholder": "voce@exemplo.com",
+      "emailAriaLabel": "Endereço de e-mail",
+      "submitButton": "Enviar link de redefinição",
+      "submittingButton": "Enviando link de redefinição…",
+      "backToSignIn": "Voltar para entrar",
+      "successMessage": "Se este e-mail existir, um link de redefinição foi enviado.",
+      "errors": {
+        "invalidEmail": "Endereço de e-mail inválido.",
+        "tooManyRequests": "Muitas solicitações. Tente novamente mais tarde.",
+        "networkError": "Erro de rede. Verifique sua conexão e tente novamente.",
         "unexpected": "Ocorreu um erro inesperado. Por favor, tente novamente."
       }
     }
