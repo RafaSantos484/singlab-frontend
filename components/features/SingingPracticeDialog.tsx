@@ -720,7 +720,7 @@ export function SingingPracticeDialog({
     });
 
     return next;
-  }, [song.id, song.separatedSongInfo?.stems]);
+  }, [song.id, song.separatedSongInfo]);
 
   const { urls: stemUrls } = useStorageDownloadUrls(stemPaths);
 
