@@ -6,9 +6,9 @@
  * Upload flow:
  * 1. Validate the audio file (size and type via MIME + extension fallback).
  * 2. Extract metadata (title, artist) from audio tags (optional).
- * 3. Convert audio/video to MP3 using FFmpeg WASM (fast path if already MP3).
+ * 3. Normalize audio/video to canonical AAC/M4A using FFmpeg WASM.
  * 4. Generate a stable `songId` (Firestore doc ID).
- * 5. Upload the MP3 file to Firebase Storage at `users/:userId/songs/:songId/raw.mp3`.
+ * 5. Upload the normalized file to Storage at `users/:userId/songs/:songId/raw.m4a`.
  * 6. Create the song document directly in Firestore with metadata and storage path.
  *
  * If the Firestore write fails after Storage upload, the file is
@@ -16,6 +16,7 @@
  */
 
 import { getFirebaseAuth } from '@/lib/firebase/auth';
+import { withPendingActivity } from '@/lib/async/pendingActivity';
 import {
   uploadRawSong,
   deleteRawSong,
@@ -31,7 +32,7 @@ const MAX_FILE_SIZE_MB = 100;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 // Supported audio/video formats from FFmpeg
-// All these formats are converted to MP3 before uploading.
+// All these formats are normalized before uploading.
 const SUPPORTED_AUDIO_FORMATS = [
   'audio/mpeg', // .mp3
   'audio/mp3', // .mp3 (alternative MIME)
@@ -73,8 +74,8 @@ const SUPPORTED_EXTENSIONS = [
 
 /**
  * Describes the current phase of the song creation process:
- * - `'converting'`  – audio/video file is being converted to MP3.
- * - `'uploading'`   – MP3 file is being uploaded to Firebase Storage.
+ * - `'converting'`  – audio/video file is being normalized.
+ * - `'uploading'`   – normalized file is being uploaded to Firebase Storage.
  * - `'saving'`      – file upload is complete; song document is being
  *                     written to Firestore.
  */
@@ -175,7 +176,7 @@ export interface CreateSongResult {
 
 /**
  * Creates a new song using a two-step process:
- * 1. Uploads the MP3 file to Firebase Storage (caller must convert beforehand).
+ * 1. Uploads the normalized audio file to Storage (caller must normalize beforehand).
  * 2. Creates the song document directly in Firestore with metadata.
  *
  * The `onPhaseChange` callback receives `'uploading'` before the Storage
@@ -189,9 +190,9 @@ export interface CreateSongResult {
  * **Note:** The caller (e.g., `SongCreateDialog`) is responsible for:
  * - File format validation (MIME type + extension fallback)
  * - Audio metadata extraction (title, artist from tags)
- * - MP3 conversion using FFmpeg (via `convertToMp3`)
+ * - Canonical normalization using FFmpeg (via `normalizeAudioFile`)
  *
- * @param options - MP3 file, metadata (title, author) and optional phase callback.
+ * @param options - Normalized file, metadata (title, author) and optional phase callback.
  * @returns The created song result.
  * @throws {InvalidFileError} If client-side file validation fails.
  * @throws {StorageUploadError} If the Firebase Storage upload step fails.
@@ -200,54 +201,54 @@ export interface CreateSongResult {
 export async function createSong(
   options: CreateSongOptions,
 ): Promise<CreateSongResult> {
-  const { title, author, file, onPhaseChange } = options;
+  return withPendingActivity(async (): Promise<CreateSongResult> => {
+    const { title, author, file, onPhaseChange } = options;
 
-  // 1. Validate file before doing anything async.
-  validateSongFile(file);
+    // 1. Validate file before doing anything async.
+    validateSongFile(file);
 
-  // 2. Resolve the current user — required to build the storage path.
-  const currentUser = getFirebaseAuth().currentUser;
-  if (!currentUser) {
-    throw new Error('No authenticated user');
-  }
-  const userId = currentUser.uid;
+    // 2. Resolve the current user — required to build the storage path.
+    const currentUser = getFirebaseAuth().currentUser;
+    if (!currentUser) {
+      throw new Error('No authenticated user');
+    }
+    const userId = currentUser.uid;
 
-  // 3. Generate a stable songId that matches the storage path.
-  const songId = generateSongId(userId);
+    // 3. Generate a stable songId that matches the storage path.
+    const songId = generateSongId(userId);
 
-  // 4. Upload the raw audio file to Storage.
-  onPhaseChange?.('uploading');
-  let storagePath: string;
-  try {
-    storagePath = buildRawSongStoragePath(userId, songId);
-    await uploadRawSong(userId, songId, file);
-  } catch (err) {
-    const message =
-      err instanceof Error ? err.message : 'Unknown storage error';
-    throw new StorageUploadError(message);
-  }
-
-  // 5. Create the song document directly in Firestore.
-  onPhaseChange?.('saving');
-  try {
-    await createSongDoc(userId, songId, title, author, storagePath);
-
-    return { songId, title, author };
-  } catch (err) {
-    // Firestore write failed — rollback the Storage upload to avoid orphaned files.
+    // 4. Upload the raw audio file to Storage.
+    onPhaseChange?.('uploading');
     try {
-      await deleteRawSong(userId, songId);
-    } catch (rollbackErr) {
-      const rollbackMsg =
-        rollbackErr instanceof Error ? rollbackErr.message : 'Unknown error';
-      console.error(
-        `Failed to rollback storage upload for song ${songId}: ${rollbackMsg}`,
-      );
+      await uploadRawSong(userId, songId, file);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Unknown storage error';
+      throw new StorageUploadError(message);
     }
 
-    // Re-throw the original error.
-    throw err;
-  }
+    // 5. Create the song document directly in Firestore.
+    onPhaseChange?.('saving');
+    try {
+      await createSongDoc(userId, songId, title, author);
+
+      return { songId, title, author };
+    } catch (err) {
+      // Firestore write failed — rollback the Storage upload to avoid orphaned files.
+      try {
+        await deleteRawSong(userId, songId);
+      } catch (rollbackErr) {
+        const rollbackMsg =
+          rollbackErr instanceof Error ? rollbackErr.message : 'Unknown error';
+        console.error(
+          `Failed to rollback storage upload for song ${songId}: ${rollbackMsg}`,
+        );
+      }
+
+      // Re-throw the original error.
+      throw err;
+    }
+  });
 }
 
 /**
