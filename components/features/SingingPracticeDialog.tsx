@@ -537,12 +537,12 @@ function drawPracticeCanvas(
       continue;
     }
 
-      const x = xFromTime(point.time);
-      const heightVal = height;
-      context.beginPath();
-      context.moveTo(x, heightVal - 12);
-      context.lineTo(x, heightVal - 2);
-      context.stroke();
+    const x = xFromTime(point.time);
+    const heightVal = height;
+    context.beginPath();
+    context.moveTo(x, heightVal - 12);
+    context.lineTo(x, heightVal - 2);
+    context.stroke();
   }
 
   // Time cursor.
@@ -706,7 +706,9 @@ export function SingingPracticeDialog({
     microphoneNoteLabel: null,
   });
 
-  const stemPaths = useMemo((): Partial<Record<SeparationStemName, string>> | null => {
+  const stemPaths = useMemo((): Partial<
+    Record<SeparationStemName, string>
+  > | null => {
     const currentUser = getFirebaseAuth().currentUser;
     if (!currentUser?.uid || !song.separatedSongInfo?.stems) {
       return null;

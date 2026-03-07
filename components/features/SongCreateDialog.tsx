@@ -221,7 +221,7 @@ export function SongCreateDialog({
 
   /**
    * Handles form submission.
-    * Validates all fields, normalizes the file, creates the song via API,
+   * Validates all fields, normalizes the file, creates the song via API,
    * and handles the response.
    */
   async function handleSubmit(): Promise<void> {

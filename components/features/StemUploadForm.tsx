@@ -262,9 +262,9 @@ export const StemUploadForm = forwardRef<
 
         const uploadSettlements = await Promise.allSettled(uploadPromises);
 
-      // Track results and identify failures.
-      // Use `unknown` type because Promise.allSettled().reason can be any value,
-      // not just Error (e.g., null, string, or custom object).
+        // Track results and identify failures.
+        // Use `unknown` type because Promise.allSettled().reason can be any value,
+        // not just Error (e.g., null, string, or custom object).
         let uploadError: unknown = null;
         uploadSettlements.forEach((settlement) => {
           if (settlement.status === 'fulfilled') {
@@ -278,7 +278,7 @@ export const StemUploadForm = forwardRef<
           }
         });
 
-      // If conversion failed after partial uploads started/completed, rollback.
+        // If conversion failed after partial uploads started/completed, rollback.
         if (conversionError) {
           if (uploadedStemNames.length > 0) {
             try {
@@ -303,7 +303,7 @@ export const StemUploadForm = forwardRef<
           return;
         }
 
-      // If any upload failed, rollback all successful uploads
+        // If any upload failed, rollback all successful uploads
         if (uploadError) {
           if (uploadedStemNames.length > 0) {
             try {
@@ -314,7 +314,9 @@ export const StemUploadForm = forwardRef<
           }
 
           const message =
-            uploadError instanceof Error ? uploadError.message : 'Unknown error';
+            uploadError instanceof Error
+              ? uploadError.message
+              : 'Unknown error';
           setError(
             t('validation.uploadFailed', {
               message,
@@ -331,14 +333,9 @@ export const StemUploadForm = forwardRef<
 
         const availableStems = Object.keys(stemPaths).filter(
           (stem): stem is SeparationStemName =>
-            [
-              'vocals',
-              'guitar',
-              'piano',
-              'bass',
-              'drums',
-              'other',
-            ].includes(stem),
+            ['vocals', 'guitar', 'piano', 'bass', 'drums', 'other'].includes(
+              stem,
+            ),
         );
 
         // Update Firestore with stems

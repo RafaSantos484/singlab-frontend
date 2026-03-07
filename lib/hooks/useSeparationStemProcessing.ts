@@ -69,14 +69,9 @@ export function useSeparationStemProcessing(): {
 
         const stemsData = Object.keys(stemPaths).filter(
           (stem): stem is SeparationStemName =>
-            [
-              'vocals',
-              'bass',
-              'drums',
-              'piano',
-              'guitar',
-              'other',
-            ].includes(stem),
+            ['vocals', 'bass', 'drums', 'piano', 'guitar', 'other'].includes(
+              stem,
+            ),
         );
 
         try {
