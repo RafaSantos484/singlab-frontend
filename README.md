@@ -97,6 +97,8 @@ npm run type-check      # TypeScript check (no emit)
 │   ├── layout.tsx
 │   ├── page.tsx
 │   ├── [locale]/           # Internationalized routes (en-US, pt-BR)
+│   │   ├── complete-profile/
+│   │   ├── forgot-password/
 │   │   ├── login/
 │   │   ├── register/
 │   │   └── dashboard/
@@ -117,7 +119,7 @@ npm run type-check      # TypeScript check (no emit)
 │   ├── storage/            # Firebase Storage upload utilities (raw + stems)
 │   ├── store/              # Global state (Context + useReducer)
 │   ├── theme/              # Central MUI theme configuration
-│   └── validation/         # Zod validation schemas (sign-in, user creation)
+│   └── validation/         # Zod validation schemas (sign-in, register, complete-profile, forgot-password)
 ├── messages/               # i18n translation files (en-US.json, pt-BR.json)
 ├── public/                 # Static assets
 ├── .env.local              # Local environment variables (not committed)

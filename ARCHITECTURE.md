@@ -48,6 +48,9 @@ conventions with server and client components as appropriate.
 |---|---|
 | `/` | Landing / home |
 | `/login` | Firebase authentication page |
+| `/forgot-password` | Password reset request page |
+| `/register` | Account creation page (email + password) |
+| `/complete-profile` | Profile bootstrap page for first sign-in (creates `/users/{uid}`) |
 | `/dashboard` | User's song library with inline audio player |
 
 ### 2. Components
@@ -55,7 +58,8 @@ conventions with server and client components as appropriate.
 Components are split into two groups:
 
 - **`components/layout/`** — Shared page wrappers for route families.
-     - `AuthLayout` — common visual shell for `/login` and `/register`.
+     - `AuthLayout` — common visual shell for auth/profile routes
+       (`/login`, `/register`, `/forgot-password`, `/complete-profile`).
      - `DashboardLayout` — authenticated shell (app bar, profile, sign out).
 - **`components/ui/`** — Branding and decorative primitives (`SingLabLogo`,
      waveform/spectrum decorations).

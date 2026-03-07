@@ -1,9 +1,12 @@
 import {
   getAuth,
   signInWithEmailAndPassword,
+  signInWithPopup,
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
   sendEmailVerification,
+  sendPasswordResetEmail,
+  GoogleAuthProvider,
   type Auth,
   type User,
 } from 'firebase/auth';
@@ -107,6 +110,31 @@ export async function signIn(email: string, password: string): Promise<void> {
 }
 
 /**
+ * Signs in the user with Google OAuth popup.
+ *
+ * Enforces the same email verification policy used by password sign-in:
+ * if the provider user is not verified, the session is immediately cleared
+ * and `EmailNotVerifiedError` is thrown.
+ *
+ * @throws {EmailNotVerifiedError} When the email is not yet verified.
+ * @throws {FirebaseError} On popup/auth errors.
+ */
+export async function signInWithGoogle(): Promise<void> {
+  await withPendingActivity(async () => {
+    const auth = getFirebaseAuth();
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+
+    const { user } = await signInWithPopup(auth, provider);
+
+    if (!user.emailVerified) {
+      await firebaseSignOut(auth);
+      throw new EmailNotVerifiedError();
+    }
+  });
+}
+
+/**
  * Sends a verification email to the given Firebase user.
  * Meant to be called right after the account is created, while the
  * caller still holds a reference to the temporary `User` object.
@@ -151,5 +179,16 @@ export async function signOut(): Promise<void> {
     await firebaseSignOut(getFirebaseAuth());
     // Clear storage URL cache on session end
     storageUrlManager.clearCache();
+  });
+}
+
+/**
+ * Sends a password reset email to the given address.
+ *
+ * @param email - Email address that should receive the reset instructions.
+ */
+export async function sendPasswordReset(email: string): Promise<void> {
+  await withPendingActivity(async () => {
+    await sendPasswordResetEmail(getFirebaseAuth(), email);
   });
 }

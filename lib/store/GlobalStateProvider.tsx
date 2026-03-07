@@ -7,6 +7,7 @@ import {
 } from 'firebase/auth';
 import {
   collection,
+  doc,
   onSnapshot,
   type DocumentData,
   type QueryDocumentSnapshot,
@@ -34,7 +35,8 @@ function toAuthUser(user: FirebaseUser): AuthUser {
   return {
     uid: user.uid,
     email: user.email!,
-    displayName: user.displayName!,
+    // Name is sourced from Firestore (/users/{uid}.name), never from Auth displayName.
+    name: user.email ?? '',
     photoURL: user.photoURL,
     emailVerified: user.emailVerified,
   };
@@ -65,7 +67,7 @@ interface GlobalStateProviderProps {
  *
  * Responsibilities:
  * - Subscribes to **Firebase Auth** state changes to track the signed-in user.
- *   User profile data (name, email) comes directly from Auth, not Firestore.
+ *   Identity comes from Auth and display name comes from Firestore profile.
  * - When a user is authenticated, subscribes to a **Firestore real-time
  *   listener** for `/users/{uid}/songs` — the user's song library.
  * - Tears down Firestore listeners automatically on sign-out or unmount.
@@ -109,14 +111,66 @@ export function GlobalStateProvider({ children }: GlobalStateProviderProps) {
   }, []);
 
   // -------------------------------------------------------------------------
-  // 2. Firestore listener for songs — activated only while a user is authenticated
+  // 2. Firestore listener for user profile — keeps `/users/{uid}.name` in sync
+  // -------------------------------------------------------------------------
+
+  useEffect(() => {
+    const uid = state.userProfile?.uid;
+
+    if (!uid) return;
+
+    const db = getFirebaseFirestore();
+
+    dispatch({ type: 'USER_DOC_LOADING' });
+
+    const unsubUserProfile = onSnapshot(
+      doc(db, 'users', uid),
+      (snap) => {
+        if (!snap.exists()) {
+          dispatch({ type: 'USER_DOC_MISSING' });
+          return;
+        }
+
+        const data = snap.data();
+        const firestoreName = data['name'];
+        const firestoreEmail = data['email'];
+
+        if (typeof firestoreEmail === 'string' && firestoreEmail.trim()) {
+          dispatch({
+            type: 'AUTH_PROFILE_UPDATED',
+            payload: { email: firestoreEmail.trim() },
+          });
+        }
+
+        if (typeof firestoreName === 'string' && firestoreName.trim()) {
+          dispatch({
+            type: 'AUTH_PROFILE_UPDATED',
+            payload: { name: firestoreName.trim() },
+          });
+        }
+
+        dispatch({ type: 'USER_DOC_EXISTS' });
+      },
+      () => {
+        // Fail closed for route gating: if read fails, treat as missing profile.
+        dispatch({ type: 'USER_DOC_MISSING' });
+      },
+    );
+
+    return () => {
+      unsubUserProfile();
+    };
+  }, [state.userProfile?.uid]);
+
+  // -------------------------------------------------------------------------
+  // 3. Firestore listener for songs — activated only while a user is authenticated
   // -------------------------------------------------------------------------
 
   useEffect(() => {
     // uid is the stable key; derived from the auth state set above.
     const uid = state.userProfile?.uid;
 
-    if (!uid) return;
+    if (!uid || state.userDocStatus !== 'exists') return;
 
     const db = getFirebaseFirestore();
 
@@ -140,7 +194,7 @@ export function GlobalStateProvider({ children }: GlobalStateProviderProps) {
       unsubSongs();
     };
     // Re-run only when the authenticated UID changes (login / logout).
-  }, [state.userProfile?.uid]);
+  }, [state.userProfile?.uid, state.userDocStatus]);
 
   // -------------------------------------------------------------------------
   // Render

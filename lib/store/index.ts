@@ -31,6 +31,7 @@ export { useGlobalState, useGlobalStateDispatch } from './GlobalStateContext';
 export type {
   GlobalState,
   AuthStatus,
+  UserDocStatus,
   LoadStatus,
   AuthUser,
   UserProfile,

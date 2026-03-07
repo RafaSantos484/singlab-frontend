@@ -16,7 +16,7 @@ const VALID_PASSWORD_CHARS = /^[\x21-\x7E]+$/;
  */
 export const CreateUserSchema = z.object({
   name: z.string().min(3, 'name.tooShort').max(255, 'name.tooLong'),
-  email: z.string().email('email.invalid').max(255, 'email.tooLong'),
+  email: z.email('email.invalid').max(255, 'email.tooLong'),
   password: z
     .string()
     .min(6, 'password.tooShort')

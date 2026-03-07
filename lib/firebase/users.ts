@@ -11,8 +11,8 @@ import { getFirebaseFirestore } from './firestore';
 /**
  * Creates a user profile document in Firestore.
  *
- * Should be called right after `createUserAccount` to persist the
- * user's display name and metadata alongside the Firebase Auth record.
+ * Should be called after a verified user signs in and completes the
+ * profile setup form.
  *
  * @param uid - Firebase Auth UID returned by `createUserAccount`.
  * @param name - User's display name.

@@ -117,7 +117,7 @@ export default function DashboardPage(): React.ReactElement | null {
   }
 
   const user = userProfile;
-  const displayName = user?.displayName ?? user?.email ?? 'User';
+  const displayName = user?.name ?? user?.email ?? 'User';
 
   return (
     <DashboardLayout>

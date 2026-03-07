@@ -35,6 +35,8 @@
       "forgotPassword": "Forgot password?",
       "submitButton": "Sign in",
       "submittingButton": "Signing in…",
+      "googleButton": "Continue with Google",
+      "googleSubmittingButton": "Signing in with Google…",
       "createAccount": "Create new account",
       "emailVerifiedSuccess": "Account created! Check your inbox and verify your email address before signing in.",
       "errors": {
@@ -43,14 +45,12 @@
         "accountDisabled": "This account has been disabled.",
         "tooManyRequests": "Too many failed attempts. Please try again later.",
         "networkError": "Network error. Check your connection and try again.",
+        "googlePopupClosed": "Google sign-in was cancelled.",
         "unexpected": "An unexpected error occurred. Please try again."
       }
     },
     "register": {
       "subtitle": "Create your account",
-      "nameLabel": "Full Name",
-      "namePlaceholder": "Jane Doe",
-      "nameAriaLabel": "Full name",
       "emailLabel": "Email",
       "emailPlaceholder": "you@example.com",
       "emailAriaLabel": "Email address",
@@ -66,6 +66,35 @@
       "backToSignIn": "Already have an account? Sign in",
       "errors": {
         "emailAlreadyInUse": "This email address is already in use.",
+        "unexpected": "An unexpected error occurred. Please try again."
+      }
+    },
+    "completeProfile": {
+      "subtitle": "Complete your profile",
+      "emailLabel": "Email",
+      "emailAriaLabel": "Email address",
+      "nameLabel": "Full Name",
+      "namePlaceholder": "Jane Doe",
+      "nameAriaLabel": "Full name",
+      "submitButton": "Continue",
+      "submittingButton": "Saving profile…",
+      "errors": {
+        "unexpected": "An unexpected error occurred. Please try again."
+      }
+    },
+    "forgotPassword": {
+      "subtitle": "Reset your password",
+      "emailLabel": "Email",
+      "emailPlaceholder": "you@example.com",
+      "emailAriaLabel": "Email address",
+      "submitButton": "Send reset link",
+      "submittingButton": "Sending reset link…",
+      "backToSignIn": "Back to sign in",
+      "successMessage": "If this email exists, a password reset link has been sent.",
+      "errors": {
+        "invalidEmail": "Invalid email address.",
+        "tooManyRequests": "Too many requests. Please try again later.",
+        "networkError": "Network error. Check your connection and try again.",
         "unexpected": "An unexpected error occurred. Please try again."
       }
     }

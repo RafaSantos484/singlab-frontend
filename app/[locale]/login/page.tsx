@@ -1,7 +1,6 @@
 'use client';
 
 import { type FormEvent, useEffect, useState } from 'react';
-import Link from 'next/link';
 import {
   Box,
   TextField,
@@ -12,14 +11,19 @@ import {
   CircularProgress,
   Typography,
 } from '@mui/material';
+import GoogleIcon from '@mui/icons-material/Google';
 import { useTranslations } from 'next-intl';
 import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
-import { signIn, EmailNotVerifiedError } from '@/lib/firebase';
+import {
+  signIn,
+  signInWithGoogle,
+  EmailNotVerifiedError,
+} from '@/lib/firebase';
 import { type FirebaseError } from 'firebase/app';
 import { AuthLayout } from '@/components/layout';
 import { validateSignIn } from '@/lib/validation/sign-in';
-import { useRouter } from '@/lib/i18n/navigation';
 import { usePendingNavigationGuard } from '@/lib/hooks/usePendingNavigationGuard';
+import { Link } from '@/lib/i18n/navigation';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -41,6 +45,8 @@ function getErrorKey(error: unknown): string {
       return 'errors.tooManyRequests';
     case 'auth/network-request-failed':
       return 'errors.networkError';
+    case 'auth/popup-closed-by-user':
+      return 'errors.googlePopupClosed';
     default:
       return 'errors.unexpected';
   }
@@ -52,9 +58,9 @@ function getErrorKey(error: unknown): string {
 
 export default function LoginPage(): React.ReactElement | null {
   const t = useTranslations('Auth.signIn');
+  const tC = useTranslations('Common');
   const tV = useTranslations('Validation');
   const isLoading = useAuthGuard('public');
-  const router = useRouter();
   const { confirmNavigationIfPending } = usePendingNavigationGuard();
 
   const [email, setEmail] = useState('');
@@ -62,7 +68,10 @@ export default function LoginPage(): React.ReactElement | null {
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
   const [showRegisteredToast, setShowRegisteredToast] = useState(false);
+
+  const isBusy = submitting || googleSubmitting;
 
   const isFormValid =
     email.length > 0 &&
@@ -99,11 +108,23 @@ export default function LoginPage(): React.ReactElement | null {
 
     try {
       await signIn(email, password);
-      router.replace('/dashboard');
     } catch (err) {
       setError(getErrorKey(err));
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleGoogleSignIn(): Promise<void> {
+    setError(null);
+    setGoogleSubmitting(true);
+
+    try {
+      await signInWithGoogle();
+    } catch (err) {
+      setError(getErrorKey(err));
+    } finally {
+      setGoogleSubmitting(false);
     }
   }
 
@@ -164,7 +185,7 @@ export default function LoginPage(): React.ReactElement | null {
                 });
               }
             }}
-            disabled={submitting}
+            disabled={isBusy}
             placeholder={t('emailPlaceholder')}
             error={!!fieldErrors.email}
             helperText={
@@ -199,11 +220,9 @@ export default function LoginPage(): React.ReactElement | null {
                 {t('passwordLabel')}
               </Typography>
               <Button
-                component="button"
-                type="button"
-                onClick={() => {
-                  /* TODO: navigate to /forgot-password */
-                }}
+                component={Link}
+                href="/forgot-password"
+                disabled={isBusy}
                 sx={{
                   fontSize: '0.75rem',
                   color: 'secondary.light',
@@ -237,7 +256,7 @@ export default function LoginPage(): React.ReactElement | null {
                   });
                 }
               }}
-              disabled={submitting}
+              disabled={isBusy}
               placeholder={t('passwordPlaceholder')}
               error={!!fieldErrors.password}
               helperText={
@@ -263,7 +282,7 @@ export default function LoginPage(): React.ReactElement | null {
             type="submit"
             variant="contained"
             fullWidth
-            disabled={submitting || !isFormValid}
+            disabled={isBusy || !isFormValid}
             size="large"
             sx={{ mt: 1 }}
             startIcon={
@@ -271,6 +290,24 @@ export default function LoginPage(): React.ReactElement | null {
             }
           >
             {submitting ? t('submittingButton') : t('submitButton')}
+          </Button>
+
+          <Button
+            type="button"
+            variant="outlined"
+            fullWidth
+            disabled={isBusy}
+            size="large"
+            onClick={handleGoogleSignIn}
+            startIcon={
+              googleSubmitting ? (
+                <CircularProgress size={16} color="inherit" />
+              ) : (
+                <GoogleIcon fontSize="small" />
+              )
+            }
+          >
+            {googleSubmitting ? t('googleSubmittingButton') : t('googleButton')}
           </Button>
         </Stack>
 
@@ -293,7 +330,7 @@ export default function LoginPage(): React.ReactElement | null {
             }}
           />
           <Typography variant="body2" sx={{ color: 'text.disabled' }}>
-            or
+            {tC('or')}
           </Typography>
           <Box
             sx={{
@@ -313,10 +350,11 @@ export default function LoginPage(): React.ReactElement | null {
           fullWidth
           size="large"
           onClick={(event) => {
-            if (!confirmNavigationIfPending()) {
+            if (!confirmNavigationIfPending() || isBusy) {
               event.preventDefault();
             }
           }}
+          disabled={isBusy}
         >
           {t('createAccount')}
         </Button>
