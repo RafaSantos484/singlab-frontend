@@ -24,10 +24,19 @@ function mapStoredStems(
 ): SeparationStems | null {
   if (!stems) return null;
 
-  return {
-    uploadedAt: stems.uploadedAt,
-    paths: stems.paths,
-  };
+  if (Array.isArray(stems)) {
+    return stems;
+  }
+
+  // Backward compatibility for legacy docs storing { uploadedAt, paths }.
+  if (typeof stems === 'object' && stems !== null && 'paths' in stems) {
+    const paths = (stems as { paths?: Record<string, string> }).paths;
+    if (paths && typeof paths === 'object') {
+      return Object.keys(paths) as SeparationStems;
+    }
+  }
+
+  return null;
 }
 
 export class PoyoSeparationAdapter implements SeparationProviderAdapter<PoyoSeparationTaskDetails> {
