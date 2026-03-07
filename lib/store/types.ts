@@ -19,6 +19,15 @@ export type { Song };
 export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
 
 /**
+ * Status of the Firestore `/users/{uid}` profile document.
+ * - `idle`    – not checking yet (no authenticated user)
+ * - `loading` – checking document existence
+ * - `exists`  – document exists
+ * - `missing` – document does not exist yet
+ */
+export type UserDocStatus = 'idle' | 'loading' | 'exists' | 'missing';
+
+/**
  * Plain-object representation of the signed-in Firebase user.
  * Intentionally kept serialisable (no methods).
  */
@@ -27,8 +36,8 @@ export interface AuthUser {
   uid: string;
   /** Primary email address (guaranteed to be a valid string by backend). */
   email: string;
-  /** User's display name (guaranteed to be a valid string by backend). */
-  displayName: string;
+  /** User-facing name from Firestore `/users/{uid}.name`. */
+  name: string;
   /** URL of the user's profile photo, or `null` if not set. */
   photoURL: string | null;
   /** Whether the user's email address has been verified. */
@@ -40,8 +49,7 @@ export interface AuthUser {
 // ---------------------------------------------------------------------------
 
 /**
- * User profile is simply the authenticated user's information from Firebase Auth.
- * The backend guarantees that displayName is a valid string.
+ * User profile combines Firebase Auth identity and Firestore profile data.
  */
 export type UserProfile = AuthUser;
 
@@ -86,6 +94,8 @@ export interface GlobalState {
    * `null` when not authenticated or during initial load.
    */
   userProfile: UserProfile | null;
+  /** Existence status of `/users/{uid}`. */
+  userDocStatus: UserDocStatus;
 
   // --- Songs ---
   /**

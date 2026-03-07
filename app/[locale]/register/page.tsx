@@ -14,8 +14,7 @@ import {
 import { useTranslations } from 'next-intl';
 import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
 import { createUserAccount } from '@/lib/firebase/auth';
-import { createUserDoc } from '@/lib/firebase/users';
-import { validateCreateUser } from '@/lib/validation/create-user';
+import { validateSignIn } from '@/lib/validation/sign-in';
 import { AuthLayout } from '@/components/layout';
 import { useRouter } from '@/lib/i18n/navigation';
 import { usePendingNavigationGuard } from '@/lib/hooks/usePendingNavigationGuard';
@@ -45,7 +44,6 @@ export default function RegisterPage(): React.ReactElement | null {
   const router = useRouter();
   const { confirmNavigationIfPending } = usePendingNavigationGuard();
 
-  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -57,7 +55,6 @@ export default function RegisterPage(): React.ReactElement | null {
     confirmPassword.length > 0 && password !== confirmPassword;
 
   const isFormValid =
-    name.trim().length > 0 &&
     email.length > 0 &&
     password.length > 0 &&
     confirmPassword.length > 0 &&
@@ -70,11 +67,7 @@ export default function RegisterPage(): React.ReactElement | null {
     setError(null);
     setFieldErrors({});
 
-    const validation = validateCreateUser({
-      name: name.trim(),
-      email,
-      password,
-    });
+    const validation = validateSignIn({ email, password });
 
     if (!validation.success) {
       setFieldErrors(validation.errors);
@@ -91,8 +84,7 @@ export default function RegisterPage(): React.ReactElement | null {
     setSubmitting(true);
 
     try {
-      const uid = await createUserAccount(email, password);
-      await createUserDoc(uid, name.trim(), email);
+      await createUserAccount(email, password);
       sessionStorage.setItem('emailVerificationSent', 'true');
       router.replace('/login');
     } catch (err) {
@@ -122,38 +114,6 @@ export default function RegisterPage(): React.ReactElement | null {
     <AuthLayout title="SingLab" subtitle={t('subtitle')}>
       <Box component="form" onSubmit={handleSubmit} noValidate>
         <Stack spacing={3}>
-          {/* Full Name */}
-          <TextField
-            id="name"
-            label={t('nameLabel')}
-            type="text"
-            autoComplete="name"
-            required
-            fullWidth
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value);
-              if (fieldErrors.name) {
-                setFieldErrors((prev) => {
-                  const next = { ...prev };
-                  delete next.name;
-                  return next;
-                });
-              }
-            }}
-            disabled={submitting}
-            placeholder={t('namePlaceholder')}
-            error={!!fieldErrors.name}
-            helperText={
-              fieldErrors.name
-                ? tV(fieldErrors.name as Parameters<typeof tV>[0])
-                : undefined
-            }
-            inputProps={{
-              'aria-label': t('nameAriaLabel'),
-            }}
-          />
-
           {/* Email */}
           <TextField
             id="email"
