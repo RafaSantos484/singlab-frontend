@@ -91,23 +91,44 @@ export function GlobalStateProvider({ children }: GlobalStateProviderProps) {
 
   useEffect(() => {
     const auth = getFirebaseAuth();
+    let unsubscribe: (() => void) | null = null;
 
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        if (!user.emailVerified) {
-          // Never surface unverified users as authenticated.
-          // Sign out silently — the UI will stay (or land) on the public pages.
-          void firebaseSignOut(auth);
-          dispatch({ type: 'AUTH_UNAUTHENTICATED' });
-          return;
+    const init = async (): Promise<void> => {
+      // Process redirect result BEFORE registering onAuthStateChanged
+      // to prevent Firebase from clearing the redirect state
+      try {
+        const { getRedirectResult } = await import('firebase/auth');
+        const result = await getRedirectResult(auth);
+
+        if (result && !result.user.emailVerified) {
+          await firebaseSignOut(auth);
         }
-        dispatch({ type: 'AUTH_AUTHENTICATED', payload: toAuthUser(user) });
-      } else {
-        dispatch({ type: 'AUTH_UNAUTHENTICATED' });
+      } catch {
+        // Redirect errors are handled silently; user stays on login page
       }
-    });
 
-    return unsubscribe;
+      // Register the auth state listener
+      unsubscribe = onAuthStateChanged(auth, (user) => {
+        if (user) {
+          if (!user.emailVerified) {
+            void firebaseSignOut(auth);
+            dispatch({ type: 'AUTH_UNAUTHENTICATED' });
+            return;
+          }
+          dispatch({ type: 'AUTH_AUTHENTICATED', payload: toAuthUser(user) });
+        } else {
+          dispatch({ type: 'AUTH_UNAUTHENTICATED' });
+        }
+      });
+    };
+
+    void init();
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
   }, []);
 
   // -------------------------------------------------------------------------

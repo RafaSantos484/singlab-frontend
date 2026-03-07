@@ -27,13 +27,11 @@ export class LocalSeparationAdapter implements SeparationProviderAdapter<LocalSe
       status: 'finished',
       taskId: null,
       errorMessage: null,
-      requestedAt: data.uploadedAt,
-      finishedAt: data.uploadedAt,
+      requestedAt: null,
+      finishedAt: null,
       stems: this.getStems(data, info.stems),
       providerData: data,
-      metadata: {
-        uploadedAt: data.uploadedAt,
-      },
+      metadata: {},
     };
   }
 
@@ -55,18 +53,31 @@ export class LocalSeparationAdapter implements SeparationProviderAdapter<LocalSe
   ): SeparationStems | null {
     if (!storedStems) return null;
 
-    return {
-      uploadedAt: storedStems.uploadedAt,
-      paths: storedStems.paths,
-    };
+    if (Array.isArray(storedStems)) {
+      return storedStems;
+    }
+
+    // Backward compatibility for legacy docs storing { uploadedAt, paths }.
+    if (
+      typeof storedStems === 'object' &&
+      storedStems !== null &&
+      'paths' in storedStems
+    ) {
+      const paths = (storedStems as { paths?: Record<string, string> }).paths;
+      if (paths && typeof paths === 'object') {
+        return Object.keys(paths) as SeparationStems;
+      }
+    }
+
+    return null;
   }
 
-  getRequestedAt(data: LocalSeparationProviderData): string | null {
-    return data.uploadedAt ?? null;
+  getRequestedAt(): string | null {
+    return null;
   }
 
-  getFinishedAt(data: LocalSeparationProviderData): string | null {
-    return data.uploadedAt ?? null;
+  getFinishedAt(): string | null {
+    return null;
   }
 
   shouldPoll(): boolean {
@@ -77,7 +88,7 @@ export class LocalSeparationAdapter implements SeparationProviderAdapter<LocalSe
     _data: LocalSeparationProviderData,
     storedStems: SeparatedSongInfo<LocalSeparationProviderData>['stems'],
   ): boolean {
-    return storedStems !== null && storedStems.paths !== null;
+    return Array.isArray(storedStems) && storedStems.length > 0;
   }
 
   getStemUrls(): Record<string, string> {

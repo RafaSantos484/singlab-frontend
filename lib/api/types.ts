@@ -84,10 +84,14 @@ export interface CreateUserResult {
 // Song domain types
 // ---------------------------------------------------------------------------
 
-/** Raw audio file metadata stored in Firestore (path only). */
+/**
+ * Raw audio metadata stored in Firestore.
+ *
+ * Note: The `path` field was removed. Storage paths are now computed
+ * dynamically from userId + songId (convention-based approach).
+ * This simplifies the data model and eliminates path redundancy.
+ */
 export interface RawSongInfo {
-  /** Storage path, e.g. `users/{userId}/songs/{songId}/raw.mp3` */
-  path: string;
   /** ISO 8601 datetime when the song was uploaded. */
   uploadedAt: string;
 }
@@ -134,11 +138,14 @@ export type SeparationProviderStemOutputs = Record<
   string | null
 >;
 
-/** Stems persisted in Firestore with storage paths (no signed URLs). */
-export interface SeparationStems {
-  uploadedAt: string;
-  paths: Partial<Record<SeparationStemName, string>>;
-}
+/**
+ * Stems persisted in Firestore as available stem names only.
+ *
+ * Migration note: Previously stored as `{ uploadedAt, paths }` object.
+ * Now simplified to array of stem names. Storage paths are computed
+ * dynamically using `buildStemStoragePath(userId, songId, stemName)`.
+ */
+export type SeparationStems = SeparationStemName[];
 
 /** Provider-agnostic view of a separation task. */
 export interface NormalizedSeparationInfo<TProviderData = unknown> {
@@ -218,12 +225,14 @@ export type PoyoSeparatedSongInfo =
 // ---------------------------------------------------------------------------
 
 /**
- * Local provider data — tracks when stems were uploaded.
- * Since stems are uploaded directly by the user, there is no async task.
+ * Local provider has no provider-specific task payload.
+ * Available stems live in `separatedSongInfo.stems`.
+ *
+ * Migration note: Previously stored `{ uploadedAt }`. Now null because
+ * upload timestamp is tracked at the song document level (`updatedAt`),
+ * not per-provider.
  */
-export interface LocalSeparationProviderData {
-  uploadedAt: string;
-}
+export type LocalSeparationProviderData = null;
 
 export type LocalSeparatedSongInfo =
   SeparatedSongInfo<LocalSeparationProviderData>;

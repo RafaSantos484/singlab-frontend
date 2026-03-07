@@ -16,7 +16,9 @@ import { useTranslations } from 'next-intl';
 import { useAuthGuard } from '@/lib/hooks/useAuthGuard';
 import {
   signIn,
-  signInWithGoogle,
+  signInWithGooglePopup,
+  signInWithGoogleRedirect,
+  shouldUseRedirectForGoogleSignIn,
   EmailNotVerifiedError,
 } from '@/lib/firebase';
 import { type FirebaseError } from 'firebase/app';
@@ -46,7 +48,10 @@ function getErrorKey(error: unknown): string {
     case 'auth/network-request-failed':
       return 'errors.networkError';
     case 'auth/popup-closed-by-user':
+    case 'auth/user-cancelled':
       return 'errors.googlePopupClosed';
+    case 'auth/account-exists-with-different-credential':
+      return 'errors.accountExistsWithDifferentCredential';
     default:
       return 'errors.unexpected';
   }
@@ -61,7 +66,8 @@ export default function LoginPage(): React.ReactElement | null {
   const tC = useTranslations('Common');
   const tV = useTranslations('Validation');
   const isLoading = useAuthGuard('public');
-  const { confirmNavigationIfPending } = usePendingNavigationGuard();
+  const { confirmNavigationIfPending, bypassPendingNavigationPrompt } =
+    usePendingNavigationGuard();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -120,7 +126,14 @@ export default function LoginPage(): React.ReactElement | null {
     setGoogleSubmitting(true);
 
     try {
-      await signInWithGoogle();
+      if (shouldUseRedirectForGoogleSignIn()) {
+        bypassPendingNavigationPrompt();
+        await signInWithGoogleRedirect();
+        // Page redirects immediately — finally block never runs
+        return;
+      }
+
+      await signInWithGooglePopup();
     } catch (err) {
       setError(getErrorKey(err));
     } finally {

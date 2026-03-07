@@ -8,7 +8,8 @@
  * - `getCurrentUserIdToken`    — resolves the current user's ID token (with optional force-refresh)
  * - `createUserAccount`        — creates a new Firebase Auth account + sends verification email
  * - `signIn`                   — signs in with email + password (requires verified email)
- * - `signInWithGoogle`         — signs in with Google OAuth (requires verified email)
+ * - `signInWithGooglePopup`    — signs in with Google OAuth via popup (desktop)
+ * - `signInWithGoogleRedirect` — initiates Google OAuth via redirect (mobile)
  * - `sendPasswordReset`        — sends a password reset email
  * - `sendVerificationEmail`    — sends a Firebase email verification to the given user
  * - `EmailNotVerifiedError`    — error thrown when login is attempted with unverified email
@@ -26,7 +27,9 @@ export {
   getCurrentUserIdToken,
   createUserAccount,
   signIn,
-  signInWithGoogle,
+  signInWithGooglePopup,
+  signInWithGoogleRedirect,
+  shouldUseRedirectForGoogleSignIn,
   sendPasswordReset,
   sendVerificationEmail,
   initiateEmailVerification,

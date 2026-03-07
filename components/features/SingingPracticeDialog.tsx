@@ -24,7 +24,9 @@ import Replay10Icon from '@mui/icons-material/Replay10';
 import { useTranslations } from 'next-intl';
 
 import type { SeparationStemName, Song } from '@/lib/api/types';
+import { getFirebaseAuth } from '@/lib/firebase/auth';
 import { useStorageDownloadUrls } from '@/lib/hooks/useStorageDownloadUrls';
+import { buildStemStoragePath } from '@/lib/storage/uploadSeparationStems';
 
 /** Low-latency pitch tracking defaults */
 const DEFAULT_WINDOW_SECONDS = 15;
@@ -92,6 +94,20 @@ interface PitchPoint {
 interface PracticeReadout {
   vocalsNoteLabel: string | null;
   microphoneNoteLabel: string | null;
+}
+
+function trimPitchPoints(points: PitchPoint[], minTime: number): void {
+  let firstValidIndex = 0;
+  while (
+    firstValidIndex < points.length &&
+    points[firstValidIndex].time < minTime
+  ) {
+    firstValidIndex += 1;
+  }
+
+  if (firstValidIndex > 0) {
+    points.splice(0, firstValidIndex);
+  }
 }
 
 interface PitchTrackProcessorState {
@@ -515,16 +531,19 @@ function drawPracticeCanvas(
   // Gap markers where no pitch was detected.
   context.strokeStyle = 'rgba(244, 114, 182, 0.5)';
   context.lineWidth = 1;
-  visibleVocalsPoints
-    .filter((point) => point.midi === null)
-    .forEach((point) => {
-      const x = xFromTime(point.time);
-      const heightVal = height;
-      context.beginPath();
-      context.moveTo(x, heightVal - 12);
-      context.lineTo(x, heightVal - 2);
-      context.stroke();
-    });
+  for (let i = 0; i < visibleVocalsPoints.length; i += 1) {
+    const point = visibleVocalsPoints[i];
+    if (point.midi !== null) {
+      continue;
+    }
+
+    const x = xFromTime(point.time);
+    const heightVal = height;
+    context.beginPath();
+    context.moveTo(x, heightVal - 12);
+    context.lineTo(x, heightVal - 2);
+    context.stroke();
+  }
 
   // Time cursor.
   context.strokeStyle = 'rgba(236, 72, 153, 0.8)';
@@ -682,11 +701,26 @@ export function SingingPracticeDialog({
   const instrumentalEnabledRef = useRef(isInstrumentalEnabled);
   const microphoneEnabledRef = useRef(isMicrophoneEnabled);
   const hoverXRef = useRef<number | null>(null);
+  const readoutRef = useRef<PracticeReadout>({
+    vocalsNoteLabel: null,
+    microphoneNoteLabel: null,
+  });
 
-  const stemPaths = useMemo(
-    () => song.separatedSongInfo?.stems?.paths ?? null,
-    [song.separatedSongInfo?.stems?.paths],
-  );
+  const stemPaths = useMemo((): Partial<
+    Record<SeparationStemName, string>
+  > | null => {
+    const currentUser = getFirebaseAuth().currentUser;
+    if (!currentUser?.uid || !song.separatedSongInfo?.stems) {
+      return null;
+    }
+
+    const next: Partial<Record<SeparationStemName, string>> = {};
+    song.separatedSongInfo.stems.forEach((stem) => {
+      next[stem] = buildStemStoragePath(currentUser.uid, song.id, stem);
+    });
+
+    return next;
+  }, [song.id, song.separatedSongInfo]);
 
   const { urls: stemUrls } = useStorageDownloadUrls(stemPaths);
 
@@ -1012,6 +1046,10 @@ export function SingingPracticeDialog({
         vocalsNoteLabel: null,
         microphoneNoteLabel: null,
       });
+      readoutRef.current = {
+        vocalsNoteLabel: null,
+        microphoneNoteLabel: null,
+      };
       centerMidiRef.current = 60;
       setIsAudioLoaded(false);
       setIsMicrophoneReady(false);
@@ -1317,7 +1355,7 @@ export function SingingPracticeDialog({
             midi: isMicrophoneTrackActive ? microphoneDisplayMidi : null,
           });
 
-          setReadout({
+          const nextReadout: PracticeReadout = {
             vocalsNoteLabel:
               vocalsDisplayMidi !== null
                 ? midiToNoteLabel(vocalsDisplayMidi)
@@ -1326,15 +1364,21 @@ export function SingingPracticeDialog({
               isMicrophoneTrackActive && microphoneDisplayMidi !== null
                 ? midiToNoteLabel(microphoneDisplayMidi)
                 : null,
-          });
+          };
+
+          const currentReadout = readoutRef.current;
+          if (
+            currentReadout.vocalsNoteLabel !== nextReadout.vocalsNoteLabel ||
+            currentReadout.microphoneNoteLabel !==
+              nextReadout.microphoneNoteLabel
+          ) {
+            readoutRef.current = nextReadout;
+            setReadout(nextReadout);
+          }
 
           const minHistoryTime = audioElement.currentTime - windowSeconds * 1.5;
-          vocalsPointsRef.current = vocalsPointsRef.current.filter(
-            (point) => point.time >= minHistoryTime,
-          );
-          microphonePointsRef.current = microphonePointsRef.current.filter(
-            (point) => point.time >= minHistoryTime,
-          );
+          trimPitchPoints(vocalsPointsRef.current, minHistoryTime);
+          trimPitchPoints(microphonePointsRef.current, minHistoryTime);
         }
       }
 
@@ -1476,6 +1520,10 @@ export function SingingPracticeDialog({
         vocalsNoteLabel: null,
         microphoneNoteLabel: null,
       });
+      readoutRef.current = {
+        vocalsNoteLabel: null,
+        microphoneNoteLabel: null,
+      };
     } else {
       // Forward seek: break line with sentinel
       vocalsPointsRef.current.push({ time: from, midi: null });
