@@ -9,6 +9,14 @@ export type GlobalStateAction =
   | { type: 'AUTH_LOADING' }
   /** Firebase confirmed a signed-in user */
   | { type: 'AUTH_AUTHENTICATED'; payload: AuthUser }
+  /** Patch authenticated user profile fields (e.g. Firestore name). */
+  | { type: 'AUTH_PROFILE_UPDATED'; payload: Partial<AuthUser> }
+  /** Firestore user profile document check started. */
+  | { type: 'USER_DOC_LOADING' }
+  /** Firestore user profile document exists. */
+  | { type: 'USER_DOC_EXISTS' }
+  /** Firestore user profile document does not exist yet. */
+  | { type: 'USER_DOC_MISSING' }
   /** Firebase confirmed no signed-in user (or sign-out completed) */
   | { type: 'AUTH_UNAUTHENTICATED' }
   /** Firestore listener for /users/{uid}/songs started */
@@ -40,6 +48,7 @@ export type GlobalStateAction =
 export const initialState: GlobalState = {
   authStatus: 'loading',
   userProfile: null,
+  userDocStatus: 'idle',
   songs: [],
   songsStatus: 'idle',
   songsStemUploading: new Set(),
@@ -71,6 +80,17 @@ export function globalStateReducer(
         ...state,
         authStatus: 'authenticated',
         userProfile: action.payload,
+        userDocStatus: 'loading',
+      };
+
+    case 'AUTH_PROFILE_UPDATED':
+      if (!state.userProfile) return state;
+      return {
+        ...state,
+        userProfile: {
+          ...state.userProfile,
+          ...action.payload,
+        },
       };
 
     case 'AUTH_UNAUTHENTICATED':
@@ -78,6 +98,15 @@ export function globalStateReducer(
         ...initialState,
         authStatus: 'unauthenticated',
       };
+
+    case 'USER_DOC_LOADING':
+      return { ...state, userDocStatus: 'loading' };
+
+    case 'USER_DOC_EXISTS':
+      return { ...state, userDocStatus: 'exists' };
+
+    case 'USER_DOC_MISSING':
+      return { ...state, userDocStatus: 'missing' };
 
     case 'SONGS_LOADING':
       return { ...state, songsStatus: 'loading' };
