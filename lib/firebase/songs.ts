@@ -53,17 +53,14 @@ export function generateSongId(userId: string): string {
  * @param songId - Pre-generated song document ID.
  * @param title - Song title.
  * @param author - Song author / artist name.
- * @param storagePath - Storage path of the raw audio file.
  */
 export async function createSongDoc(
   userId: string,
   songId: string,
   title: string,
   author: string,
-  storagePath: string,
 ): Promise<void> {
   const rawSongInfo: RawSongInfo = {
-    path: storagePath,
     uploadedAt: new Date().toISOString(),
   };
 
@@ -130,13 +127,13 @@ export async function updateSeparatedSongInfo(
 }
 
 /**
- * Updates only the stem paths on an existing separation.
+ * Updates only the available stems on an existing separation.
  *
  * Preserves the existing provider and providerData fields.
  *
  * @param userId - Firebase Auth UID of the song owner.
  * @param songId - Song document ID.
- * @param stems - Stem metadata with upload time and storage paths.
+ * @param stems - Available stem names.
  */
 export async function updateSeparationStems(
   userId: string,
