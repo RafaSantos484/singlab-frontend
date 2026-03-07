@@ -79,7 +79,7 @@ Components are split into two groups:
           * File picker + drag-and-drop support
           * Audio format validation (MIME type + extension fallback)
           * Client-side metadata extraction from audio tags
-          * Client-side FFmpeg WASM MP3 conversion with progress tracking
+          * Client-side FFmpeg WASM canonical audio normalization with progress tracking
           * Form validation for title/author
           * Multi-phase progress UI (converting → uploading → saving)
      - `SongEditDialog` — song metadata editing with validation and error handling.
@@ -95,9 +95,9 @@ Shared utilities used across the app:
 | Module | Responsibility |
 |---|---|
 | `lib/api/` | Typed HTTP client for backend separation endpoints only (30s timeout, logging) |
-| `lib/api/song-creation.ts` | Three-step song upload: validation → FFmpeg MP3 conversion → Storage upload → Firestore save with rollback |
+| `lib/api/song-creation.ts` | Three-step song upload: validation → FFmpeg canonical normalization (AAC/M4A) → Storage upload → Firestore save with rollback |
 | `lib/api/separations.ts` | API client for stem separation proxy (submit, status) |
-| `lib/audio/convertToMp3.ts` | Client-side audio/video → MP3 conversion using FFmpeg WASM (singleton, lazy-loaded from CDN). Queue-based concurrency control serializes all conversion operations to prevent shared WASM instance and virtual FS collisions. Unique file tokens prevent path conflicts. |
+| `lib/audio/normalizeAudio.ts` | Client-side audio/video normalization to canonical AAC/M4A using FFmpeg WASM (singleton, lazy-loaded from CDN). Queue-based concurrency control serializes all conversion operations to prevent shared WASM instance and virtual FS collisions. Unique file tokens prevent path conflicts. |
 | `lib/async/` | Pending activity tracking for navigation guards (prevents leaving during uploads) |
 | `lib/firebase/` | Firebase app initialization (singleton), auth helpers, Firestore CRUD (songs, users), Storage utilities |
 | `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`, `useSeparationStatus`, `useStemAutoProcessor`, etc.) |
@@ -139,10 +139,10 @@ Protected endpoints
      │ 2. Metadata extraction from audio tags (optional, auto-fill title/artist)
      │ 3. Extract metadata if available
      ▼
-[FFmpeg WASM converts audio/video to MP3 (if not already MP3)]
+[FFmpeg WASM normalizes audio/video to canonical AAC/M4A]
      │
      │ Uses [@ffmpeg/ffmpeg] loaded from CDN (single-threaded, no COOP/COEP needed)
-     │ Fast path: if file is already MP3, returns unchanged
+     │ No fast path: all uploads are always normalized
      │ Supports: MP3, WAV, OGG, WebM, MP4, MOV, FLAC, AAC, M4A
      │ VBR encoding (~192 kbps) for smaller file sizes
      │ Progress callback updates UI (0–100%)
@@ -152,7 +152,7 @@ Protected endpoints
      │ Client-side validation of metadata fields
      ▼
 [Generate stable songId (Firestore doc ID)]
-[Upload MP3 to Storage: users/:userId/songs/:songId/raw.mp3]
+[Upload normalized audio to Storage: users/:userId/songs/:songId/raw.m4a]
      ▼
 [Firebase Storage SDK uploads audio]
      │
@@ -191,7 +191,7 @@ Two provider paths are supported: `poyo` (async backend-proxied AI task) and
      ▼
 [Frontend writes providerData to Firestore]
      │
-     │ updateSeparatedSongInfo() writes to song doc
+     │ updateSeparatedSongInfo() writes providerData to song doc
      ▼
 [useSeparationStatus polls status every 60s]
      │
@@ -208,12 +208,12 @@ Two provider paths are supported: `poyo` (async backend-proxied AI task) and
 [Client downloads stems from PoYo URLs]
      │
      │ processStemUrls(): downloads each stem as Blob
-     │ Uploads to Storage: users/:userId/songs/:songId/stems/:stemName.mp3
+     │ Uploads to Storage: users/:userId/songs/:songId/stems/:stemName.m4a
      │ withPendingActivity() tracks uploads
      ▼
-[Frontend writes stem paths directly to Firestore]
+[Frontend writes available stem names directly to Firestore]
      │
-     │ updateSeparationStems() updates song doc with paths + uploadedAt
+     │ updateSeparationStems() updates song doc with available stem names
      ▼
 [Success]
      │
@@ -229,7 +229,7 @@ Two provider paths are supported: `poyo` (async backend-proxied AI task) and
 [User opens SeparationDialog and selects provider = local]
      │
      │ Fills StemUploadForm (vocals required + at least one other stem)
-     │ Client validates files and converts to MP3 when required
+     │ Client validates files and always normalizes audio to canonical AAC/M4A
      ▼
 [Client uploads stems directly to Firebase Storage]
      │
