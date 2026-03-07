@@ -46,6 +46,7 @@
         "tooManyRequests": "Too many failed attempts. Please try again later.",
         "networkError": "Network error. Check your connection and try again.",
         "googlePopupClosed": "Google sign-in was cancelled.",
+        "accountExistsWithDifferentCredential": "An account already exists with this email using a different sign-in method. Please use your original sign-in method.",
         "unexpected": "An unexpected error occurred. Please try again."
       }
     },
@@ -166,8 +167,8 @@
     "submitButton": "Upload Stems",
     "cancelButton": "Cancel",
     "uploadingButton": "Uploading stems…",
-    "convertingButton": "Converting to MP3{progress, select, 0 {} other { ({progress}%)}}",
-    "stemConverting": "Converting to MP3{progress, select, 0 {} other { ({progress}%)}}",
+    "convertingButton": "Normalizing audio{progress, select, 0 {} other { ({progress}%)}}",
+    "stemConverting": "Normalizing audio{progress, select, 0 {} other { ({progress}%)}}",
     "stemUploading": "Uploading…",
     "typeLabel": "Stem Type",
     "fileLabel": "Audio File",
@@ -181,7 +182,7 @@
       "fileMissing": "Please select a file",
       "bothMissing": "Please select a type and a file",
       "duplicateType": "This stem type is already added",
-      "conversionFailed": "Failed to convert file to MP3: {message}",
+      "conversionFailed": "Failed to normalize audio file: {message}",
       "uploadFailed": "Failed to upload stems: {message}",
       "firestoreUpdateFailed": "Uploaded stems were rolled back due to database error: {message}"
     }
@@ -203,11 +204,11 @@
     "uploadButton": "Upload Song",
     "uploadingButton": "Uploading...",
     "uploadingFileButton": "Uploading file...",
-    "convertingButton": "Converting to MP3{progress, select, 0 {} other { ({progress}%)}}",
+    "convertingButton": "Normalizing audio{progress, select, 0 {} other { ({progress}%)}}",
     "registeringButton": "Registering...",
     "errors": {
       "unexpected": "An unexpected error occurred. Please try again.",
-      "conversionFailed": "Failed to convert file to MP3: {message}. Please try again.",
+      "conversionFailed": "Failed to normalize audio file: {message}. Please try again.",
       "uploadFailed": "Upload failed: {message} ({statusCode}). Please try again.",
       "storageUploadFailed": "Failed to upload file: {message}. Please try again."
     }
@@ -367,7 +368,7 @@
       "tooLong": "Name must be at most 255 characters"
     },
     "file": {
-      "invalidType": "Unsupported format. Supported: MP3, WAV, OGG, WebM, MP4, MOV, FLAC.",
+      "invalidType": "Unsupported format. Supported: MP3, WAV, OGG, WebM, MP4, MOV, FLAC, AAC, M4A.",
       "sizeTooLarge": "File exceeds the maximum size of 100 MB.",
       "required": "Please select an audio file",
       "invalid": "Invalid file"
