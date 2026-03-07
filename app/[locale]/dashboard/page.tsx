@@ -423,9 +423,8 @@ function SongCardItem({
         throw new Error('User not authenticated');
       }
 
-      // Get stem names from storage paths
-      const stemNames = song.separatedSongInfo?.stems?.paths
-        ? Object.keys(song.separatedSongInfo.stems.paths)
+      const stemNames = song.separatedSongInfo?.stems
+        ? song.separatedSongInfo.stems
         : [];
 
       // Delete stem files from storage
@@ -573,11 +572,7 @@ function SongCardItem({
             <SongDeleteButton
               songId={song.id}
               songTitle={song.title}
-              stemNames={
-                song.separatedSongInfo?.stems?.paths
-                  ? Object.keys(song.separatedSongInfo.stems.paths)
-                  : undefined
-              }
+              stemNames={song.separatedSongInfo?.stems ?? undefined}
             />
           </Box>
         </Box>

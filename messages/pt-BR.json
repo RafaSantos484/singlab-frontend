@@ -46,6 +46,7 @@
         "tooManyRequests": "Muitas tentativas com falha. Tente novamente mais tarde.",
         "networkError": "Erro de rede. Verifique sua conexão e tente novamente.",
         "googlePopupClosed": "O login com Google foi cancelado.",
+        "accountExistsWithDifferentCredential": "Já existe uma conta com este e-mail usando um método de login diferente. Use seu método original de login.",
         "unexpected": "Ocorreu um erro inesperado. Por favor, tente novamente."
       }
     },
@@ -165,8 +166,8 @@
     "submitButton": "Enviar Faixas",
     "cancelButton": "Cancelar",
     "uploadingButton": "Enviando faixas…",
-    "convertingButton": "Convertendo para MP3{progress, select, 0 {} other { ({progress}%)}}",
-    "stemConverting": "Convertendo para MP3{progress, select, 0 {} other { ({progress}%)}}",
+    "convertingButton": "Normalizando áudio{progress, select, 0 {} other { ({progress}%)}}",
+    "stemConverting": "Normalizando áudio{progress, select, 0 {} other { ({progress}%)}}",
     "stemUploading": "Enviando…",
     "typeLabel": "Tipo de Faixa",
     "fileLabel": "Arquivo de Áudio",
@@ -180,7 +181,7 @@
       "fileMissing": "Selecione um arquivo",
       "bothMissing": "Selecione um tipo e um arquivo",
       "duplicateType": "Este tipo de faixa já foi adicionado",
-      "conversionFailed": "Falha ao converter arquivo para MP3: {message}",
+      "conversionFailed": "Falha ao normalizar arquivo de áudio: {message}",
       "uploadFailed": "Falha ao enviar faixas: {message}",
       "firestoreUpdateFailed": "Faixas enviadas foram desfeitas devido a erro no banco de dados: {message}"
     }
@@ -201,11 +202,11 @@
     "uploadButton": "Enviar Música",
     "uploadingButton": "Enviando...",
     "uploadingFileButton": "Enviando arquivo...",
-    "convertingButton": "Convertendo para MP3{progress, select, 0 {} other { ({progress}%)}}",
+    "convertingButton": "Normalizando áudio{progress, select, 0 {} other { ({progress}%)}}",
     "registeringButton": "Registrando...",
     "errors": {
       "unexpected": "Ocorreu um erro inesperado. Por favor, tente novamente.",
-      "conversionFailed": "Falha ao converter arquivo para MP3: {message}. Por favor, tente novamente.",
+      "conversionFailed": "Falha ao normalizar arquivo de áudio: {message}. Por favor, tente novamente.",
       "uploadFailed": "Falha no envio: {message} ({statusCode}). Por favor, tente novamente.",
       "storageUploadFailed": "Falha ao enviar arquivo: {message}. Por favor, tente novamente."
     }
@@ -365,7 +366,7 @@
       "tooLong": "O nome deve ter no máximo 255 caracteres"
     },
     "file": {
-      "invalidType": "Formato não suportado. Suportados: MP3, WAV, OGG, WebM, MP4, MOV, FLAC.",
+      "invalidType": "Formato não suportado. Suportados: MP3, WAV, OGG, WebM, MP4, MOV, FLAC, AAC, M4A.",
       "sizeTooLarge": "O arquivo excede o tamanho máximo de 100 MB.",
       "required": "Por favor, selecione um arquivo de áudio",
       "invalid": "Arquivo inválido"

@@ -2,6 +2,7 @@ import {
   getAuth,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
   sendEmailVerification,
@@ -49,6 +50,30 @@ export class EmailNotVerifiedError extends Error {
     super('Email address has not been verified.');
     this.name = 'EmailNotVerifiedError';
   }
+}
+
+/**
+ * Returns `true` when running in a mobile browser where popup OAuth is
+ * less reliable, so redirect-based sign-in should be preferred.
+ */
+export function shouldUseRedirectForGoogleSignIn(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const nav = navigator as Navigator & {
+    userAgentData?: {
+      mobile?: boolean;
+    };
+  };
+
+  if (typeof nav.userAgentData?.mobile === 'boolean') {
+    return nav.userAgentData.mobile;
+  }
+
+  return /android|iphone|ipad|ipod|iemobile|opera mini|mobile/i.test(
+    navigator.userAgent,
+  );
 }
 
 /**
@@ -110,7 +135,10 @@ export async function signIn(email: string, password: string): Promise<void> {
 }
 
 /**
- * Signs in the user with Google OAuth popup.
+ * Signs in the user with Google OAuth via popup.
+ *
+ * Use this for desktop browsers. For mobile, use `signInWithGoogleRedirect`
+ * and `resolveGoogleRedirectSignIn` instead.
  *
  * Enforces the same email verification policy used by password sign-in:
  * if the provider user is not verified, the session is immediately cleared
@@ -119,7 +147,7 @@ export async function signIn(email: string, password: string): Promise<void> {
  * @throws {EmailNotVerifiedError} When the email is not yet verified.
  * @throws {FirebaseError} On popup/auth errors.
  */
-export async function signInWithGoogle(): Promise<void> {
+export async function signInWithGooglePopup(): Promise<void> {
   await withPendingActivity(async () => {
     const auth = getFirebaseAuth();
     const provider = new GoogleAuthProvider();
@@ -132,6 +160,22 @@ export async function signInWithGoogle(): Promise<void> {
       throw new EmailNotVerifiedError();
     }
   });
+}
+
+/**
+ * Initiates Google OAuth sign-in via redirect flow.
+ *
+ * The page will navigate to Google's OAuth screen immediately.
+ * When the user returns, `getRedirectResult()` is called automatically
+ * in `GlobalStateProvider` to complete the sign-in.
+ *
+ * Use this for mobile browsers where popup is unreliable.
+ */
+export async function signInWithGoogleRedirect(): Promise<void> {
+  const auth = getFirebaseAuth();
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  await signInWithRedirect(auth, provider);
 }
 
 /**

@@ -187,6 +187,8 @@ import {
   requestPracticeDialogOpen,
 } from '@/lib/player/practiceSync';
 import { normalizeSeparationInfo } from '@/lib/separations';
+import { getFirebaseAuth } from '@/lib/firebase/auth';
+import { buildStemStoragePath } from '@/lib/storage/uploadSeparationStems';
 import { useGlobalState, useGlobalStateDispatch } from '@/lib/store';
 import { SeparationDialog } from './SeparationDialog';
 
@@ -209,6 +211,9 @@ const DRIFT_CHECK_INTERVAL_MS = 180;
 const DRIFT_HARD_THRESHOLD = 0.25;
 const DRIFT_SOFT_THRESHOLD = 0.03;
 const DRIFT_MAX_CORRECTION = 0.05;
+const SEEK_OFFSET_MAX_SECONDS = 0.15;
+const SEEK_OFFSET_MIN_OBSERVATION_SECONDS = 0.008;
+const SEEK_OFFSET_CALIBRATION_DELAY_MS = 180;
 
 function formatTime(seconds: number): string {
   if (!isFinite(seconds) || seconds < 0) return '0:00';
@@ -221,6 +226,43 @@ function formatTime(seconds: number): string {
 
 function clampToRange(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function getSeekOffsetStorageKey(songId: string): string {
+  return `singlab:stem-seek-offsets:${songId}`;
+}
+
+function parseStemSeekOffsets(
+  raw: string | null,
+): Partial<Record<StemKey, number>> {
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      return {};
+    }
+
+    const offsets: Partial<Record<StemKey, number>> = {};
+    STEM_ORDER.forEach((stem) => {
+      const value = (parsed as Record<string, unknown>)[stem];
+      if (typeof value !== 'number' || !isFinite(value)) {
+        return;
+      }
+
+      offsets[stem] = clampToRange(
+        value,
+        -SEEK_OFFSET_MAX_SECONDS,
+        SEEK_OFFSET_MAX_SECONDS,
+      );
+    });
+
+    return offsets;
+  } catch {
+    return {};
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -358,9 +400,23 @@ function useSongStemsUrl(song: Song): SongStemsUrlResult {
   );
 
   const isFinished = separation?.status === 'finished';
-  const stemPaths: Partial<Record<StemKey, string>> | null = isFinished
-    ? (separation?.stems?.paths ?? null)
-    : null;
+  const stemPaths: Partial<Record<StemKey, string>> | null = useMemo(() => {
+    if (!isFinished || !separation?.stems) {
+      return null;
+    }
+
+    const currentUser = getFirebaseAuth().currentUser;
+    if (!currentUser?.uid) {
+      return null;
+    }
+
+    const next: Partial<Record<StemKey, string>> = {};
+    separation.stems.forEach((stem) => {
+      next[stem] = buildStemStoragePath(currentUser.uid, song.id, stem);
+    });
+
+    return next;
+  }, [isFinished, separation?.stems, song.id]);
 
   const { urls, isLoading } = useStorageDownloadUrls(stemPaths);
 
@@ -676,6 +732,90 @@ function SeparatedPlayerEngine({
 
   const durationsRef = useRef<Partial<Record<StemKey, number>>>({});
   const waitingSetRef = useRef<Set<StemKey>>(new Set());
+  const seekOffsetsRef = useRef<Partial<Record<StemKey, number>>>({});
+  const seekCalibrationTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const raw = window.localStorage.getItem(getSeekOffsetStorageKey(song.id));
+    seekOffsetsRef.current = parseStemSeekOffsets(raw);
+  }, [song.id]);
+
+  const persistSeekOffsets = useCallback((): void => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(
+        getSeekOffsetStorageKey(song.id),
+        JSON.stringify(seekOffsetsRef.current),
+      );
+    } catch {
+      // Ignore localStorage persistence errors.
+    }
+  }, [song.id]);
+
+  const clearScheduledSeekCalibration = useCallback((): void => {
+    if (typeof window === 'undefined') return;
+    if (seekCalibrationTimeoutRef.current !== null) {
+      window.clearTimeout(seekCalibrationTimeoutRef.current);
+      seekCalibrationTimeoutRef.current = null;
+    }
+  }, []);
+
+  const calibrateSeekOffsets = useCallback((): void => {
+    const leader = leaderAudioRef.current;
+    if (!leader || playerRef.current.isSeeking || !playerRef.current.isLoaded) {
+      return;
+    }
+
+    const leaderTime = leader.currentTime || 0;
+    let hasChanges = false;
+
+    (
+      Object.entries(audiosRef.current) as Array<[StemKey, HTMLAudioElement]>
+    ).forEach(([stem, audio]) => {
+      if (!audio || stem === leaderKeyRef.current) {
+        return;
+      }
+
+      const observedDiff = leaderTime - (audio.currentTime || 0);
+      const absObserved = Math.abs(observedDiff);
+
+      if (
+        !isFinite(observedDiff) ||
+        absObserved < SEEK_OFFSET_MIN_OBSERVATION_SECONDS ||
+        absObserved > SEEK_OFFSET_MAX_SECONDS
+      ) {
+        return;
+      }
+
+      const previous = seekOffsetsRef.current[stem] ?? 0;
+      const blended = previous * 0.65 + observedDiff * 0.35;
+      const next = clampToRange(
+        blended,
+        -SEEK_OFFSET_MAX_SECONDS,
+        SEEK_OFFSET_MAX_SECONDS,
+      );
+
+      if (Math.abs(next - previous) >= 0.001) {
+        seekOffsetsRef.current[stem] = next;
+        hasChanges = true;
+      }
+    });
+
+    if (hasChanges) {
+      persistSeekOffsets();
+    }
+  }, [persistSeekOffsets]);
+
+  const scheduleSeekCalibration = useCallback((): void => {
+    if (typeof window === 'undefined') return;
+    clearScheduledSeekCalibration();
+
+    seekCalibrationTimeoutRef.current = window.setTimeout(() => {
+      seekCalibrationTimeoutRef.current = null;
+      calibrateSeekOffsets();
+    }, SEEK_OFFSET_CALIBRATION_DELAY_MS);
+  }, [calibrateSeekOffsets, clearScheduledSeekCalibration]);
 
   const {
     urls: stemsUrls,
@@ -740,11 +880,18 @@ function SeparatedPlayerEngine({
 
   const alignAllToTime = useCallback((target: number, eps = 0.02): void => {
     const t = Math.max(0, target);
-    (Object.values(audiosRef.current) as HTMLAudioElement[]).forEach((a) => {
-      if (!a || !isFinite(a.currentTime)) return;
-      if (Math.abs(a.currentTime - t) > eps) {
+    const maxDuration = playerRef.current.duration || Number.POSITIVE_INFINITY;
+    (
+      Object.entries(audiosRef.current) as Array<[StemKey, HTMLAudioElement]>
+    ).forEach(([stem, audio]) => {
+      if (!audio || !isFinite(audio.currentTime)) return;
+
+      const compensation = seekOffsetsRef.current[stem] ?? 0;
+      const desiredTime = clampToRange(t + compensation, 0, maxDuration);
+
+      if (Math.abs(audio.currentTime - desiredTime) > eps) {
         try {
-          a.currentTime = t;
+          audio.currentTime = desiredTime;
         } catch {
           /* no-op */
         }
@@ -982,6 +1129,7 @@ function SeparatedPlayerEngine({
     // Capture ref values so the closure sees the same object identity
     const waitingSet = waitingSetRef.current;
     return () => {
+      clearScheduledSeekCalibration();
       const keys = Object.keys(audiosRef.current) as StemKey[];
       for (const k of keys) {
         const a = audiosRef.current[k];
@@ -1008,7 +1156,7 @@ function SeparatedPlayerEngine({
       durationsRef.current = {};
       waitingSet.clear();
     };
-  }, []);
+  }, [clearScheduledSeekCalibration]);
 
   // Activate / deactivate: pause when inactive, apply volumes when active
   useEffect(() => {
@@ -1044,12 +1192,13 @@ function SeparatedPlayerEngine({
       const target =
         player.currentTime >= 0 ? player.currentTime : leader.currentTime || 0;
       alignAllToTime(target, 0.02);
+      scheduleSeekCalibration();
       void playAll();
     } else {
       pauseAll();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [player.isPlaying, player.isLoaded, active]);
+  }, [player.isPlaying, player.isLoaded, active, scheduleSeekCalibration]);
 
   // Apply seek commits
   useEffect(() => {
@@ -1063,6 +1212,7 @@ function SeparatedPlayerEngine({
     const current = leader?.currentTime ?? 0;
     if (Math.abs(current - target) > 0.2) {
       alignAllToTime(target, 0.01);
+      scheduleSeekCalibration();
     }
   }, [
     player.currentTime,
@@ -1071,6 +1221,7 @@ function SeparatedPlayerEngine({
     player.duration,
     active,
     alignAllToTime,
+    scheduleSeekCalibration,
   ]);
 
   // Continuous drift-correction loop via requestAnimationFrame
@@ -1150,7 +1301,10 @@ function SeparatedPlayerEngine({
 
         const max = Math.max(...times);
         const min = Math.min(...times);
-        if (max - min > 0.03) alignAllToTime(max, 0.01);
+        if (max - min > 0.03) {
+          alignAllToTime(max, 0.01);
+          scheduleSeekCalibration();
+        }
         void playAll();
         setPlayer((p) => ({ ...p, isPlaying: true }));
       });
@@ -1159,8 +1313,7 @@ function SeparatedPlayerEngine({
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () =>
       document.removeEventListener('visibilitychange', onVisibilityChange);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [alignAllToTime, playAll, scheduleSeekCalibration, setPlayer]);
 
   return null;
 }

@@ -15,8 +15,8 @@ stateless proxy between the frontend and external AI services.
 - Firebase Authentication for user sign-in
 - **Client-side audio upload** with three-step flow:
   - Audio format validation (MIME type + extension fallback)
-  - Client-side FFmpeg WASM MP3 conversion with progress tracking (supports MP3, WAV, OGG, WebM, MP4, MOV, FLAC, AAC, M4A)
-  - Upload converted MP3 to Firebase Storage (bypassing API)
+  - Client-side FFmpeg WASM canonical normalization with progress tracking (supports MP3, WAV, OGG, WebM, MP4, MOV, FLAC, AAC, M4A)
+  - Upload normalized audio to Firebase Storage (bypassing API)
   - Save song metadata directly to Firestore
   - Automatic rollback on failure (orphaned files cleaned up)
 - **Drag-and-drop file upload** — Intuitive drag-and-drop UI in song upload dialog
@@ -27,7 +27,7 @@ stateless proxy between the frontend and external AI services.
 - **Dual-provider stem separation workflow**:
   - Select provider in separation dialog (`poyo` AI proxy or `local` manual upload)
   - `poyo`: request via backend proxy, poll status, auto-process provider stems
-  - `local`: upload stems directly from client and persist stem paths to Firestore
+  - `local`: upload stems directly from client and persist only available stem names to Firestore
   - Delete existing stems and re-request separation from another provider
 - Karaoke playback with vocal / instrumental stem toggle
 - Singing Practice Mode with dual-track live pitch timeline (vocals + microphone), 10-second seek controls, hover note inspection, and player-synced playback
@@ -140,8 +140,8 @@ The frontend drives a two-phase song upload and stem processing pipeline:
 1. User selects audio file via file picker or drag-and-drop in `SongCreateDialog`.
 2. Client validates file (size, format via MIME type + extension fallback).
 3. Client extracts metadata (title, artist) from audio tags if available.
-4. **Client converts audio/video to MP3 using FFmpeg WASM** (fast path if already MP3).
-5. **Client uploads converted MP3 to Firebase Storage** at `users/:userId/songs/:songId/raw.mp3`.
+4. **Client normalizes audio/video to canonical AAC/M4A using FFmpeg WASM**.
+5. **Client uploads normalized audio to Firebase Storage** at `users/:userId/songs/:songId/raw.m4a`.
 6. **Client writes song document directly to Firestore** via `createSongDoc()`.
 7. Real-time Firestore listener adds song to global state.
 8. **Rollback:** If Firestore write fails after Storage upload, client deletes the uploaded file.
@@ -160,13 +160,13 @@ The frontend drives a two-phase song upload and stem processing pipeline:
 3. **Frontend writes provider data to Firestore** via `updateSeparatedSongInfo()`.
 4. `useSeparationStatus` polls `GET /separations/status?taskId=xxx` every 60s.
 5. On `finished` with no stored stems, `useStemAutoProcessor` downloads and uploads stems.
-6. **Frontend writes stem paths to Firestore** and UI updates through Firestore listener.
+6. **Frontend writes available stem names to Firestore** and UI updates through Firestore listener.
 
 #### `local` path
 
 1. User uploads at least 2 stems (vocals required) via `StemUploadForm`.
-2. Client converts each file to MP3 when needed.
-3. Client uploads stems to Storage and writes `provider: 'local'` + stem paths to Firestore.
+2. Client normalizes every file to canonical AAC/M4A (all providers share the same pipeline).
+3. Client uploads stems to Storage and writes `provider: 'local'` + available stem names to Firestore.
 4. Stems become immediately available in `GlobalPlayer` (no polling required).
 
 #### Re-processing

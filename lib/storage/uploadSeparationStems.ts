@@ -3,6 +3,11 @@
 import { getStorage, ref, uploadBytes, deleteObject } from 'firebase/storage';
 
 import { getFirebaseApp } from '@/lib/firebase/app';
+import {
+  CANONICAL_AUDIO_EXTENSION,
+  CANONICAL_AUDIO_MIME_TYPE,
+  normalizeAudioFile,
+} from '@/lib/audio/normalizeAudio';
 import { withPendingActivity } from '@/lib/async/pendingActivity';
 import { storageUrlManager } from './StorageUrlManager';
 
@@ -12,14 +17,14 @@ import { storageUrlManager } from './StorageUrlManager';
  * @param userId - Firebase Auth UID of the song owner.
  * @param songId - Unique song document ID.
  * @param stemName - Stem type (vocals, bass, drums, etc).
- * @returns Storage path: `users/{userId}/songs/{songId}/stems/{stemName}.mp3`
+ * @returns Storage path: `users/{userId}/songs/{songId}/stems/{stemName}.m4a`
  */
 export function buildStemStoragePath(
   userId: string,
   songId: string,
   stemName: string,
 ): string {
-  return `users/${userId}/songs/${songId}/stems/${stemName}.mp3`;
+  return `users/${userId}/songs/${songId}/stems/${stemName}${CANONICAL_AUDIO_EXTENSION}`;
 }
 
 /**
@@ -46,7 +51,7 @@ export async function uploadSeparationStem(
     await uploadBytes(storageRef, data, {
       customMetadata: {
         stemName,
-        contentType: 'audio/mpeg',
+        contentType: CANONICAL_AUDIO_MIME_TYPE,
       },
     });
 
@@ -98,12 +103,15 @@ export async function processStemUrls(
   const results = await Promise.all(
     Object.entries(stemUrls).map(async ([stemName, url]) => {
       try {
-        const blob = await downloadFileAsBlob(url);
+        const downloadedBlob = await downloadFileAsBlob(url);
+        const normalizedFile = await normalizeAudioFile(downloadedBlob, {
+          fileName: `${stemName}${CANONICAL_AUDIO_EXTENSION}`,
+        });
         const storagePath = await uploadSeparationStem(
           userId,
           songId,
           stemName,
-          blob,
+          normalizedFile,
         );
         return { stemName, storagePath };
       } catch (error) {
@@ -140,20 +148,31 @@ export async function deleteSeparationStems(
   songId: string,
   stemNames: string[],
 ): Promise<void> {
+  const paths = stemNames.map((stemName) =>
+    buildStemStoragePath(userId, songId, stemName),
+  );
+  await deleteSeparationStemPaths(paths);
+}
+
+/**
+ * Deletes stem files using their stored Cloud Storage paths.
+ *
+ * Use this when the persisted song document already has full paths, since
+ * it handles both legacy and canonical extensions without assumptions.
+ */
+export async function deleteSeparationStemPaths(
+  paths: string[],
+): Promise<void> {
   await withPendingActivity(async () => {
     const storage = getStorage(getFirebaseApp());
-    const deletionPromises = stemNames.map(async (stemName) => {
-      const storagePath = buildStemStoragePath(userId, songId, stemName);
+    const deletionPromises = paths.map(async (storagePath) => {
       const storageRef = ref(storage, storagePath);
       try {
         await deleteObject(storageRef);
         // Clear cache entry for deleted file
         storageUrlManager.invalidatePath(storagePath);
       } catch (error) {
-        console.error(
-          `Failed to delete stem ${stemName} at ${storagePath}:`,
-          error,
-        );
+        console.error(`Failed to delete stem at ${storagePath}:`, error);
         throw error;
       }
     });

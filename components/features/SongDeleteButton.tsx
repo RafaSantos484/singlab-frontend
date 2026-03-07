@@ -33,10 +33,7 @@ export interface SongDeleteButtonProps {
   /** Title of the song (displayed in confirmation dialog). */
   songTitle: string;
 
-  /**
-   * Stem names to clean up from Storage when deleting.
-   * Pass the keys from `separatedSongInfo.stems.paths` if available.
-   */
+  /** Available stem names to clean up from Storage when deleting. */
   stemNames?: string[];
 
   /** Optional size for the IconButton. Defaults to 'medium'. */
