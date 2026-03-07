@@ -3,6 +3,10 @@
 import { getStorage, ref, uploadBytes, deleteObject } from 'firebase/storage';
 
 import { getFirebaseApp } from '@/lib/firebase/app';
+import {
+  CANONICAL_AUDIO_EXTENSION,
+  CANONICAL_AUDIO_MIME_TYPE,
+} from '@/lib/audio/normalizeAudio';
 import { withPendingActivity } from '@/lib/async/pendingActivity';
 import { storageUrlManager } from './StorageUrlManager';
 
@@ -11,18 +15,18 @@ import { storageUrlManager } from './StorageUrlManager';
  *
  * @param userId - Firebase Auth UID of the song owner.
  * @param songId - Unique song document ID.
- * @returns Storage path: `users/{userId}/songs/{songId}/raw.mp3`
+ * @returns Storage path: `users/{userId}/songs/{songId}/raw.m4a`
  */
 export function buildRawSongStoragePath(
   userId: string,
   songId: string,
 ): string {
-  return `users/${userId}/songs/${songId}/raw.mp3`;
+  return `users/${userId}/songs/${songId}/raw${CANONICAL_AUDIO_EXTENSION}`;
 }
 
 /**
  * Uploads a raw audio file to Firebase Storage at the canonical path
- * `users/:userId/songs/:songId/raw.mp3`.
+ * `users/:userId/songs/:songId/raw.m4a`.
  *
  * The caller must generate a stable `songId` before uploading so it can
  * later register the song with the API using the same identifier.
@@ -43,7 +47,9 @@ export async function uploadRawSong(
     const storagePath = buildRawSongStoragePath(userId, songId);
     const storageRef = ref(storage, storagePath);
 
-    await uploadBytes(storageRef, file);
+    await uploadBytes(storageRef, file, {
+      contentType: CANONICAL_AUDIO_MIME_TYPE,
+    });
 
     // Invalidate cache to ensure fresh URL on next access
     storageUrlManager.invalidatePath(storagePath);
@@ -64,9 +70,19 @@ export async function deleteRawSong(
   userId: string,
   songId: string,
 ): Promise<void> {
+  const storagePath = buildRawSongStoragePath(userId, songId);
+  await deleteRawSongAtPath(storagePath);
+}
+
+/**
+ * Deletes a raw song file by its exact Storage path.
+ *
+ * Useful for deleting legacy files whose extension may differ from the current
+ * canonical one.
+ */
+export async function deleteRawSongAtPath(storagePath: string): Promise<void> {
   await withPendingActivity(async () => {
     const storage = getStorage(getFirebaseApp());
-    const storagePath = buildRawSongStoragePath(userId, songId);
     const storageRef = ref(storage, storagePath);
 
     await deleteObject(storageRef);
