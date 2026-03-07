@@ -19,7 +19,10 @@ import { useRef, useState } from 'react';
 import jsmediatags from 'jsmediatags';
 import { useTranslations } from 'next-intl';
 
-import { convertToMp3, Mp3ConversionError } from '@/lib/audio/convertToMp3';
+import {
+  AudioNormalizationError,
+  normalizeAudioFile,
+} from '@/lib/audio/normalizeAudio';
 
 import {
   createSong,
@@ -49,7 +52,7 @@ interface SongCreateDialogProps {
  * - File picker + drag-and-drop support for audio files
  * - Format validation (MIME type + extension fallback)
  * - Automatic metadata extraction from audio tags (title, artist)
- * - Client-side MP3 conversion using FFmpeg WASM (for any audio/video format)
+ * - Client-side canonical audio normalization using FFmpeg WASM
  * - Text fields for title and author with real-time validation
  * - Multi-phase progress tracking (converting → uploading → saving)
  * - Loading and error states with granular error messages
@@ -61,8 +64,8 @@ interface SongCreateDialogProps {
  * 2. File is validated (format, size)
  * 3. Metadata automatically extracted from audio tags (if present)
  * 4. User fills in/confirms title and author
- * 5. FFmpeg converts any format to MP3 (progress shown)
- * 6. Converted MP3 uploaded to Storage + metadata sent to API
+ * 5. FFmpeg normalizes any format to canonical AAC/M4A (progress shown)
+ * 6. Normalized audio uploaded to Storage + metadata sent to API
  * 7. Dialog closes automatically; songs list updates via Firestore listener
  */
 export function SongCreateDialog({
@@ -218,7 +221,7 @@ export function SongCreateDialog({
 
   /**
    * Handles form submission.
-   * Validates all fields, converts the file to MP3, creates the song via API,
+    * Validates all fields, normalizes the file, creates the song via API,
    * and handles the response.
    */
   async function handleSubmit(): Promise<void> {
@@ -242,18 +245,21 @@ export function SongCreateDialog({
     // Attempt conversion + upload
     setIsLoading(true);
     try {
-      // Step 1 – Convert to MP3 in the browser
+      // Step 1 – Normalize audio in the browser (canonical AAC/M4A)
       setUploadPhase('converting');
       setConversionProgress(0);
-      const mp3File = await convertToMp3(selectedFile, (pct) => {
-        setConversionProgress(pct);
+      const normalizedFile = await normalizeAudioFile(selectedFile, {
+        fileName: selectedFile.name,
+        onProgress: (pct) => {
+          setConversionProgress(pct);
+        },
       });
 
       // Step 2 – Upload and register
       await createSong({
         title: title.trim(),
         author: author.trim(),
-        file: mp3File,
+        file: normalizedFile,
         onPhaseChange: (phase) => setUploadPhase(phase),
       });
 
@@ -268,8 +274,8 @@ export function SongCreateDialog({
       // Handle different error types
       if (err instanceof InvalidFileError) {
         setFieldErrors({ file: err.message });
-      } else if (err instanceof Mp3ConversionError) {
-        console.error('MP3 conversion failed:', err);
+      } else if (err instanceof AudioNormalizationError) {
+        console.error('Audio normalization failed:', err);
         setError(t('errors.conversionFailed', { message: err.message }));
       } else if (err instanceof StorageUploadError) {
         setError(t('errors.storageUploadFailed', { message: err.message }));

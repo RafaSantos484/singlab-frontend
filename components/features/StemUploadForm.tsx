@@ -25,13 +25,17 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete';
 import { useTranslations } from 'next-intl';
 
-import { convertToMp3, Mp3ConversionError } from '@/lib/audio/convertToMp3';
+import {
+  AudioNormalizationError,
+  normalizeAudioFile,
+} from '@/lib/audio/normalizeAudio';
 import { validateSongFile, InvalidFileError } from '@/lib/api/song-creation';
 import type { SeparationStemName } from '@/lib/api/types';
 import {
   uploadSeparationStem,
   deleteSeparationStems,
 } from '@/lib/storage/uploadSeparationStems';
+import { withPendingActivity } from '@/lib/async/pendingActivity';
 import { getFirebaseAuth } from '@/lib/firebase/auth';
 import { updateSeparatedSongInfo } from '@/lib/firebase/songs';
 
@@ -83,7 +87,7 @@ const MAX_STEMS = 6;
  * Manual stem upload form used by the local separation provider.
  *
  * Requires vocals plus at least one additional stem, validates files,
- * converts to MP3 when needed, uploads to Storage, and persists
+ * normalizes audio to canonical format, uploads to Storage, and persists
  * `separatedSongInfo` with provider `local` in Firestore.
  */
 export const StemUploadForm = forwardRef<
@@ -194,156 +198,180 @@ export const StemUploadForm = forwardRef<
     setIsLoading(true);
 
     try {
-      const user = getFirebaseAuth().currentUser;
-      if (!user?.uid) throw new Error('User not authenticated');
+      await withPendingActivity(async (): Promise<void> => {
+        const user = getFirebaseAuth().currentUser;
+        if (!user?.uid) throw new Error('User not authenticated');
 
-      const stemsToUpload = stems.filter(
-        (s): s is { id: string; type: SeparationStemName; file: File } =>
-          s.type !== '' && s.file !== null,
-      );
-
-      // Convert all stems to MP3 in parallel (with per-stem progress)
-      const conversionPromises = stemsToUpload.map(async (stem) => {
-        setStemProgress((prev) => ({
-          ...prev,
-          [stem.id]: { phase: 'converting', progress: 0 },
-        }));
-
-        try {
-          const mp3File = await convertToMp3(stem.file, (pct) => {
-            setStemProgress((prev) => ({
-              ...prev,
-              [stem.id]: { phase: 'converting', progress: pct },
-            }));
-          });
-          return { id: stem.id, type: stem.type, file: mp3File };
-        } catch (err) {
-          const message =
-            err instanceof Mp3ConversionError ? err.message : 'file.invalid';
-          throw new Error(`${message} [${stem.type}]`);
-        }
-      });
-
-      let convertedStems: Array<{
-        id: string;
-        type: SeparationStemName;
-        file: File;
-      }> = [];
-
-      try {
-        convertedStems = await Promise.all(conversionPromises);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'file.invalid';
-        setError(t('validation.conversionFailed', { message }));
-        setStemProgress({});
-        return;
-      }
-
-      // Upload all stems to storage in parallel (with per-stem progress)
-      const uploadPromises = convertedStems.map(async (stem) => {
-        setStemProgress((prev) => ({
-          ...prev,
-          [stem.id]: { phase: 'uploading', progress: 0 },
-        }));
-
-        const storagePath = await uploadSeparationStem(
-          user.uid,
-          songId,
-          stem.type,
-          stem.file,
+        const stemsToUpload = stems.filter(
+          (s): s is { id: string; type: SeparationStemName; file: File } =>
+            s.type !== '' && s.file !== null,
         );
 
-        setStemProgress((prev) => ({
-          ...prev,
-          [stem.id]: { phase: 'uploading', progress: 100 },
-        }));
+        const uploadPromises: Array<
+          Promise<{ type: SeparationStemName; path: string }>
+        > = [];
+        let conversionError: unknown = null;
 
-        return { type: stem.type, path: storagePath };
-      });
+        // Convert sequentially and start each upload immediately after conversion.
+        for (const stem of stemsToUpload) {
+          setStemProgress((prev) => ({
+            ...prev,
+            [stem.id]: { phase: 'converting', progress: 0 },
+          }));
 
-      const uploadResults: Array<{ type: SeparationStemName; path: string }> =
-        [];
-      const uploadedStemNames: string[] = [];
+          try {
+            const normalizedFile = await normalizeAudioFile(stem.file, {
+              fileName: stem.file.name,
+              onProgress: (pct) => {
+                setStemProgress((prev) => ({
+                  ...prev,
+                  [stem.id]: { phase: 'converting', progress: pct },
+                }));
+              },
+            });
 
-      const uploadSettlements = await Promise.allSettled(uploadPromises);
+            setStemProgress((prev) => ({
+              ...prev,
+              [stem.id]: { phase: 'uploading', progress: 0 },
+            }));
+
+            const uploadPromise = uploadSeparationStem(
+              user.uid,
+              songId,
+              stem.type,
+              normalizedFile,
+            ).then((storagePath) => {
+              setStemProgress((prev) => ({
+                ...prev,
+                [stem.id]: { phase: 'uploading', progress: 100 },
+              }));
+
+              return { type: stem.type, path: storagePath };
+            });
+
+            uploadPromises.push(uploadPromise);
+          } catch (err) {
+            conversionError = err;
+            break;
+          }
+        }
+
+        const uploadResults: Array<{ type: SeparationStemName; path: string }> =
+          [];
+        const uploadedStemNames: string[] = [];
+
+        const uploadSettlements = await Promise.allSettled(uploadPromises);
 
       // Track results and identify failures.
       // Use `unknown` type because Promise.allSettled().reason can be any value,
       // not just Error (e.g., null, string, or custom object).
-      let uploadError: unknown = null;
-      uploadSettlements.forEach((settlement) => {
-        if (settlement.status === 'fulfilled') {
-          uploadResults.push(settlement.value);
-          uploadedStemNames.push(settlement.value.type);
-        } else {
-          // Capture first error for display
-          if (!uploadError) {
-            uploadError = settlement.reason;
+        let uploadError: unknown = null;
+        uploadSettlements.forEach((settlement) => {
+          if (settlement.status === 'fulfilled') {
+            uploadResults.push(settlement.value);
+            uploadedStemNames.push(settlement.value.type);
+          } else {
+            // Capture first error for display
+            if (!uploadError) {
+              uploadError = settlement.reason;
+            }
           }
+        });
+
+      // If conversion failed after partial uploads started/completed, rollback.
+        if (conversionError) {
+          if (uploadedStemNames.length > 0) {
+            try {
+              await deleteSeparationStems(user.uid, songId, uploadedStemNames);
+            } catch (deleteErr) {
+              console.error('Failed to rollback uploaded stems:', deleteErr);
+            }
+          }
+
+          const rawMessage =
+            conversionError instanceof AudioNormalizationError
+              ? conversionError.message
+              : conversionError instanceof Error
+                ? conversionError.message
+                : 'file.invalid';
+          setError(
+            t('validation.conversionFailed', {
+              message: rawMessage,
+            }),
+          );
+          setStemProgress({});
+          return;
         }
-      });
 
       // If any upload failed, rollback all successful uploads
-      if (uploadError) {
-        if (uploadedStemNames.length > 0) {
-          try {
-            await deleteSeparationStems(user.uid, songId, uploadedStemNames);
-          } catch (deleteErr) {
-            console.error('Failed to rollback uploaded stems:', deleteErr);
+        if (uploadError) {
+          if (uploadedStemNames.length > 0) {
+            try {
+              await deleteSeparationStems(user.uid, songId, uploadedStemNames);
+            } catch (deleteErr) {
+              console.error('Failed to rollback uploaded stems:', deleteErr);
+            }
           }
+
+          const message =
+            uploadError instanceof Error ? uploadError.message : 'Unknown error';
+          setError(
+            t('validation.uploadFailed', {
+              message,
+            }),
+          );
+          setStemProgress({});
+          return;
         }
 
-        const message =
-          uploadError instanceof Error ? uploadError.message : 'Unknown error';
-        setError(
-          t('validation.uploadFailed', {
-            message,
-          }),
-        );
-        setStemProgress({});
-        return;
-      }
-
-      const stemPaths: Partial<Record<SeparationStemName, string>> = {};
-      uploadResults.forEach(({ type, path }) => {
-        stemPaths[type] = path;
-      });
-
-      // Update Firestore with stems
-      try {
-        await updateSeparatedSongInfo(user.uid, songId, {
-          provider: 'local',
-          providerData: {
-            uploadedAt: new Date().toISOString(),
-          },
-          stems: {
-            uploadedAt: new Date().toISOString(),
-            paths: stemPaths,
-          },
+        const stemPaths: Partial<Record<SeparationStemName, string>> = {};
+        uploadResults.forEach(({ type, path }) => {
+          stemPaths[type] = path;
         });
-      } catch (firestoreErr) {
-        // Rollback: delete all uploaded stems if Firestore update fails
-        if (uploadedStemNames.length > 0) {
-          try {
-            await deleteSeparationStems(user.uid, songId, uploadedStemNames);
-          } catch (deleteErr) {
-            console.error(
-              'Failed to rollback stems after Firestore update failure:',
-              deleteErr,
-            );
+
+        const availableStems = Object.keys(stemPaths).filter(
+          (stem): stem is SeparationStemName =>
+            [
+              'vocals',
+              'guitar',
+              'piano',
+              'bass',
+              'drums',
+              'other',
+            ].includes(stem),
+        );
+
+        // Update Firestore with stems
+        try {
+          await updateSeparatedSongInfo(user.uid, songId, {
+            provider: 'local',
+            providerData: null,
+            stems: availableStems,
+          });
+        } catch (firestoreErr) {
+          // Rollback: delete all uploaded stems if Firestore update fails
+          if (uploadedStemNames.length > 0) {
+            try {
+              await deleteSeparationStems(user.uid, songId, uploadedStemNames);
+            } catch (deleteErr) {
+              console.error(
+                'Failed to rollback stems after Firestore update failure:',
+                deleteErr,
+              );
+            }
           }
+
+          const message =
+            firestoreErr instanceof Error
+              ? firestoreErr.message
+              : 'Unknown error';
+          setError(t('validation.firestoreUpdateFailed', { message }));
+          setStemProgress({});
+          return;
         }
 
-        const message =
-          firestoreErr instanceof Error
-            ? firestoreErr.message
-            : 'Unknown error';
-        setError(t('validation.firestoreUpdateFailed', { message }));
-        setStemProgress({});
-        return;
-      }
-
-      onSuccess();
+        onSuccess();
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       setError(t('validation.uploadFailed', { message }));
