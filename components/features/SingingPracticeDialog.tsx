@@ -35,44 +35,54 @@ const HYSTERESIS_MARGIN_SEMITONES = 1;
 const SAMPLE_INTERVAL_MS = 15;
 
 /** Detection thresholds tuned for reliability */
-const PITCH_RMS_THRESHOLD = 0.006;
-const PITCH_CORRELATION_THRESHOLD = 0.7;
+const PITCH_RMS_THRESHOLD = 0.008; // Slightly lower gate for softer input
+/** YIN threshold: lower values are more selective (0.1-0.2 works well for voice) */
+const YIN_CMND_THRESHOLD = 0.12;
 
-/** Frequency analysis bounds */
-const MIN_FREQUENCY_HZ = 60;
-const MAX_FREQUENCY_HZ = 1100;
+/** Frequency analysis bounds extended for lower and higher notes */
+const MIN_FREQUENCY_HZ = 50;
+const MAX_FREQUENCY_HZ = 1300;
 
 /** Default visible MIDI window */
 const MIN_VISIBLE_MIDI = 36; // C2
 const MAX_VISIBLE_MIDI = 84; // C6
 
-/** Keep downsampling for lower CPU usage */
+/** Balanced downsampling for CPU use and stability */
 const DOWNSAMPLE_FACTOR = 2;
 
 /** Low-latency smoothing controls */
-/** Median filter window sized to reject outliers with minimal lag (~75ms) */
 const MEDIAN_WINDOW_SIZE = 5;
 
 /** Dynamic EMA limits based on detection confidence */
-const EMA_ALPHA_FAST = 0.55; // high confidence: responsive and stable
-const EMA_ALPHA_SLOW = 0.28; // low confidence: stronger smoothing
+const EMA_ALPHA_FAST = 0.82;
+const EMA_ALPHA_SLOW = 0.42;
+const EMA_ALPHA_ATTACK_BOOST = 0.12;
+const ATTACK_DELTA_SEMITONES = 1.2;
 
 /** Pitch velocity clamp in semitones/second to avoid jagged jumps */
-const MAX_SEMITONES_PER_SECOND = 32;
+const MAX_SEMITONES_PER_SECOND_SLOW = 20;
+const MAX_SEMITONES_PER_SECOND_FAST = 56;
+const MAX_SEMITONES_PER_SECOND_ATTACK = 78;
 
-/** Hold last note briefly through short detection gaps */
-const GAP_HOLD_SAMPLES = 2;
+/** Hold last note through short detection gaps */
+const GAP_HOLD_SAMPLES = 3;
 
 /** Pitch history buffer size */
-const MAX_PITCH_HISTORY_SAMPLES = 24;
+const MAX_PITCH_HISTORY_SAMPLES = 28;
 
 /** Outlier rejection: discard large low-confidence jumps */
-const OUTLIER_REJECTION_SEMITONES = 1.8;
-const HIGH_CONFIDENCE_CORRELATION = 0.93;
+const OUTLIER_REJECTION_MIN_SEMITONES = 1.7;
+const OUTLIER_REJECTION_MAX_SEMITONES = 6.5;
+const LOW_CONFIDENCE = 0.72;
 
 /** Sticky cents deadband and quantization for steadier display */
-const STICKY_CENTS_DEADBAND = 8; // ±8 cents
-const CENTS_QUANTIZATION_STEP = 5; // quantize in 5-cent steps
+const STICKY_CENTS_DEADBAND = 8;
+const CENTS_QUANTIZATION_STEP = 5;
+
+/** Microphone prefilter parameters to keep lows while reducing hum */
+const MIC_HIGHPASS_HZ = 50;
+const MIC_LOWPASS_HZ = 1600;
+const MIC_FILTER_Q = 0.707; // ~Butterworth
 
 interface PitchPoint {
   time: number;
@@ -91,6 +101,8 @@ interface PitchTrackProcessorState {
   gapSamples: number;
   lastDisplayCents: number | null;
 }
+
+type TimeDomainFrame = Parameters<AnalyserNode['getFloatTimeDomainData']>[0];
 
 interface SingingPracticeDialogProps {
   open: boolean;
@@ -225,168 +237,112 @@ function resetPitchTrackProcessorState(state: PitchTrackProcessorState): void {
   state.lastDisplayCents = null;
 }
 
-function processPitchDetection(
-  state: PitchTrackProcessorState,
-  detection: { frequency: number; correlation: number } | null,
-  elapsedMs: number,
-): number | null {
-  const frequency = detection?.frequency ?? null;
-  const correlation = detection?.correlation ?? null;
-  const rawMidi = frequency !== null ? frequencyToMidi(frequency) : null;
-
-  appendPitchHistory(state.pitchHistory, rawMidi);
-
-  let medianMidi = getMedianFromRecentValid(
-    state.pitchHistory,
-    MEDIAN_WINDOW_SIZE,
-  );
-
-  // Robust outlier rejection for large low-confidence jumps.
-  if (
-    medianMidi !== null &&
-    state.lastSmoothedPitch !== null &&
-    correlation !== null &&
-    correlation < HIGH_CONFIDENCE_CORRELATION &&
-    Math.abs(medianMidi - state.lastSmoothedPitch) > OUTLIER_REJECTION_SEMITONES
-  ) {
-    medianMidi = null;
-  }
-
-  let smoothedMidi: number | null = null;
-
-  if (medianMidi !== null) {
-    // Dynamic EMA alpha based on detection confidence.
-    const dynAlpha =
-      correlation === null
-        ? EMA_ALPHA_SLOW
-        : mapRange(correlation, 0.7, 0.98, EMA_ALPHA_SLOW, EMA_ALPHA_FAST);
-
-    const emaMidi = exponentialMovingAverage(
-      state.emaPitch,
-      medianMidi,
-      dynAlpha,
-    );
-
-    // Delta limit proportional to real elapsed time.
-    const dtSec = Math.max(elapsedMs, SAMPLE_INTERVAL_MS) / 1000;
-    const maxSemitonesPerSample = MAX_SEMITONES_PER_SECOND * dtSec;
-
-    smoothedMidi =
-      state.lastSmoothedPitch !== null
-        ? limitPitchDelta(
-            emaMidi,
-            state.lastSmoothedPitch,
-            maxSemitonesPerSample,
-          )
-        : emaMidi;
-
-    state.emaPitch = emaMidi;
-    state.lastSmoothedPitch = smoothedMidi;
-    state.gapSamples = 0;
-  } else {
-    state.gapSamples += 1;
-    if (
-      state.gapSamples <= GAP_HOLD_SAMPLES &&
-      state.lastSmoothedPitch !== null
-    ) {
-      smoothedMidi = state.lastSmoothedPitch;
-    } else {
-      smoothedMidi = null;
-      state.emaPitch = null;
-    }
-  }
-
-  if (smoothedMidi === null) {
-    state.lastDisplayCents = null;
-    return null;
-  }
-
-  // Sticky deadband plus cents quantization for stable rendering.
-  const nearestMidi = Math.round(smoothedMidi);
-  let cents = (smoothedMidi - nearestMidi) * 100;
-  if (state.lastDisplayCents !== null) {
-    const deltaCents = cents - state.lastDisplayCents;
-    if (Math.abs(deltaCents) < STICKY_CENTS_DEADBAND) {
-      cents = state.lastDisplayCents;
-    }
-  }
-
-  // Quantize cents in fixed 5-cent increments.
-  cents = Math.round(cents / CENTS_QUANTIZATION_STEP) * CENTS_QUANTIZATION_STEP;
-  state.lastDisplayCents = cents;
-
-  return nearestMidi + cents / 100;
+function removeDCOffset(data: Float32Array): void {
+  let mean = 0;
+  for (let i = 0; i < data.length; i += 1) mean += data[i];
+  mean /= data.length || 1;
+  for (let i = 0; i < data.length; i += 1) data[i] -= mean;
 }
 
-/** Returns frequency and best correlation for adaptive smoothing */
-function detectPitchFromFrame(
-  frame: Float32Array<ArrayBuffer>,
+interface DetectionResult {
+  frequency: number;
+  confidence: number; // 0..1, where 1 is best
+}
+
+/** YIN (difference + cumulative mean normalized difference) with parabolic interpolation */
+function detectPitchYINFromFrame(
+  frame: TimeDomainFrame,
   sampleRate: number,
-): { frequency: number; correlation: number } | null {
-  const downsampledLength = Math.floor(frame.length / DOWNSAMPLE_FACTOR);
-  if (downsampledLength < 64) {
-    return null;
+): DetectionResult | null {
+  // Downsample
+  const dsLen = Math.floor(frame.length / DOWNSAMPLE_FACTOR);
+  if (dsLen < 64) return null;
+
+  const x = new Float32Array(dsLen);
+  for (let i = 0; i < dsLen; i += 1) {
+    x[i] = frame[i * DOWNSAMPLE_FACTOR] ?? 0;
   }
 
-  const downsampled = new Float32Array(downsampledLength);
-  for (let i = 0; i < downsampledLength; i += 1) {
-    downsampled[i] = frame[i * DOWNSAMPLE_FACTOR] ?? 0;
-  }
+  // Lightweight preprocessing
+  removeDCOffset(x);
+  // YIN generally works better here without a window (preserves periodicity)
+  // applyHannWindow(x); // optional
 
+  // RMS gating
   let rms = 0;
-  for (let i = 0; i < downsampledLength; i += 1) {
-    rms += downsampled[i] * downsampled[i];
-  }
-  rms = Math.sqrt(rms / downsampledLength);
+  for (let i = 0; i < dsLen; i += 1) rms += x[i] * x[i];
+  rms = Math.sqrt(rms / dsLen);
+  if (!isFinite(rms) || rms < PITCH_RMS_THRESHOLD) return null;
 
-  if (!isFinite(rms) || rms < PITCH_RMS_THRESHOLD) {
-    return null;
-  }
+  const dsRate = sampleRate / DOWNSAMPLE_FACTOR;
+  const minLag = Math.max(2, Math.floor(dsRate / MAX_FREQUENCY_HZ));
+  const maxLag = Math.min(Math.floor(dsRate / MIN_FREQUENCY_HZ), dsLen - 2);
 
-  const minLag = Math.floor(sampleRate / MAX_FREQUENCY_HZ / DOWNSAMPLE_FACTOR);
-  const maxLag = Math.floor(sampleRate / MIN_FREQUENCY_HZ / DOWNSAMPLE_FACTOR);
+  if (maxLag <= minLag + 2) return null;
 
-  let bestLag = -1;
-  let bestCorrelation = 0;
-
-  // Normalized autocorrelation over the full downsampled window.
-  for (let lag = minLag; lag <= maxLag; lag += 1) {
+  // Difference function d(tau)
+  const d = new Float32Array(maxLag + 1);
+  for (let tau = 1; tau <= maxLag; tau += 1) {
     let sum = 0;
-    let energyA = 0;
-    let energyB = 0;
-
-    const limit = downsampledLength - lag;
-    for (let i = 0; i < limit; i += 1) {
-      const a = downsampled[i];
-      const b = downsampled[i + lag];
-      sum += a * b;
-      energyA += a * a;
-      energyB += b * b;
+    for (let i = 0; i < dsLen - tau; i += 1) {
+      const diff = x[i] - x[i + tau];
+      sum += diff * diff;
     }
+    d[tau] = sum;
+  }
 
-    const denom = Math.sqrt(energyA * energyB);
-    const correlation = denom > 0 ? sum / denom : 0;
+  // Cumulative mean normalized difference function (CMND)
+  const cmnd = new Float32Array(maxLag + 1);
+  cmnd[0] = 1;
+  let cumulative = 0;
+  for (let tau = 1; tau <= maxLag; tau += 1) {
+    cumulative += d[tau];
+    cmnd[tau] = d[tau] * (tau / (cumulative || 1));
+  }
 
-    if (correlation > bestCorrelation) {
-      bestCorrelation = correlation;
-      bestLag = lag;
+  // Pick the first tau with cmnd below threshold at a local minimum
+  let tauEstimate = -1;
+  for (let tau = minLag + 1; tau < maxLag; tau += 1) {
+    if (
+      cmnd[tau] < YIN_CMND_THRESHOLD &&
+      cmnd[tau] < cmnd[tau - 1] &&
+      cmnd[tau] <= cmnd[tau + 1]
+    ) {
+      tauEstimate = tau;
+      break;
+    }
+  }
+  // Fallback to the global minimum for better noise stability
+  if (tauEstimate < 0) {
+    let minV = Infinity;
+    for (let tau = minLag; tau <= maxLag; tau += 1) {
+      if (cmnd[tau] < minV) {
+        minV = cmnd[tau];
+        tauEstimate = tau;
+      }
     }
   }
 
-  if (bestLag <= 0 || bestCorrelation < PITCH_CORRELATION_THRESHOLD) {
+  // Parabolic interpolation around the minimum
+  let refinedTau = tauEstimate;
+  if (tauEstimate > minLag && tauEstimate < maxLag) {
+    const cM1 = cmnd[tauEstimate - 1];
+    const c0 = cmnd[tauEstimate];
+    const cP1 = cmnd[tauEstimate + 1];
+    const denom = cM1 - 2 * c0 + cP1;
+    if (Math.abs(denom) > 1e-12) {
+      const offset = (0.5 * (cM1 - cP1)) / denom;
+      refinedTau = tauEstimate + clamp(offset, -0.5, 0.5);
+    }
+  }
+
+  const freq = dsRate / refinedTau;
+  if (!isFinite(freq) || freq < MIN_FREQUENCY_HZ || freq > MAX_FREQUENCY_HZ) {
     return null;
   }
 
-  const frequency = sampleRate / DOWNSAMPLE_FACTOR / bestLag;
-  if (
-    !isFinite(frequency) ||
-    frequency < MIN_FREQUENCY_HZ ||
-    frequency > MAX_FREQUENCY_HZ
-  ) {
-    return null;
-  }
-
-  return { frequency, correlation: bestCorrelation };
+  const confidence = clamp(1 - cmnd[Math.round(tauEstimate)], 0, 1);
+  return { frequency: freq, confidence };
 }
 
 function drawRoundRect(
@@ -397,7 +353,6 @@ function drawRoundRect(
   h: number,
   r: number,
 ): void {
-  // Canvas 2D has no built-in rounded-rectangle primitive in all targets.
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.lineTo(x + w - r, y);
@@ -433,7 +388,6 @@ function drawSmoothPath(
     context.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
   }
 
-  // Final segment to the last point.
   const last = pts.length - 1;
   context.quadraticCurveTo(
     pts[last - 1].x,
@@ -565,9 +519,10 @@ function drawPracticeCanvas(
     .filter((point) => point.midi === null)
     .forEach((point) => {
       const x = xFromTime(point.time);
+      const heightVal = height;
       context.beginPath();
-      context.moveTo(x, height - 12);
-      context.lineTo(x, height - 2);
+      context.moveTo(x, heightVal - 12);
+      context.lineTo(x, heightVal - 2);
       context.stroke();
     });
 
@@ -592,31 +547,25 @@ function drawPracticeCanvas(
     context.stroke();
     context.setLineDash([]);
 
-    // Find the pitch point closest to hovered time within ±0.5 s.
     const hoveredTime = minTime + (hoverX / width) * timeWindowSeconds;
-    let closestVocalsPoint: PitchPoint | null = null;
-    let closestVocalsDist = 0.5;
-    for (const point of visibleVocalsPoints) {
-      if (point.midi !== null) {
-        const dist = Math.abs(point.time - hoveredTime);
-        if (dist < closestVocalsDist) {
-          closestVocalsDist = dist;
-          closestVocalsPoint = point;
-        }
-      }
-    }
 
-    let closestMicrophonePoint: PitchPoint | null = null;
-    let closestMicrophoneDist = 0.5;
-    for (const point of visibleMicrophonePoints) {
-      if (point.midi !== null) {
-        const dist = Math.abs(point.time - hoveredTime);
-        if (dist < closestMicrophoneDist) {
-          closestMicrophoneDist = dist;
-          closestMicrophonePoint = point;
+    const pickClosest = (pts: PitchPoint[]): PitchPoint | null => {
+      let best: PitchPoint | null = null;
+      let bestDist = 0.5;
+      for (const p of pts) {
+        if (p.midi !== null) {
+          const dist = Math.abs(p.time - hoveredTime);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = p;
+          }
         }
       }
-    }
+      return best;
+    };
+
+    const closestVocalsPoint = pickClosest(visibleVocalsPoints);
+    const closestMicrophonePoint = pickClosest(visibleMicrophonePoints);
 
     const hoverItems: Array<{
       x: number;
@@ -626,7 +575,7 @@ function drawPracticeCanvas(
       borderColor: string;
     }> = [];
 
-    if (closestVocalsPoint !== null && closestVocalsPoint.midi !== null) {
+    if (closestVocalsPoint?.midi != null) {
       hoverItems.push({
         x: xFromTime(closestVocalsPoint.time),
         y: yFromMidi(closestVocalsPoint.midi),
@@ -636,10 +585,7 @@ function drawPracticeCanvas(
       });
     }
 
-    if (
-      closestMicrophonePoint !== null &&
-      closestMicrophonePoint.midi !== null
-    ) {
+    if (closestMicrophonePoint?.midi != null) {
       hoverItems.push({
         x: xFromTime(closestMicrophonePoint.time),
         y: yFromMidi(closestMicrophonePoint.midi),
@@ -699,7 +645,7 @@ export function SingingPracticeDialog({
   );
   const [isPracticePlaying, setIsPracticePlaying] = useState(true);
   const [isInstrumentalEnabled, setIsInstrumentalEnabled] = useState(true);
-  const [isMicrophoneEnabled, setIsMicrophoneEnabled] = useState(true);
+  const [isMicrophoneEnabled, setIsMicrophoneEnabled] = useState(true); // Controls analysis only
   const [isDynamicAxis, setIsDynamicAxis] = useState(true);
   const [showNoteLabels, setShowNoteLabels] = useState(true);
   const [readout, setReadout] = useState<PracticeReadout>({
@@ -720,9 +666,8 @@ export function SingingPracticeDialog({
   const vocalsAnalyserRef = useRef<AnalyserNode | null>(null);
   const microphoneAnalyserRef = useRef<AnalyserNode | null>(null);
   const backingGainRef = useRef<GainNode | null>(null);
-  const microphoneGainRef = useRef<GainNode | null>(null);
-  const vocalsFrameRef = useRef<Float32Array<ArrayBuffer> | null>(null);
-  const microphoneFrameRef = useRef<Float32Array<ArrayBuffer> | null>(null);
+  const vocalsFrameRef = useRef<TimeDomainFrame | null>(null);
+  const microphoneFrameRef = useRef<TimeDomainFrame | null>(null);
   const microphoneStreamRef = useRef<MediaStream | null>(null);
   const vocalsPointsRef = useRef<PitchPoint[]>([]);
   const microphonePointsRef = useRef<PitchPoint[]>([]);
@@ -790,10 +735,6 @@ export function SingingPracticeDialog({
     resetPitchTrackProcessorState(vocalsProcessorRef.current);
     resetPitchTrackProcessorState(microphoneProcessorRef.current);
     lastSampleAtRef.current = 0;
-    setReadout({
-      vocalsNoteLabel: null,
-      microphoneNoteLabel: null,
-    });
   }, [open, isEligible, visibleRangeSemitones]);
 
   useEffect(() => {
@@ -855,6 +796,8 @@ export function SingingPracticeDialog({
     }
 
     let isDisposed = false;
+    const vocalsProcessorState = vocalsProcessorRef.current;
+    const microphoneProcessorState = microphoneProcessorRef.current;
 
     const createAudioElement = (src: string): HTMLAudioElement => {
       const element = new Audio();
@@ -877,11 +820,15 @@ export function SingingPracticeDialog({
     backingAudioRefs.current = backingElements;
 
     const context = new AudioContext();
-    const vocalsAnalyser = context.createAnalyser();
 
-    /** Smaller analysis window reduces effective latency. */
-    vocalsAnalyser.fftSize = 1024;
-    vocalsAnalyser.smoothingTimeConstant = 0; // does not affect time-domain reads
+    // ====== ANALYZERS ======
+    const vocalsAnalyser = context.createAnalyser();
+    vocalsAnalyser.fftSize = 4096; // use same analysis window as microphone for consistency
+    vocalsAnalyser.smoothingTimeConstant = 0;
+
+    const microphoneAnalyser = context.createAnalyser();
+    microphoneAnalyser.fftSize = 4096; // Larger window improves low-note tracking
+    microphoneAnalyser.smoothingTimeConstant = 0;
 
     const vocalsSource = context.createMediaElementSource(audioElement);
     const backingGain = context.createGain();
@@ -891,7 +838,23 @@ export function SingingPracticeDialog({
       context.createMediaElementSource(element),
     );
 
-    vocalsSource.connect(vocalsAnalyser);
+    // Route vocals playback and analysis through separate branches.
+    // Analysis uses the same HP/LP preprocessing as microphone to keep pitch
+    // tracking behavior consistent between both curves.
+    const vocalsHp = context.createBiquadFilter();
+    vocalsHp.type = 'highpass';
+    vocalsHp.frequency.value = MIC_HIGHPASS_HZ;
+    vocalsHp.Q.value = MIC_FILTER_Q;
+
+    const vocalsLp = context.createBiquadFilter();
+    vocalsLp.type = 'lowpass';
+    vocalsLp.frequency.value = MIC_LOWPASS_HZ;
+    vocalsLp.Q.value = MIC_FILTER_Q;
+
+    // Routing
+    vocalsSource.connect(vocalsHp);
+    vocalsHp.connect(vocalsLp);
+    vocalsLp.connect(vocalsAnalyser);
     vocalsSource.connect(context.destination);
     backingSources.forEach((source) => {
       source.connect(backingGain);
@@ -934,8 +897,8 @@ export function SingingPracticeDialog({
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
+            echoCancellation: false,
+            noiseSuppression: false,
             autoGainControl: false,
           },
         });
@@ -948,23 +911,27 @@ export function SingingPracticeDialog({
         }
 
         const microphoneSource = context.createMediaStreamSource(stream);
-        const microphoneAnalyser = context.createAnalyser();
-        const microphoneGain = context.createGain();
 
-        microphoneAnalyser.fftSize = 1024;
-        microphoneAnalyser.smoothingTimeConstant = 0;
-        microphoneGain.gain.value = microphoneEnabledRef.current ? 1 : 0;
+        // Chain: mic -> HP -> LP -> analyser (no output to destination)
+        const hp = context.createBiquadFilter();
+        hp.type = 'highpass';
+        hp.frequency.value = MIC_HIGHPASS_HZ;
+        hp.Q.value = MIC_FILTER_Q;
 
-        microphoneSource.connect(microphoneAnalyser);
-        microphoneSource.connect(microphoneGain);
-        microphoneGain.connect(context.destination);
+        const lp = context.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = MIC_LOWPASS_HZ;
+        lp.Q.value = MIC_FILTER_Q;
+
+        microphoneSource.connect(hp);
+        hp.connect(lp);
+        lp.connect(microphoneAnalyser);
 
         microphoneStreamRef.current = stream;
         microphoneAnalyserRef.current = microphoneAnalyser;
-        microphoneGainRef.current = microphoneGain;
         microphoneFrameRef.current = new Float32Array(
           microphoneAnalyser.fftSize,
-        ) as Float32Array<ArrayBuffer>;
+        ) as TimeDomainFrame;
 
         setMicrophoneErrorKey(null);
         setIsMicrophoneReady(true);
@@ -991,7 +958,7 @@ export function SingingPracticeDialog({
     backingGainRef.current = backingGain;
     vocalsFrameRef.current = new Float32Array(
       vocalsAnalyser.fftSize,
-    ) as Float32Array<ArrayBuffer>;
+    ) as TimeDomainFrame;
 
     return () => {
       isDisposed = true;
@@ -1031,7 +998,6 @@ export function SingingPracticeDialog({
       vocalsAnalyserRef.current = null;
       microphoneAnalyserRef.current = null;
       backingGainRef.current = null;
-      microphoneGainRef.current = null;
       vocalsFrameRef.current = null;
       microphoneFrameRef.current = null;
       microphoneStreamRef.current = null;
@@ -1040,8 +1006,8 @@ export function SingingPracticeDialog({
       audioContextRef.current = null;
       vocalsPointsRef.current = [];
       microphonePointsRef.current = [];
-      resetPitchTrackProcessorState(vocalsProcessorRef.current);
-      resetPitchTrackProcessorState(microphoneProcessorRef.current);
+      resetPitchTrackProcessorState(vocalsProcessorState);
+      resetPitchTrackProcessorState(microphoneProcessorState);
       setReadout({
         vocalsNoteLabel: null,
         microphoneNoteLabel: null,
@@ -1063,16 +1029,149 @@ export function SingingPracticeDialog({
     backingGain.gain.value = isInstrumentalEnabled ? 1 : 0;
   }, [isInstrumentalEnabled]);
 
+  // Microphone monitoring output was removed.
+  // The switch now toggles analysis only, without routing mic audio to speakers.
   useEffect(() => {
     microphoneEnabledRef.current = isMicrophoneEnabled;
+  }, [isMicrophoneEnabled]);
 
-    const microphoneGain = microphoneGainRef.current;
-    if (!microphoneGain) {
-      return;
+  /** Pitch processing without octave continuity correction */
+  function processPitchDetection(
+    state: PitchTrackProcessorState,
+    detection: DetectionResult | null,
+    elapsedMs: number,
+  ): number | null {
+    const frequency = detection?.frequency ?? null;
+    const confidence = detection?.confidence ?? null;
+
+    const rawMidi = frequency != null ? frequencyToMidi(frequency) : null;
+
+    appendPitchHistory(state.pitchHistory, rawMidi);
+
+    let medianMidi = getMedianFromRecentValid(
+      state.pitchHistory,
+      MEDIAN_WINDOW_SIZE,
+    );
+
+    // Reject large jumps when confidence is low.
+    if (
+      medianMidi !== null &&
+      state.lastSmoothedPitch !== null &&
+      confidence !== null &&
+      confidence < LOW_CONFIDENCE
+    ) {
+      const outlierLimit = mapRange(
+        confidence,
+        0,
+        LOW_CONFIDENCE,
+        OUTLIER_REJECTION_MIN_SEMITONES,
+        OUTLIER_REJECTION_MAX_SEMITONES,
+      );
+
+      if (Math.abs(medianMidi - state.lastSmoothedPitch) > outlierLimit) {
+        medianMidi = null;
+      }
     }
 
-    microphoneGain.gain.value = isMicrophoneEnabled ? 1 : 0;
-  }, [isMicrophoneEnabled]);
+    let smoothedMidi: number | null = null;
+
+    if (medianMidi !== null) {
+      const previousPitch = state.lastSmoothedPitch;
+      const pitchDelta =
+        previousPitch === null ? 0 : Math.abs(medianMidi - previousPitch);
+
+      const dynAlpha =
+        confidence === null
+          ? EMA_ALPHA_SLOW
+          : mapRange(confidence, 0.45, 0.99, EMA_ALPHA_SLOW, EMA_ALPHA_FAST);
+
+      const attackAlphaBoost =
+        pitchDelta > ATTACK_DELTA_SEMITONES
+          ? mapRange(
+              pitchDelta,
+              ATTACK_DELTA_SEMITONES,
+              ATTACK_DELTA_SEMITONES + 6,
+              0,
+              EMA_ALPHA_ATTACK_BOOST,
+            )
+          : 0;
+
+      const effectiveAlpha = clamp(
+        dynAlpha + attackAlphaBoost,
+        EMA_ALPHA_SLOW,
+        0.95,
+      );
+
+      const emaMidi = exponentialMovingAverage(
+        state.emaPitch,
+        medianMidi,
+        effectiveAlpha,
+      );
+
+      const dtSec = Math.max(elapsedMs, SAMPLE_INTERVAL_MS) / 1000;
+      const maxSemitonesPerSecond =
+        confidence === null
+          ? MAX_SEMITONES_PER_SECOND_SLOW
+          : mapRange(
+              confidence,
+              0.45,
+              0.99,
+              MAX_SEMITONES_PER_SECOND_SLOW,
+              MAX_SEMITONES_PER_SECOND_FAST,
+            );
+
+      const boostedMaxSemitonesPerSecond =
+        pitchDelta > ATTACK_DELTA_SEMITONES * 1.8
+          ? Math.max(maxSemitonesPerSecond, MAX_SEMITONES_PER_SECOND_ATTACK)
+          : maxSemitonesPerSecond;
+
+      const maxSemitonesPerSample = boostedMaxSemitonesPerSecond * dtSec;
+
+      smoothedMidi =
+        state.lastSmoothedPitch !== null
+          ? limitPitchDelta(
+              emaMidi,
+              state.lastSmoothedPitch,
+              maxSemitonesPerSample,
+            )
+          : emaMidi;
+
+      state.emaPitch = emaMidi;
+      state.lastSmoothedPitch = smoothedMidi;
+      state.gapSamples = 0;
+    } else {
+      state.gapSamples += 1;
+      if (
+        state.gapSamples <= GAP_HOLD_SAMPLES &&
+        state.lastSmoothedPitch !== null
+      ) {
+        smoothedMidi = state.lastSmoothedPitch;
+      } else {
+        smoothedMidi = null;
+        state.emaPitch = null;
+      }
+    }
+
+    if (smoothedMidi === null) {
+      state.lastDisplayCents = null;
+      return null;
+    }
+
+    // Sticky cents plus fixed-step quantization
+    const nearestMidi = Math.round(smoothedMidi);
+    let cents = (smoothedMidi - nearestMidi) * 100;
+    if (state.lastDisplayCents !== null) {
+      const deltaCents = cents - state.lastDisplayCents;
+      if (Math.abs(deltaCents) < STICKY_CENTS_DEADBAND) {
+        cents = state.lastDisplayCents;
+      }
+    }
+    cents =
+      Math.round(cents / CENTS_QUANTIZATION_STEP) * CENTS_QUANTIZATION_STEP;
+    state.lastDisplayCents = cents;
+
+    return nearestMidi + cents / 100;
+  }
 
   useEffect(() => {
     if (!open || !isEligible || !resolvedVocalsUrl) {
@@ -1139,18 +1238,16 @@ export function SingingPracticeDialog({
           let vocalsDisplayMidi: number | null = null;
           if (!isAnalysisBlockedByCors) {
             vocalsAnalyser.getFloatTimeDomainData(vocalsFrame);
-            const vocalsDetection = detectPitchFromFrame(
+            const det = detectPitchYINFromFrame(
               vocalsFrame,
               vocalsAnalyser.context.sampleRate,
             );
             vocalsDisplayMidi = processPitchDetection(
               vocalsProcessorRef.current,
-              vocalsDetection,
+              det,
               elapsedMs,
             );
           } else {
-            // Keep microphone analysis active even when vocals waveform reads
-            // are blocked by Storage CORS.
             resetPitchTrackProcessorState(vocalsProcessorRef.current);
           }
 
@@ -1163,13 +1260,13 @@ export function SingingPracticeDialog({
           let microphoneDisplayMidi: number | null = null;
           if (isMicrophoneTrackActive) {
             microphoneAnalyser.getFloatTimeDomainData(microphoneFrame);
-            const microphoneDetection = detectPitchFromFrame(
+            const detMic = detectPitchYINFromFrame(
               microphoneFrame,
               microphoneAnalyser.context.sampleRate,
             );
             microphoneDisplayMidi = processPitchDetection(
               microphoneProcessorRef.current,
-              microphoneDetection,
+              detMic,
               elapsedMs,
             );
           } else {
@@ -1364,9 +1461,7 @@ export function SingingPracticeDialog({
     });
 
     if (deltaSec < 0) {
-      // Backward seek: remove only the points in the interval being revisited
-      // (target - 0.5s buffer … from) so the old curve doesn't overlap the new
-      // one when the playhead replays that segment.
+      // Backward seek: clear revisited interval
       const clearFrom = Math.max(0, target - 0.5);
       vocalsPointsRef.current = vocalsPointsRef.current.filter(
         (point) => point.time < clearFrom,
@@ -1375,7 +1470,6 @@ export function SingingPracticeDialog({
         (point) => point.time < clearFrom,
       );
 
-      // Reset smoothing state so the detector starts fresh at the new position.
       resetPitchTrackProcessorState(vocalsProcessorRef.current);
       resetPitchTrackProcessorState(microphoneProcessorRef.current);
       setReadout({
@@ -1383,9 +1477,7 @@ export function SingingPracticeDialog({
         microphoneNoteLabel: null,
       });
     } else {
-      // Forward seek: insert a null sentinel at the departure point so the
-      // canvas renderer breaks the line segment instead of drawing a straight
-      // line from the last visible note all the way to the next new sample.
+      // Forward seek: break line with sentinel
       vocalsPointsRef.current.push({ time: from, midi: null });
       microphonePointsRef.current.push({ time: from, midi: null });
     }
