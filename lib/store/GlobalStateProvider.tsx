@@ -103,7 +103,7 @@ export function GlobalStateProvider({ children }: GlobalStateProviderProps) {
         if (result && !result.user.emailVerified) {
           await firebaseSignOut(auth);
         }
-      } catch (error) {
+      } catch {
         // Redirect errors are handled silently; user stays on login page
       }
 
