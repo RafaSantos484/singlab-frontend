@@ -83,6 +83,8 @@ Components are split into two groups:
           * Form validation for title/author
           * Multi-phase progress UI (converting → uploading → saving)
      - `SongEditDialog` — song metadata editing with validation and error handling.
+     - `TranscriptionDialog` — in-browser vocals transcription dialog using Whisper,
+          with model/language settings, loading progress, and live incremental text updates.
      - `SingingPracticeDialog` — synchronized practice experience with
           dual pitch tracking (vocals stem + user microphone), seek controls,
           dynamic pitch axis, and graceful fallback when Storage CORS blocks
@@ -101,6 +103,8 @@ Shared utilities used across the app:
 | `lib/async/` | Pending activity tracking for navigation guards (prevents leaving during uploads) |
 | `lib/firebase/` | Firebase app initialization (singleton), auth helpers, Firestore CRUD (songs, users), Storage utilities |
 | `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`, `useSeparationStatus`, `useStemAutoProcessor`, etc.) |
+| `lib/hooks/useWhisperTranscriber.ts` | Client hook that manages Whisper worker lifecycle, start/stop controls, loading state, and live transcript state |
+| `lib/transcription/` | Whisper worker implementation, request/response typing, and model/language configuration constants |
 | `lib/separations/` | Adapter pattern for provider-agnostic separation normalization and stem URL extraction |
 | `lib/storage/` | Firebase Storage upload utilities (raw songs and separated stems) with rollback support. Automatically invalidates cache after upload/delete operations. |
 | `lib/storage/StorageUrlManager.ts` | Centralized Firebase Storage download URL caching with TTL (1 day) based expiration, deduplication of concurrent requests, and automatic refresh on expiry. Supports selective path invalidation on upload/delete and full cache clearing on sign-out. Ensures fast URL access for real-time playback switching without redundant Firebase calls or stale URLs. |
@@ -251,6 +255,29 @@ Two provider paths are supported: `poyo` (async backend-proxied AI task) and
      │ Sets separatedSongInfo=null in Firestore
      ▼
 [Song becomes eligible for a new separation request]
+```
+
+### Vocals Transcription Flow (Client-side Whisper)
+
+```
+[User opens TranscriptionDialog from a song card]
+     │
+     │ Selects model, quantization, language/task options
+     ▼
+[Client fetches vocals stem URL and decodes audio to AudioBuffer]
+     │
+     │ Convert to mono Float32Array at transcription sample rate
+     ▼
+[useWhisperTranscriber posts request to Web Worker]
+     │
+     │ Worker loads Whisper model via transformers.js
+     │ Emits progress events and incremental transcript updates
+     ▼
+[Dialog renders loading progress + live chunks + full transcript]
+     │
+     │ User can stop safely; worker disposes pipeline on stop
+     ▼
+[Transcription session completes entirely in browser]
 ```
 
 ## State Management

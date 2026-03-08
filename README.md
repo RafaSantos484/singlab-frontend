@@ -29,6 +29,7 @@ stateless proxy between the frontend and external AI services.
   - `poyo`: request via backend proxy, poll status, auto-process provider stems
   - `local`: upload stems directly from client and persist only available stem names to Firestore
   - Delete existing stems and re-request separation from another provider
+- In-browser vocals transcription with Whisper (Web Worker + incremental live transcript)
 - Karaoke playback with vocal / instrumental stem toggle
 - Singing Practice Mode with dual-track live pitch timeline (vocals + microphone), 10-second seek controls, hover note inspection, and player-synced playback
 - Event-driven audio player state synchronization (responds to media keys)
@@ -119,6 +120,7 @@ npm run type-check      # TypeScript check (no emit)
 │   ├── storage/            # Firebase Storage upload utilities (raw + stems)
 │   ├── store/              # Global state (Context + useReducer)
 │   ├── theme/              # Central MUI theme configuration
+│   ├── transcription/       # Whisper worker and transcription types/constants
 │   └── validation/         # Zod validation schemas (sign-in, register, complete-profile, forgot-password)
 ├── messages/               # i18n translation files (en-US.json, pt-BR.json)
 ├── public/                 # Static assets
