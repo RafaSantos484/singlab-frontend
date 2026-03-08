@@ -353,6 +353,49 @@
       "verticalScrollHint": "Turn off Dynamic Y-axis, then use the mouse wheel over the chart to scroll notes vertically."
     }
   },
+  "Transcription": {
+    "entryButton": "Transcribe vocals",
+    "title": "Transcribe Vocals - {songTitle}",
+    "description": "Run Whisper directly in your browser. Pick a model and start real-time transcription for the vocals track.",
+    "modelLabel": "Model",
+    "quantizedLabel": "Quantized",
+    "multilingualLabel": "Multilingual",
+    "languageLabel": "Language",
+    "taskLabel": "Task",
+    "tasks": {
+      "transcribe": "Transcribe",
+      "translate": "Translate to English"
+    },
+    "languages": {
+      "auto": "Auto",
+      "en": "English",
+      "pt": "Portuguese",
+      "es": "Spanish",
+      "fr": "French",
+      "de": "German",
+      "it": "Italian",
+      "ja": "Japanese",
+      "ko": "Korean",
+      "zh": "Chinese"
+    },
+    "preparingAudio": "Preparing vocals audio...",
+    "stopToClose": "Stop the transcription and wait for the worker to finish before closing this window.",
+    "loadingProgress": "Loading model files",
+    "emptyState": "Start transcription to see real-time segments.",
+    "emptyChunk": "...",
+    "fullTranscriptLabel": "Live transcript",
+    "noTranscriptYet": "No transcript yet.",
+    "startButton": "Start transcription",
+    "stopButton": "Stop",
+    "transcribingButton": "Transcribing...",
+    "closeButton": "Close",
+    "errors": {
+      "noVocals": "Vocals track is not available for this song.",
+      "audioDecode": "Failed to load vocals audio: {message}",
+      "transcription": "Transcription failed: {message}",
+      "unknown": "Unknown error"
+    }
+  },
   "Validation": {
     "email": {
       "invalid": "Invalid email format",

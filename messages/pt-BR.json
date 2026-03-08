@@ -351,6 +351,49 @@
       "verticalScrollHint": "Desative o Eixo Y dinâmico e use a roda do mouse sobre o gráfico para rolar as notas verticalmente."
     }
   },
+  "Transcription": {
+    "entryButton": "Transcrever vocais",
+    "title": "Transcrever Vocais - {songTitle}",
+    "description": "Execute o Whisper diretamente no navegador. Escolha um modelo e inicie a transcrição em tempo real da faixa vocal.",
+    "modelLabel": "Modelo",
+    "quantizedLabel": "Quantizado",
+    "multilingualLabel": "Multilíngue",
+    "languageLabel": "Idioma",
+    "taskLabel": "Tarefa",
+    "tasks": {
+      "transcribe": "Transcrever",
+      "translate": "Traduzir para inglês"
+    },
+    "languages": {
+      "auto": "Automático",
+      "en": "Inglês",
+      "pt": "Português",
+      "es": "Espanhol",
+      "fr": "Francês",
+      "de": "Alemão",
+      "it": "Italiano",
+      "ja": "Japonês",
+      "ko": "Coreano",
+      "zh": "Chinês"
+    },
+    "preparingAudio": "Preparando áudio vocal...",
+    "stopToClose": "Pare a transcrição e aguarde o worker finalizar antes de fechar esta janela.",
+    "loadingProgress": "Carregando arquivos do modelo",
+    "emptyState": "Inicie a transcrição para ver segmentos em tempo real.",
+    "emptyChunk": "...",
+    "fullTranscriptLabel": "Transcrição ao vivo",
+    "noTranscriptYet": "Sem transcrição ainda.",
+    "startButton": "Iniciar transcrição",
+    "stopButton": "Parar",
+    "transcribingButton": "Transcrevendo...",
+    "closeButton": "Fechar",
+    "errors": {
+      "noVocals": "A faixa vocal não está disponível para esta música.",
+      "audioDecode": "Falha ao carregar áudio vocal: {message}",
+      "transcription": "Falha na transcrição: {message}",
+      "unknown": "Erro desconhecido"
+    }
+  },
   "Validation": {
     "email": {
       "invalid": "Formato de e-mail inválido",
