@@ -118,9 +118,20 @@
     "deleteStemsTitle": "Delete stem separation",
     "deleteStemsMessage": "Are you sure you want to delete the separated stems? You will be able to request a new separation from any provider afterwards.",
     "cancelButton": "Cancel",
+    "downloadTracksTitle": "Download tracks",
+    "downloadTracksDescription": "Choose which tracks to download for \"{songTitle}\".",
+    "downloadTracksConfirmButton": "Download selected",
+    "downloadTracksDownloadingButton": "Downloading...",
+    "downloadTracksNoSelection": "Select at least one track to download.",
+    "downloadTracksResolving": "Resolving track download links...",
+    "downloadTracksAuthError": "You must be signed in to download tracks.",
+    "downloadTracksRawErrorMessage": "Failed to resolve raw track: {message}",
+    "downloadTracksFailedMessage": "Failed to download tracks: {message}",
+    "downloadTracksUnknownError": "Unknown error",
     "tooltips": {
       "playSong": "Play song",
-      "editSong": "Edit song"
+      "editSong": "Edit song",
+      "downloadTracks": "Download tracks"
     }
   },
   "Separation": {

@@ -118,9 +118,20 @@
     "deleteStemsTitle": "Deletar separação de faixas",
     "deleteStemsMessage": "Tem certeza de que deseja deletar as faixas separadas? Você poderá solicitar uma nova separação de qualquer provedor depois.",
     "cancelButton": "Cancelar",
+    "downloadTracksTitle": "Baixar faixas",
+    "downloadTracksDescription": "Escolha quais faixas deseja baixar para \"{songTitle}\".",
+    "downloadTracksConfirmButton": "Baixar selecionadas",
+    "downloadTracksDownloadingButton": "Baixando...",
+    "downloadTracksNoSelection": "Selecione pelo menos uma faixa para baixar.",
+    "downloadTracksResolving": "Resolvendo links de download das faixas...",
+    "downloadTracksAuthError": "Você precisa estar autenticado para baixar faixas.",
+    "downloadTracksRawErrorMessage": "Falha ao resolver faixa original: {message}",
+    "downloadTracksFailedMessage": "Falha ao baixar faixas: {message}",
+    "downloadTracksUnknownError": "Erro desconhecido",
     "tooltips": {
       "playSong": "Tocar música",
-      "editSong": "Editar música"
+      "editSong": "Editar música",
+      "downloadTracks": "Baixar faixas"
     }
   },
   "Separation": {
