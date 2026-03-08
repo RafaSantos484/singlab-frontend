@@ -328,9 +328,7 @@ export function TranscriptionDialog({
             </Stack>
           )}
 
-          {!canClose && (
-            <Alert severity="warning">{t('stopToClose')}</Alert>
-          )}
+          {!canClose && <Alert severity="warning">{t('stopToClose')}</Alert>}
 
           {isPreparingAudio && (
             <Alert severity="info" icon={<CircularProgress size={16} />}>

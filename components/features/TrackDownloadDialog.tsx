@@ -82,7 +82,7 @@ async function downloadFile(url: string, fileName: string): Promise<void> {
  * - Clear error messages for auth failures or URL resolution issues
  *
  * **File Naming:**
- * Downloads are saved as: `{songTitle}_{stemType}.m4a`  
+ * Downloads are saved as: `{songTitle}_{stemType}.m4a`
  * (e.g., `My Song_vocals.m4a`, `My Song_raw.m4a`)
  *
  * @param open — Dialog visibility
@@ -138,7 +138,9 @@ export function TrackDownloadDialog({
       } catch (error) {
         if (!cancelled) {
           const message =
-            error instanceof Error ? error.message : tDashboard('downloadTracksUnknownError');
+            error instanceof Error
+              ? error.message
+              : tDashboard('downloadTracksUnknownError');
           setRawUrl(null);
           setRawUrlError(message);
         }
@@ -225,7 +227,9 @@ export function TrackDownloadDialog({
       onClose();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : tDashboard('downloadTracksUnknownError');
+        error instanceof Error
+          ? error.message
+          : tDashboard('downloadTracksUnknownError');
       setDownloadError(
         tDashboard('downloadTracksFailedMessage', {
           message,
@@ -239,29 +243,29 @@ export function TrackDownloadDialog({
   const isBusy = isResolvingRawUrl || isResolvingStemUrls || isDownloading;
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth='sm' fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>{tDashboard('downloadTracksTitle')}</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
-          <Typography variant='body2' color='text.secondary'>
+          <Typography variant="body2" color="text.secondary">
             {tDashboard('downloadTracksDescription', { songTitle })}
           </Typography>
 
           {(isResolvingRawUrl || isResolvingStemUrls) && (
-            <Alert severity='info' icon={<CircularProgress size={16} />}>
+            <Alert severity="info" icon={<CircularProgress size={16} />}>
               {tDashboard('downloadTracksResolving')}
             </Alert>
           )}
 
           {rawUrlError && (
-            <Alert severity='error'>
+            <Alert severity="error">
               {tDashboard('downloadTracksRawErrorMessage', {
                 message: rawUrlError,
               })}
             </Alert>
           )}
 
-          {downloadError && <Alert severity='error'>{downloadError}</Alert>}
+          {downloadError && <Alert severity="error">{downloadError}</Alert>}
 
           <Box
             sx={{
@@ -295,7 +299,7 @@ export function TrackDownloadDialog({
           {tDashboard('cancelButton')}
         </Button>
         <Button
-          variant='contained'
+          variant="contained"
           onClick={() => {
             void handleDownload();
           }}
