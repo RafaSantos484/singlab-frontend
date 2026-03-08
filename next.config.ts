@@ -1,5 +1,6 @@
 import createNextIntlPlugin from 'next-intl/plugin';
 import type { NextConfig } from 'next';
+import path from 'path';
 
 const withNextIntl = createNextIntlPlugin('./lib/i18n/request.ts');
 
@@ -12,6 +13,22 @@ const nextConfig: NextConfig = {
       // build errors while maintaining all web-compatible jsmediatags features.
       'react-native-fs': './lib/empty-module.ts',
     },
+  },
+
+  webpack: (config) => {
+    // See https://webpack.js.org/configuration/resolve/#resolvealias
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      sharp$: false,
+      'onnxruntime-node$': false,
+    };
+
+    config.resolve.alias['@huggingface/transformers'] = path.resolve(
+      __dirname,
+      'node_modules/@huggingface/transformers',
+    );
+
+    return config;
   },
 };
 
