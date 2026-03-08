@@ -33,6 +33,7 @@ import PlayCircleIcon from '@mui/icons-material/PlayCircle';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import GraphicEqIcon from '@mui/icons-material/GraphicEq';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import SubtitlesIcon from '@mui/icons-material/Subtitles';
 import { useTranslations } from 'next-intl';
 
 import { SongCreateDialog } from '@/components/features/SongCreateDialog';
@@ -47,6 +48,7 @@ import type { SeparationStemName, Song } from '@/lib/api/types';
 import { useSeparationStatus } from '@/lib/hooks/useSeparationStatus';
 import { GlobalPlayer } from '@/components/features/GlobalPlayer';
 import { SingingPracticeDialog } from '@/components/features/SingingPracticeDialog';
+import { TranscriptionDialog } from '@/components/features/TranscriptionDialog';
 import { deleteSeparatedSongInfo } from '@/lib/firebase/songs';
 import { deleteSeparationStems } from '@/lib/storage/uploadSeparationStems';
 import { getFirebaseAuth } from '@/lib/firebase/auth';
@@ -381,11 +383,14 @@ function SongCardItem({
   const tSep = useTranslations('Separation');
   const tPlayer = useTranslations('Player');
   const tPractice = useTranslations('Practice');
+  const tTranscription = useTranslations('Transcription');
   const { songsStemUploading } = useGlobalState();
   const dispatch = useGlobalStateDispatch();
   const [isSeparationDialogOpen, setIsSeparationDialogOpen] = useState(false);
   const [isDeleteStemsDialogOpen, setIsDeleteStemsDialogOpen] = useState(false);
   const [isPracticeDialogOpen, setIsPracticeDialogOpen] = useState(false);
+  const [isTranscriptionDialogOpen, setIsTranscriptionDialogOpen] =
+    useState(false);
   const [isDeletingStemsLoading, setIsDeletingStemsLoading] = useState(false);
   const [showSeparationSuccessSnackbar, setShowSeparationSuccessSnackbar] =
     useState(false);
@@ -706,15 +711,26 @@ function SongCardItem({
                   {t('deleteStemsButton')}
                 </Button>
                 {isPracticeAvailable ? (
-                  <Button
-                    size="small"
-                    variant="contained"
-                    onClick={handleOpenPractice}
-                    sx={{ alignSelf: 'flex-start' }}
-                    aria-label={tPractice('entryAriaLabel')}
-                  >
-                    {tPractice('entryButton')}
-                  </Button>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      onClick={handleOpenPractice}
+                      sx={{ alignSelf: 'flex-start' }}
+                      aria-label={tPractice('entryAriaLabel')}
+                    >
+                      {tPractice('entryButton')}
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => setIsTranscriptionDialogOpen(true)}
+                      startIcon={<SubtitlesIcon fontSize="small" />}
+                      sx={{ alignSelf: 'flex-start' }}
+                    >
+                      {tTranscription('entryButton')}
+                    </Button>
+                  </Stack>
                 ) : null}
               </Stack>
             )}
@@ -803,6 +819,15 @@ function SongCardItem({
         vocalsUrl={vocalsStemUrl}
         isEligible={isPracticeAvailable}
       />
+
+      {isTranscriptionDialogOpen && (
+        <TranscriptionDialog
+          open={isTranscriptionDialogOpen}
+          onClose={() => setIsTranscriptionDialogOpen(false)}
+          songTitle={song.title}
+          vocalsUrl={vocalsStemUrl}
+        />
+      )}
     </Card>
   );
 }
