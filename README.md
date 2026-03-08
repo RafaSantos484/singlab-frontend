@@ -30,6 +30,7 @@ stateless proxy between the frontend and external AI services.
   - `local`: upload stems directly from client and persist only available stem names to Firestore
   - Delete existing stems and re-request separation from another provider
 - In-browser vocals transcription with Whisper (Web Worker + incremental live transcript)
+- **Track download** — Download raw audio or individual separated stems with sanitized file names
 - Karaoke playback with vocal / instrumental stem toggle
 - Singing Practice Mode with dual-track live pitch timeline (vocals + microphone), 10-second seek controls, hover note inspection, and player-synced playback
 - Event-driven audio player state synchronization (responds to media keys)

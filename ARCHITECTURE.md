@@ -85,10 +85,15 @@ Components are split into two groups:
      - `SongEditDialog` — song metadata editing with validation and error handling.
      - `TranscriptionDialog` — in-browser vocals transcription dialog using Whisper,
           with model/language settings, loading progress, and live incremental text updates.
+     - `TranscriptionDialog` — in-browser vocals transcription using OpenAI Whisper
+          model (transformers.js), with configurable model size, quantization,
+          language selection, and live incremental transcript updates via web worker.
      - `SingingPracticeDialog` — synchronized practice experience with
           dual pitch tracking (vocals stem + user microphone), seek controls,
           dynamic pitch axis, and graceful fallback when Storage CORS blocks
           vocals waveform reads.
+     - `TrackDownloadDialog` — lets users choose and download raw or individual
+          separated stem tracks (vocals, bass, drums, etc.) with sanitized file names.
 
 ### 3. Lib
 
@@ -103,8 +108,8 @@ Shared utilities used across the app:
 | `lib/async/` | Pending activity tracking for navigation guards (prevents leaving during uploads) |
 | `lib/firebase/` | Firebase app initialization (singleton), auth helpers, Firestore CRUD (songs, users), Storage utilities |
 | `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`, `useSeparationStatus`, `useStemAutoProcessor`, etc.) |
-| `lib/hooks/useWhisperTranscriber.ts` | Client hook that manages Whisper worker lifecycle, start/stop controls, loading state, and live transcript state |
-| `lib/transcription/` | Whisper worker implementation, request/response typing, and model/language configuration constants |
+| `lib/hooks/useWhisperTranscriber.ts` | Custom React hook managing Whisper Web Worker lifecycle: model loading, transcription start/stop, progress tracking, and incremental transcript state. Supports multiple model sizes and multilingual transcription with configurable language/task (transcribe vs. translate). |
+| `lib/transcription/` | Web Worker entry point (`loader.worker.ts`) that loads and runs OpenAI Whisper model via transformers.js, handles inference requests, emits progress events, and streams incremental transcript chunks. Also includes TypeScript types and model/language configuration (constants.ts). |
 | `lib/separations/` | Adapter pattern for provider-agnostic separation normalization and stem URL extraction |
 | `lib/storage/` | Firebase Storage upload utilities (raw songs and separated stems) with rollback support. Automatically invalidates cache after upload/delete operations. |
 | `lib/storage/StorageUrlManager.ts` | Centralized Firebase Storage download URL caching with TTL (1 day) based expiration, deduplication of concurrent requests, and automatic refresh on expiry. Supports selective path invalidation on upload/delete and full cache clearing on sign-out. Ensures fast URL access for real-time playback switching without redundant Firebase calls or stale URLs. |
