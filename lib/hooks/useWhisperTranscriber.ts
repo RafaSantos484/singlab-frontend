@@ -57,6 +57,34 @@ function createWorker(): Worker {
   );
 }
 
+/**
+ * Hook that manages OpenAI Whisper transcription via a Web Worker.
+ *
+ * Handles model loading (quantized or full precision), inference on audio,
+ * streaming progress updates, and incremental transcript chunks. Supports
+ * multilingual transcription with configurable language and task (transcribe
+ * or translate).
+ *
+ * **States:**
+ * - `isBusy` — transcription is running
+ * - `isModelLoading` — model is downloading and initializing
+ * - `isStopping` — graceful stop in progress
+ * - `progressItems` — array of model/inference progress events
+ * - `output` — complete and partial transcript text with timestamp chunks
+ * - `settings` — model, quantization, language, task configuration
+ *
+ * **Controls:**
+ * - `start(audioData)` — begin transcription on decoded AudioBuffer
+ * - `stop()` — gracefully halt transcription; worker disposes pipeline
+ * - `reset()` — clear output and progress; ready for new session
+ * - `setModel/setMultilingual/setQuantized/setLanguage/setSubtask` — configure settings
+ *
+ * **Pending Activity:**
+ * Calls `startPendingActivity()` during transcription to integrate with
+ * navigation guards (prevents leaving page mid-transcription).
+ *
+ * @returns Hook result with state, controls, and settings setter functions.
+ */
 export function useWhisperTranscriber(): UseWhisperTranscriberResult {
   const workerRef = useRef<Worker | null>(null);
 
@@ -231,13 +259,11 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
   }, [endPendingActivity, terminateWorker]);
 
   useEffect(() => {
-    createAndBindWorker();
-
     return () => {
       terminateWorker();
       endPendingActivity();
     };
-  }, [createAndBindWorker, endPendingActivity, terminateWorker]);
+  }, [endPendingActivity, terminateWorker]);
 
   const setModel = useCallback((model: string): void => {
     setSettings((previous) => ({

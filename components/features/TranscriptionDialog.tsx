@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -85,7 +85,29 @@ async function decodeAudioFromUrl(url: string): Promise<AudioBuffer> {
 
 /**
  * Runs Whisper transcription for a vocals track entirely on the client,
- * including model selection, loading progress and real-time partial text.
+ * including model selection, loading progress, and real-time partial text.
+ *
+ * **Features:**
+ * - Model size selection (tiny, base, small, medium, large)
+ * - Quantization toggle (8-bit vs. full precision, affects download size and speed)
+ * - Multilingual support with configurable language and task (transcribe or translate)
+ * - Automatic locale-based language defaults
+ * - Real-time transcript streaming as the model emits chunks
+ * - Download progress for model initialization
+ * - Safe stop that waits for worker cleanup
+ *
+ * **Flow:**
+ * 1. User selects model, quantization, language, and task
+ * 2. Dialog fetches and decodes the vocals stem audio
+ * 3. useWhisperTranscriber posts audio data to web worker
+ * 4. Worker loads Whisper model and runs inference
+ * 5. Partial results stream in real-time and update the UI
+ * 6. Dialog allows pause/resume or exit once transcription completes
+ *
+ * @param open — Dialog visibility
+ * @param onClose — Called when user closes dialog (must not be busy)
+ * @param songTitle — Song title for dialog header
+ * @param vocalsUrl — URL to download decoded vocals stem for transcription
  */
 export function TranscriptionDialog({
   open,
@@ -96,6 +118,7 @@ export function TranscriptionDialog({
   const locale = useLocale();
   const t = useTranslations('Transcription');
   const transcriber = useWhisperTranscriber();
+  const hasAppliedLocaleDefaultsRef = useRef(false);
   const [isPreparingAudio, setIsPreparingAudio] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const isEnglishLocale = locale.toLowerCase().startsWith('en');
@@ -116,9 +139,6 @@ export function TranscriptionDialog({
 
   useEffect(() => {
     if (!open) {
-      transcriber.reset();
-      setAudioError(null);
-      setIsPreparingAudio(false);
       return;
     }
 
@@ -142,7 +162,12 @@ export function TranscriptionDialog({
       return;
     }
 
+    if (hasAppliedLocaleDefaultsRef.current) {
+      return;
+    }
+
     if (isEnglishLocale) {
+      hasAppliedLocaleDefaultsRef.current = true;
       return;
     }
 
@@ -154,6 +179,8 @@ export function TranscriptionDialog({
     if (transcriber.settings.language !== autoLanguage) {
       transcriber.setLanguage(autoLanguage);
     }
+
+    hasAppliedLocaleDefaultsRef.current = true;
   }, [
     isEnglishLocale,
     locale,

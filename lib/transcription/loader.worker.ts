@@ -1,4 +1,3 @@
-// import { env, pipeline, ProgressInfo } from '@huggingface/transformers';
 import { env, pipeline } from '@xenova/transformers';
 
 import type {
@@ -9,6 +8,36 @@ import type {
   WorkerTranscriptionRequest,
 } from './types';
 
+/**
+ * Web Worker for OpenAI Whisper Speech-to-Text Transcription
+ *
+ * This worker runs transformers.js AI models in a background thread, allowing
+ * the main thread to remain responsive during CPU-intensive model loading and
+ * inference.
+ *
+ * **Threading Model:**
+ * Worker is created by useWhisperTranscriber hook. Main thread posts messages
+ * to request transcription start or stop. Worker emits progress and completion
+ * events back to the main thread. Only one inference job runs at a time.
+ *
+ * **Model Loading:**
+ * - Models are loaded on-demand per configuration (model ID, quantization, task).
+ * - `env.allowLocalModels = false` forces models to load from CDN (remote),
+ *   matching whisper-web behavior for reproducibility.
+ * - Model instance is cached and reused until settings change.
+ * - Large models (medium, large) take time to download and compile; progress
+ *   is streamed back to UI.
+ *
+ * **Messages Emitted:**
+ * - `progress` — model loading progress (file, loaded, total, progress %)
+ * - `initiate` — inference started, buffer processing begins
+ * - `update` — partial transcript available (streamed in real-time)
+ * - `complete` — inference finished, final full transcript ready
+ * - `ready` — model fully loaded and ready for inference
+ * - `done` — cleanup after inference
+ * - `error` — transcription failed
+ */
+
 // Force remote model loading to match whisper-web behavior.
 env.allowLocalModels = false;
 
@@ -16,6 +45,10 @@ interface DecodeChunk {
   tokens: number[];
   finalised: boolean;
   is_last?: boolean;
+}
+
+interface TokenItem {
+  output_token_ids: number[];
 }
 
 type DecodeResult = [
@@ -42,8 +75,8 @@ interface WhisperPipelineInstance {
       task: 'transcribe' | 'translate' | null;
       return_timestamps: boolean;
       force_full_sequences: boolean;
-      callback_function: (item: unknown) => void;
-      chunk_callback: (chunk: unknown) => void;
+      callback_function: (item: TokenItem[]) => void;
+      chunk_callback: (chunk: Partial<DecodeChunk>) => void;
     },
   ): Promise<WhisperPipelineResult>;
   dispose: () => Promise<void>;
@@ -119,28 +152,6 @@ async function disposeCurrentPipeline(): Promise<void> {
   }
 }
 
-function getOutputTokenIds(item: unknown): number[] {
-  if (!Array.isArray(item) || item.length === 0) {
-    return [];
-  }
-
-  const first = item[0] as { output_token_ids?: number[] } | undefined;
-  return Array.isArray(first?.output_token_ids) ? first.output_token_ids : [];
-}
-
-function toDecodeChunk(chunk: unknown): DecodeChunk {
-  const value = (chunk ?? {}) as {
-    tokens?: number[];
-    is_last?: boolean;
-  };
-
-  return {
-    tokens: Array.isArray(value.tokens) ? value.tokens : [],
-    finalised: true,
-    is_last: Boolean(value.is_last),
-  };
-}
-
 async function transcribe(
   request: WorkerTranscriptionRequest,
   jobToken: number,
@@ -193,28 +204,25 @@ async function transcribe(
     } satisfies WorkerMessage);
   }
 
-  function chunkCallback(chunk: unknown): void {
+  function chunkCallback(chunk: Partial<DecodeChunk>): void {
     const last = chunksToProcess[chunksToProcess.length - 1];
-    const normalizedChunk = toDecodeChunk(chunk);
 
-    last.tokens = normalizedChunk.tokens;
+    Object.assign(last, chunk);
     last.finalised = true;
-    last.is_last = normalizedChunk.is_last;
 
-    if (!normalizedChunk.is_last) {
+    if (!chunk.is_last) {
       chunksToProcess.push({
         tokens: [],
         finalised: false,
       });
     }
-
-    // Emit an update when a chunk completes so UI is refreshed incrementally.
-    emitUpdate();
   }
 
-  function callbackFunction(item: unknown): void {
+  function callbackFunction(item: TokenItem[]): void {
     const last = chunksToProcess[chunksToProcess.length - 1];
-    last.tokens = getOutputTokenIds(item);
+    if (item[0]?.output_token_ids) {
+      last.tokens = [...item[0].output_token_ids];
+    }
 
     emitUpdate();
   }
