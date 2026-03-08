@@ -34,6 +34,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import GraphicEqIcon from '@mui/icons-material/GraphicEq';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import SubtitlesIcon from '@mui/icons-material/Subtitles';
+import DownloadIcon from '@mui/icons-material/Download';
 import { useTranslations } from 'next-intl';
 
 import { SongCreateDialog } from '@/components/features/SongCreateDialog';
@@ -49,6 +50,7 @@ import { useSeparationStatus } from '@/lib/hooks/useSeparationStatus';
 import { GlobalPlayer } from '@/components/features/GlobalPlayer';
 import { SingingPracticeDialog } from '@/components/features/SingingPracticeDialog';
 import { TranscriptionDialog } from '@/components/features/TranscriptionDialog';
+import { TrackDownloadDialog } from '@/components/features/TrackDownloadDialog';
 import { deleteSeparatedSongInfo } from '@/lib/firebase/songs';
 import { deleteSeparationStems } from '@/lib/storage/uploadSeparationStems';
 import { getFirebaseAuth } from '@/lib/firebase/auth';
@@ -391,6 +393,8 @@ function SongCardItem({
   const [isPracticeDialogOpen, setIsPracticeDialogOpen] = useState(false);
   const [isTranscriptionDialogOpen, setIsTranscriptionDialogOpen] =
     useState(false);
+  const [isTrackDownloadDialogOpen, setIsTrackDownloadDialogOpen] =
+    useState(false);
   const [isDeletingStemsLoading, setIsDeletingStemsLoading] = useState(false);
   const [showSeparationSuccessSnackbar, setShowSeparationSuccessSnackbar] =
     useState(false);
@@ -401,6 +405,7 @@ function SongCardItem({
     isRefreshing,
     error: separationError,
     stemUrls,
+    isResolvingStemUrls,
     stemUrlError,
     refreshStatus,
   } = useSeparationStatus(song);
@@ -579,6 +584,23 @@ function SongCardItem({
               songTitle={song.title}
               stemNames={song.separatedSongInfo?.stems ?? undefined}
             />
+
+            <Tooltip title={t('tooltips.downloadTracks')}>
+              <IconButton
+                onClick={() => setIsTrackDownloadDialogOpen(true)}
+                aria-label={t('tooltips.downloadTracks')}
+                size="small"
+                sx={{
+                  color: 'rgba(168, 85, 247, 0.8)',
+                  '&:hover': {
+                    color: 'rgba(168, 85, 247, 1)',
+                    bgcolor: 'rgba(168, 85, 247, 0.1)',
+                  },
+                }}
+              >
+                <DownloadIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </Box>
         </Box>
 
@@ -820,14 +842,22 @@ function SongCardItem({
         isEligible={isPracticeAvailable}
       />
 
-      {isTranscriptionDialogOpen && (
-        <TranscriptionDialog
-          open={isTranscriptionDialogOpen}
-          onClose={() => setIsTranscriptionDialogOpen(false)}
-          songTitle={song.title}
-          vocalsUrl={vocalsStemUrl}
-        />
-      )}
+      <TranscriptionDialog
+        open={isTranscriptionDialogOpen}
+        onClose={() => setIsTranscriptionDialogOpen(false)}
+        songTitle={song.title}
+        vocalsUrl={vocalsStemUrl}
+      />
+
+      <TrackDownloadDialog
+        open={isTrackDownloadDialogOpen}
+        onClose={() => setIsTrackDownloadDialogOpen(false)}
+        songId={song.id}
+        songTitle={song.title}
+        availableStems={availableStems}
+        stemUrls={stemUrls}
+        isResolvingStemUrls={isResolvingStemUrls}
+      />
     </Card>
   );
 }
