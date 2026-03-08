@@ -39,3 +39,16 @@ jest.mock('firebase/firestore', () => ({
   collection: jest.fn(),
   onSnapshot: jest.fn(),
 }));
+
+jest.mock('next-intl', () => ({
+  useTranslations: jest.fn(() => (key: string) => key),
+}));
+
+jest.mock('@ffmpeg/ffmpeg', () => ({
+  FFmpeg: jest.fn(),
+}));
+
+jest.mock('@ffmpeg/util', () => ({
+  fetchFile: jest.fn(),
+  toBlobURL: jest.fn(),
+}));
