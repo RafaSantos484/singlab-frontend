@@ -7,12 +7,39 @@ import { startPendingActivity } from '@/lib/async/pendingActivity';
 import type { SpeechSegment } from '@/lib/audio/ffmpegVocals';
 import { remapWordTimestamps } from '@/lib/audio/timestampRemap';
 import type {
+  TranscriptChunk,
   TranscriptionOutput,
   TranscriptionProgressItem,
   WorkerRequest,
   TranscriptionSettings,
   WorkerMessage,
 } from '@/lib/transcription/types';
+
+/**
+ * Removes chunks whose start timestamp regresses below the highest end time
+ * seen so far. This eliminates duplicate/repeated segments produced when
+ * Whisper backtracks over already-transcribed audio.
+ */
+function filterBacktrackingChunks(
+  chunks: TranscriptChunk[],
+): TranscriptChunk[] {
+  let maxEndTime = -1;
+
+  return chunks.filter((chunk) => {
+    const start = chunk.timestamp[0];
+
+    if (start < maxEndTime) {
+      return false;
+    }
+
+    const end = chunk.timestamp[1];
+    if (end !== null && end > maxEndTime) {
+      maxEndTime = end;
+    }
+
+    return true;
+  });
+}
 
 interface UseWhisperTranscriberResult {
   isBusy: boolean;
@@ -139,18 +166,21 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
             chunks: message.data[1].chunks,
           });
           break;
-        case 'complete':
+        case 'complete': {
+          const remapped = remapWordTimestamps(
+            message.data.chunks,
+            speechSegmentsRef.current,
+          );
+          const filtered = filterBacktrackingChunks(remapped);
           setOutput({
             isBusy: false,
-            text: message.data.text,
-            chunks: remapWordTimestamps(
-              message.data.chunks,
-              speechSegmentsRef.current,
-            ),
+            text: filtered.map((c) => c.text).join(''),
+            chunks: filtered,
           });
           setIsBusy(false);
           endPendingActivity();
           break;
+        }
         case 'initiate':
           setIsModelLoading(true);
           setProgressItems((previous) => [
