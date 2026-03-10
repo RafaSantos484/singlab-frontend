@@ -112,7 +112,7 @@ Shared utilities used across the app:
 | `lib/async/` | Pending activity tracking for navigation guards (prevents leaving during uploads) |
 | `lib/firebase/` | Firebase app initialization (singleton), auth helpers, Firestore CRUD (songs, users), Storage utilities |
 | `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`, `useSeparationStatus`, `useStemAutoProcessor`, etc.) |
-| `lib/hooks/useWhisperTranscriber.ts` | Custom React hook managing Whisper Web Worker lifecycle: model loading, transcription start/stop, progress tracking, and incremental transcript state. Accepts silence-removed `Float32Array` audio and a `SpeechSegment[]` cut map; automatically remaps word-level timestamps from the processed audio back to the original vocals timeline after the worker completes. Supports multiple model sizes and multilingual transcription with configurable language/task (transcribe vs. translate). |
+| `lib/hooks/useWhisperTranscriber.ts` | Custom React hook managing Whisper Web Worker lifecycle: model loading, transcription start/stop, progress tracking, and incremental transcript state. Accepts silence-removed `Float32Array` audio and a `SpeechSegment[]` cut map; automatically remaps word-level timestamps from the processed audio back to the original vocals timeline after the worker completes, then filters out any backtracking chunks (segments whose start time regresses below the highest end time seen so far) to eliminate duplicates caused by Whisper re-processing already-transcribed audio. Supports multiple model sizes and multilingual transcription with configurable language/task (transcribe vs. translate). |
 | `lib/transcription/` | Web Worker entry point (`loader.worker.ts`) that loads and runs OpenAI Whisper via transformers.js, handles inference requests with word-level timestamps (`return_timestamps: 'word'`), emits progress events, and streams incremental transcript chunks. Also includes TypeScript types and model/language configuration (`constants.ts`). |
 | `lib/separations/` | Adapter pattern for provider-agnostic separation normalization and stem URL extraction |
 | `lib/storage/` | Firebase Storage upload utilities (raw songs and separated stems) with rollback support. Automatically invalidates cache after upload/delete operations. |
@@ -299,6 +299,12 @@ Two provider paths are supported: `poyo` (async backend-proxied AI task) and
      │
      │ remapWordTimestamps(chunks, speechSegments)
      │ Binary search over SpeechSegment[] cut map
+     ▼
+[Hook filters backtracking chunks]
+     │
+     │ filterBacktrackingChunks(remapped)
+     │ Drops any chunk whose start < highest end time seen so far
+     │ Eliminates duplicate segments from Whisper backtracking
      ▼
 [Dialog renders collapsible cut map + word list with original-audio timestamps]
      │
