@@ -80,8 +80,11 @@ function createWorker(): Worker {
  * The caller (e.g. TranscriptionDialog) is responsible for running FFmpeg
  * silence removal before calling `start()`. The hook receives the processed
  * audio and a speech segment cut map. After the worker returns word-level
- * timestamps relative to the processed audio, the hook automatically remaps
- * them back to the original vocals timeline using the cut map.
+ * timestamps relative to the processed audio, the hook automatically:
+ * 1. Remaps them back to the original vocals timeline using the cut map.
+ * 2. Filters out any backtracking chunks — segments whose start timestamp
+ *    regresses below the highest end time seen so far — to eliminate
+ *    duplicates produced when Whisper re-processes already-transcribed audio.
  *
  * **States:**
  * - `isBusy` — transcription is running
