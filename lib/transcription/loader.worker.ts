@@ -73,7 +73,7 @@ interface WhisperPipelineInstance {
       stride_length_s: number;
       language: string | null;
       task: 'transcribe' | 'translate' | null;
-      return_timestamps: boolean;
+      return_timestamps: boolean | 'word';
       force_full_sequences: boolean;
       callback_function: (item: TokenItem[]) => void;
       chunk_callback: (chunk: Partial<DecodeChunk>) => void;
@@ -235,7 +235,7 @@ async function transcribe(
       stride_length_s: isDistilWhisper ? 3 : 5,
       language: request.language,
       task: request.subtask,
-      return_timestamps: true,
+      return_timestamps: 'word',
       force_full_sequences: false,
       callback_function: callbackFunction,
       chunk_callback: chunkCallback,
