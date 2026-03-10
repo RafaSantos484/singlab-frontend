@@ -73,7 +73,9 @@ function modelLabel(model: WhisperModelOption, quantized: boolean): string {
  */
 async function decodeProcessedAudio(wavBlob: Blob): Promise<Float32Array> {
   const arrayBuffer = await wavBlob.arrayBuffer();
-  const audioContext = new AudioContext({ sampleRate: TRANSCRIPTION_SAMPLE_RATE });
+  const audioContext = new AudioContext({
+    sampleRate: TRANSCRIPTION_SAMPLE_RATE,
+  });
   try {
     const buffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
     return buffer.getChannelData(0).slice();
@@ -214,8 +216,11 @@ export function TranscriptionDialog({
 
       // Step 2: Detect silences, cut audio, and build cut map via FFmpeg WASM.
       setPreparingStage('removing');
-      const { processedBlob, speechSegments, cutMapLines: newCutMap } =
-        await removeSilencesFromVocals(audioBlob);
+      const {
+        processedBlob,
+        speechSegments,
+        cutMapLines: newCutMap,
+      } = await removeSilencesFromVocals(audioBlob);
       setCutMapLines(newCutMap);
 
       // Step 3: Decode processed WAV to Float32Array for the transcription worker.

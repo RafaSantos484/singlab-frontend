@@ -54,7 +54,10 @@ interface UseWhisperTranscriberResult {
   setQuantized: (value: boolean) => void;
   setSubtask: (subtask: 'transcribe' | 'translate') => void;
   setLanguage: (language: string) => void;
-  start: (processedAudio: Float32Array, speechSegments: SpeechSegment[]) => void;
+  start: (
+    processedAudio: Float32Array,
+    speechSegments: SpeechSegment[],
+  ) => void;
   stop: () => Promise<void>;
   reset: () => void;
 }
