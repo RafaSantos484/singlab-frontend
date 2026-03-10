@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from '@/lib/transcription/constants';
 import { startPendingActivity } from '@/lib/async/pendingActivity';
+import type { SpeechSegment } from '@/lib/audio/ffmpegVocals';
+import { remapWordTimestamps } from '@/lib/audio/timestampRemap';
 import type {
   TranscriptionOutput,
   TranscriptionProgressItem,
@@ -25,27 +27,9 @@ interface UseWhisperTranscriberResult {
   setQuantized: (value: boolean) => void;
   setSubtask: (subtask: 'transcribe' | 'translate') => void;
   setLanguage: (language: string) => void;
-  start: (audioData: AudioBuffer | undefined) => void;
+  start: (processedAudio: Float32Array, speechSegments: SpeechSegment[]) => void;
   stop: () => Promise<void>;
   reset: () => void;
-}
-
-function mixToMono(audioData: AudioBuffer): Float32Array {
-  if (audioData.numberOfChannels === 1) {
-    return audioData.getChannelData(0);
-  }
-
-  const leftChannel = audioData.getChannelData(0);
-  const rightChannel = audioData.getChannelData(1);
-  const mono = new Float32Array(leftChannel.length);
-  const scalingFactor = Math.sqrt(2);
-
-  for (let index = 0; index < mono.length; index += 1) {
-    mono[index] =
-      (scalingFactor * (leftChannel[index] + rightChannel[index])) / 2;
-  }
-
-  return mono;
 }
 
 function createWorker(): Worker {
@@ -60,24 +44,32 @@ function createWorker(): Worker {
 /**
  * Hook that manages OpenAI Whisper transcription via a Web Worker.
  *
- * Handles model loading (quantized or full precision), inference on audio,
- * streaming progress updates, and incremental transcript chunks. Supports
- * multilingual transcription with configurable language and task (transcribe
- * or translate).
+ * Handles model loading (quantized or full precision), inference on
+ * silence-removed audio, streaming progress updates, and incremental
+ * transcript chunks. Supports multilingual transcription with configurable
+ * language and task (transcribe or translate).
+ *
+ * **Silence-removal pipeline:**
+ * The caller (e.g. TranscriptionDialog) is responsible for running FFmpeg
+ * silence removal before calling `start()`. The hook receives the processed
+ * audio and a speech segment cut map. After the worker returns word-level
+ * timestamps relative to the processed audio, the hook automatically remaps
+ * them back to the original vocals timeline using the cut map.
  *
  * **States:**
  * - `isBusy` — transcription is running
  * - `isModelLoading` — model is downloading and initializing
  * - `isStopping` — graceful stop in progress
  * - `progressItems` — array of model/inference progress events
- * - `output` — complete and partial transcript text with timestamp chunks
+ * - `output` — transcript with timestamps remapped to the original audio
  * - `settings` — model, quantization, language, task configuration
  *
  * **Controls:**
- * - `start(audioData)` — begin transcription on decoded AudioBuffer
+ * - `start(processedAudio, speechSegments)` — begin transcription on
+ *   silence-removed audio with its corresponding cut map
  * - `stop()` — gracefully halt transcription; worker disposes pipeline
  * - `reset()` — clear output and progress; ready for new session
- * - `setModel/setMultilingual/setQuantized/setLanguage/setSubtask` — configure settings
+ * - `setModel/setMultilingual/setQuantized/setLanguage/setSubtask` — configure
  *
  * **Pending Activity:**
  * Calls `startPendingActivity()` during transcription to integrate with
@@ -87,6 +79,7 @@ function createWorker(): Worker {
  */
 export function useWhisperTranscriber(): UseWhisperTranscriberResult {
   const workerRef = useRef<Worker | null>(null);
+  const speechSegmentsRef = useRef<SpeechSegment[]>([]);
 
   const [output, setOutput] = useState<TranscriptionOutput | undefined>(
     undefined,
@@ -150,7 +143,10 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
           setOutput({
             isBusy: false,
             text: message.data.text,
-            chunks: message.data.chunks,
+            chunks: remapWordTimestamps(
+              message.data.chunks,
+              speechSegmentsRef.current,
+            ),
           });
           setIsBusy(false);
           endPendingActivity();
@@ -306,22 +302,17 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
   }, []);
 
   const start = useCallback(
-    (audioData: AudioBuffer | undefined): void => {
-      if (!audioData) {
-        return;
-      }
-
+    (processedAudio: Float32Array, speechSegments: SpeechSegment[]): void => {
       const worker = workerRef.current ?? createAndBindWorker();
 
+      speechSegmentsRef.current = speechSegments;
       setOutput(undefined);
       setError(null);
       setIsBusy(true);
       beginPendingActivity();
 
-      const audio = mixToMono(audioData);
-
       worker.postMessage({
-        audio,
+        audio: processedAudio,
         model: settings.model,
         multilingual: settings.multilingual,
         quantized: settings.quantized,
