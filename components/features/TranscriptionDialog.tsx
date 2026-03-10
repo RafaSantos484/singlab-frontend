@@ -6,6 +6,7 @@ import {
   Box,
   Button,
   CircularProgress,
+  Collapse,
   Dialog,
   DialogActions,
   DialogContent,
@@ -25,6 +26,7 @@ import {
 } from '@mui/material';
 import { useLocale, useTranslations } from 'next-intl';
 
+import { removeSilencesFromVocals } from '@/lib/audio/ffmpegVocals';
 import { useWhisperTranscriber } from '@/lib/hooks/useWhisperTranscriber';
 import {
   getTranscriptionLanguageFromLocale,
@@ -43,16 +45,16 @@ interface TranscriptionDialogProps {
 
 function formatTimestamp(seconds: number | null): string {
   if (seconds === null || Number.isNaN(seconds)) {
-    return '--:--';
+    return '--:--.--';
   }
 
-  const totalSeconds = Math.max(0, Math.floor(seconds));
+  const totalSeconds = Math.max(0, seconds);
   const minutes = Math.floor(totalSeconds / 60);
   const remaining = totalSeconds % 60;
 
   return `${minutes.toString().padStart(2, '0')}:${remaining
-    .toString()
-    .padStart(2, '0')}`;
+    .toFixed(2)
+    .padStart(5, '0')}`;
 }
 
 function modelLabel(model: WhisperModelOption, quantized: boolean): string {
@@ -65,19 +67,18 @@ function modelLabel(model: WhisperModelOption, quantized: boolean): string {
   return `${model.id} (${size} MB)`;
 }
 
-async function decodeAudioFromUrl(url: string): Promise<AudioBuffer> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-
-  const rawData = await response.arrayBuffer();
+/**
+ * Decodes a WAV blob (already 16 kHz mono from FFmpeg) to a Float32Array
+ * for direct transfer to the transcription worker.
+ */
+async function decodeProcessedAudio(wavBlob: Blob): Promise<Float32Array> {
+  const arrayBuffer = await wavBlob.arrayBuffer();
   const audioContext = new AudioContext({
     sampleRate: TRANSCRIPTION_SAMPLE_RATE,
   });
-
   try {
-    return await audioContext.decodeAudioData(rawData.slice(0));
+    const buffer = await audioContext.decodeAudioData(arrayBuffer.slice(0));
+    return buffer.getChannelData(0).slice();
   } finally {
     await audioContext.close();
   }
@@ -85,29 +86,29 @@ async function decodeAudioFromUrl(url: string): Promise<AudioBuffer> {
 
 /**
  * Runs Whisper transcription for a vocals track entirely on the client,
- * including model selection, loading progress, and real-time partial text.
+ * including silence removal, model selection, loading progress, and
+ * word-level output aligned to the original audio timeline.
+ *
+ * **Pipeline:**
+ * 1. Fetch vocals stem as a Blob
+ * 2. FFmpeg WASM detects silences and removes them; a cut map is built
+ * 3. Processed 16 kHz mono WAV is decoded to Float32Array
+ * 4. Whisper worker transcribes with word-level timestamps
+ * 5. Timestamps are remapped from processed → original audio via cut map
+ * 6. Word list with original-audio timestamps is displayed
  *
  * **Features:**
  * - Model size selection (tiny, base, small, medium, large)
- * - Quantization toggle (8-bit vs. full precision, affects download size and speed)
- * - Multilingual support with configurable language and task (transcribe or translate)
+ * - Quantization toggle (8-bit vs. full precision)
+ * - Multilingual support with configurable language and task
  * - Automatic locale-based language defaults
- * - Real-time transcript streaming as the model emits chunks
- * - Download progress for model initialization
- * - Safe stop that waits for worker cleanup
- *
- * **Flow:**
- * 1. User selects model, quantization, language, and task
- * 2. Dialog fetches and decodes the vocals stem audio
- * 3. useWhisperTranscriber posts audio data to web worker
- * 4. Worker loads Whisper model and runs inference
- * 5. Partial results stream in real-time and update the UI
- * 6. Dialog allows pause/resume or exit once transcription completes
+ * - Real-time transcript streaming during inference
+ * - Collapsible silence cut map for debugging/inspection
  *
  * @param open — Dialog visibility
  * @param onClose — Called when user closes dialog (must not be busy)
  * @param songTitle — Song title for dialog header
- * @param vocalsUrl — URL to download decoded vocals stem for transcription
+ * @param vocalsUrl — URL to the vocals stem audio file
  */
 export function TranscriptionDialog({
   open,
@@ -119,8 +120,14 @@ export function TranscriptionDialog({
   const t = useTranslations('Transcription');
   const transcriber = useWhisperTranscriber();
   const hasAppliedLocaleDefaultsRef = useRef(false);
-  const [isPreparingAudio, setIsPreparingAudio] = useState(false);
+
+  type PreparingStage = 'detecting' | 'removing' | 'decoding' | null;
+  const [preparingStage, setPreparingStage] = useState<PreparingStage>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
+  const [cutMapLines, setCutMapLines] = useState<string[]>([]);
+  const [showCutMap, setShowCutMap] = useState(false);
+
+  const isPreparingAudio = preparingStage !== null;
   const isEnglishLocale = locale.toLowerCase().startsWith('en');
 
   const availableModels = useMemo(() => {
@@ -197,17 +204,37 @@ export function TranscriptionDialog({
     }
 
     setAudioError(null);
-    setIsPreparingAudio(true);
 
     try {
-      const decoded = await decodeAudioFromUrl(vocalsUrl);
-      transcriber.start(decoded);
+      // Step 1: Fetch vocals audio as a Blob.
+      setPreparingStage('detecting');
+      const response = await fetch(vocalsUrl);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const audioBlob = await response.blob();
+
+      // Step 2: Detect silences, cut audio, and build cut map via FFmpeg WASM.
+      setPreparingStage('removing');
+      const {
+        processedBlob,
+        speechSegments,
+        cutMapLines: newCutMap,
+      } = await removeSilencesFromVocals(audioBlob);
+      setCutMapLines(newCutMap);
+
+      // Step 3: Decode processed WAV to Float32Array for the transcription worker.
+      setPreparingStage('decoding');
+      const processedAudio = await decodeProcessedAudio(processedBlob);
+
+      // Step 4: Start transcription. The hook remaps word timestamps after completion.
+      transcriber.start(processedAudio, speechSegments);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : t('errors.unknown');
-      setAudioError(t('errors.audioDecode', { message }));
+      setAudioError(t('errors.audioProcess', { message }));
     } finally {
-      setIsPreparingAudio(false);
+      setPreparingStage(null);
     }
   }, [t, transcriber, vocalsUrl]);
 
@@ -223,7 +250,7 @@ export function TranscriptionDialog({
 
   const handleStop = useCallback(async (): Promise<void> => {
     await transcriber.stop();
-    setIsPreparingAudio(false);
+    setPreparingStage(null);
   }, [transcriber]);
 
   const handleClose = useCallback((): void => {
@@ -332,7 +359,11 @@ export function TranscriptionDialog({
 
           {isPreparingAudio && (
             <Alert severity="info" icon={<CircularProgress size={16} />}>
-              {t('preparingAudio')}
+              {preparingStage === 'detecting'
+                ? t('preparingDetecting')
+                : preparingStage === 'removing'
+                  ? t('preparingRemoving')
+                  : t('preparingDecoding')}
             </Alert>
           )}
 
@@ -344,6 +375,40 @@ export function TranscriptionDialog({
                 message: transcriber.error || t('errors.unknown'),
               })}
             </Alert>
+          )}
+
+          {cutMapLines.length > 0 && (
+            <Box>
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => setShowCutMap((prev) => !prev)}
+                sx={{ mb: 0.5, textTransform: 'none', p: 0 }}
+              >
+                {showCutMap ? t('cutMapHide') : t('cutMapShow')}
+              </Button>
+              <Collapse in={showCutMap}>
+                <Box
+                  component="pre"
+                  sx={{
+                    fontFamily: 'monospace',
+                    fontSize: '0.7rem',
+                    lineHeight: 1.6,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    borderRadius: 1,
+                    px: 1.5,
+                    py: 1,
+                    maxHeight: 160,
+                    overflowY: 'auto',
+                    whiteSpace: 'pre',
+                    m: 0,
+                  }}
+                >
+                  {cutMapLines.join('\n')}
+                </Box>
+              </Collapse>
+            </Box>
           )}
 
           {transcriber.progressItems.length > 0 && (
@@ -368,37 +433,51 @@ export function TranscriptionDialog({
             </Stack>
           )}
 
-          <Box
-            sx={{
-              border: '1px solid',
-              borderColor: 'divider',
-              borderRadius: 1,
-              minHeight: 200,
-              maxHeight: 260,
-              overflowY: 'auto',
-              px: 1,
-              py: 0.5,
-            }}
-          >
-            {transcriber.output?.chunks.length ? (
-              <List dense>
-                {transcriber.output.chunks.map((chunk, index) => (
-                  <ListItem key={`${index}-${chunk.timestamp[0]}`}>
-                    <ListItemText
-                      primary={chunk.text.trim() || t('emptyChunk')}
-                      secondary={formatTimestamp(chunk.timestamp[0])}
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            ) : (
-              <Typography
-                variant="body2"
-                sx={{ color: 'text.secondary', px: 1, py: 1.5 }}
-              >
-                {t('emptyState')}
-              </Typography>
-            )}
+          <Box>
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+              {t('wordListLabel')}
+            </Typography>
+            <Box
+              sx={{
+                border: '1px solid',
+                borderColor: 'divider',
+                borderRadius: 1,
+                minHeight: 200,
+                maxHeight: 260,
+                overflowY: 'auto',
+                px: 1,
+                py: 0.5,
+              }}
+            >
+              {transcriber.output?.chunks.length ? (
+                <List dense disablePadding>
+                  {transcriber.output.chunks.map((chunk, index) => (
+                    <ListItem
+                      key={`${index}-${chunk.timestamp[0]}`}
+                      disableGutters
+                      sx={{ py: 0.25 }}
+                    >
+                      <ListItemText
+                        primary={chunk.text.trim() || t('emptyChunk')}
+                        secondary={`${formatTimestamp(chunk.timestamp[0])} — ${formatTimestamp(chunk.timestamp[1])}`}
+                        primaryTypographyProps={{ variant: 'body2' }}
+                        secondaryTypographyProps={{
+                          variant: 'caption',
+                          sx: { fontFamily: 'monospace' },
+                        }}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              ) : (
+                <Typography
+                  variant="body2"
+                  sx={{ color: 'text.secondary', px: 1, py: 1.5 }}
+                >
+                  {t('emptyState')}
+                </Typography>
+              )}
+            </Box>
           </Box>
 
           <Box>

@@ -83,11 +83,13 @@ Components are split into two groups:
           * Form validation for title/author
           * Multi-phase progress UI (converting → uploading → saving)
      - `SongEditDialog` — song metadata editing with validation and error handling.
-     - `TranscriptionDialog` — in-browser vocals transcription dialog using Whisper,
-          with model/language settings, loading progress, and live incremental text updates.
      - `TranscriptionDialog` — in-browser vocals transcription using OpenAI Whisper
-          model (transformers.js), with configurable model size, quantization,
-          language selection, and live incremental transcript updates via web worker.
+          (transformers.js) with full silence-removal pipeline: FFmpeg WASM detects
+          and removes silences from the vocals track, builds a cut map, Whisper
+          transcribes the silence-removed audio with word-level timestamps, and
+          timestamps are automatically remapped back to the original audio timeline.
+          Configurable model size, quantization, multilingual language/task, and
+          collapsible silence cut map display.
      - `SingingPracticeDialog` — synchronized practice experience with
           dual pitch tracking (vocals stem + user microphone), seek controls,
           dynamic pitch axis, and graceful fallback when Storage CORS blocks
@@ -105,11 +107,13 @@ Shared utilities used across the app:
 | `lib/api/song-creation.ts` | Three-step song upload: validation → FFmpeg canonical normalization (AAC/M4A) → Storage upload → Firestore save with rollback |
 | `lib/api/separations.ts` | API client for stem separation proxy (submit, status) |
 | `lib/audio/normalizeAudio.ts` | Client-side audio/video normalization to canonical AAC/M4A using FFmpeg WASM (singleton, lazy-loaded from CDN). Queue-based concurrency control serializes all conversion operations to prevent shared WASM instance and virtual FS collisions. Unique file tokens prevent path conflicts. |
+| `lib/audio/ffmpegVocals.ts` | FFmpeg WASM silence removal for vocals tracks. Single-pass silence detection and cut-map construction, followed by `atrim+concat` to produce a 16 kHz mono WAV with silence gaps removed. Returns a `SpeechSegment[]` cut map mapping processed ↔ original audio coordinates for timestamp reconstruction. |
+| `lib/audio/timestampRemap.ts` | Timestamp reconstruction utilities. `remapTimestamp()` maps a single processed-audio timestamp back to the original timeline via binary search over `SpeechSegment[]`. `remapWordTimestamps()` applies the remap to Whisper word arrays. |
 | `lib/async/` | Pending activity tracking for navigation guards (prevents leaving during uploads) |
 | `lib/firebase/` | Firebase app initialization (singleton), auth helpers, Firestore CRUD (songs, users), Storage utilities |
 | `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`, `useSeparationStatus`, `useStemAutoProcessor`, etc.) |
-| `lib/hooks/useWhisperTranscriber.ts` | Custom React hook managing Whisper Web Worker lifecycle: model loading, transcription start/stop, progress tracking, and incremental transcript state. Supports multiple model sizes and multilingual transcription with configurable language/task (transcribe vs. translate). |
-| `lib/transcription/` | Web Worker entry point (`loader.worker.ts`) that loads and runs OpenAI Whisper model via transformers.js, handles inference requests, emits progress events, and streams incremental transcript chunks. Also includes TypeScript types and model/language configuration (constants.ts). |
+| `lib/hooks/useWhisperTranscriber.ts` | Custom React hook managing Whisper Web Worker lifecycle: model loading, transcription start/stop, progress tracking, and incremental transcript state. Accepts silence-removed `Float32Array` audio and a `SpeechSegment[]` cut map; automatically remaps word-level timestamps from the processed audio back to the original vocals timeline after the worker completes, then filters out any backtracking chunks (segments whose start time regresses below the highest end time seen so far) to eliminate duplicates caused by Whisper re-processing already-transcribed audio. Supports multiple model sizes and multilingual transcription with configurable language/task (transcribe vs. translate). |
+| `lib/transcription/` | Web Worker entry point (`loader.worker.ts`) that loads and runs OpenAI Whisper via transformers.js, handles inference requests with word-level timestamps (`return_timestamps: 'word'`), emits progress events, and streams incremental transcript chunks. Also includes TypeScript types and model/language configuration (`constants.ts`). |
 | `lib/separations/` | Adapter pattern for provider-agnostic separation normalization and stem URL extraction |
 | `lib/storage/` | Firebase Storage upload utilities (raw songs and separated stems) with rollback support. Automatically invalidates cache after upload/delete operations. |
 | `lib/storage/StorageUrlManager.ts` | Centralized Firebase Storage download URL caching with TTL (1 day) based expiration, deduplication of concurrent requests, and automatic refresh on expiry. Supports selective path invalidation on upload/delete and full cache clearing on sign-out. Ensures fast URL access for real-time playback switching without redundant Firebase calls or stale URLs. |
@@ -269,17 +273,42 @@ Two provider paths are supported: `poyo` (async backend-proxied AI task) and
      │
      │ Selects model, quantization, language/task options
      ▼
-[Client fetches vocals stem URL and decodes audio to AudioBuffer]
+[Stage 1: Silence detection — FFmpeg WASM silencedetect]
      │
-     │ Convert to mono Float32Array at transcription sample rate
+     │ Fetch vocals stem as Blob
+     │ Run silencedetect filter (-45 dB, min 0.3 s)
+     │ Parse silence intervals + total duration from FFmpeg log
+     ▼
+[Stage 2: Silence removal — FFmpeg WASM atrim+concat]
+     │
+     │ Build SpeechSegment[] cut map (original ↔ processed coordinates)
+     │ Cut speech-only segments and concatenate into 16 kHz mono WAV
+     │ Build human-readable cut map lines for UI display
+     ▼
+[Stage 3: Audio decode]
+     │
+     │ Decode processed WAV to Float32Array via Web Audio API
      ▼
 [useWhisperTranscriber posts request to Web Worker]
      │
      │ Worker loads Whisper model via transformers.js
+     │ Runs inference with return_timestamps: 'word'
      │ Emits progress events and incremental transcript updates
      ▼
-[Dialog renders loading progress + live chunks + full transcript]
+[Hook remaps word timestamps to original audio timeline]
      │
+     │ remapWordTimestamps(chunks, speechSegments)
+     │ Binary search over SpeechSegment[] cut map
+     ▼
+[Hook filters backtracking chunks]
+     │
+     │ filterBacktrackingChunks(remapped)
+     │ Drops any chunk whose start < highest end time seen so far
+     │ Eliminates duplicate segments from Whisper backtracking
+     ▼
+[Dialog renders collapsible cut map + word list with original-audio timestamps]
+     │
+     │ Each word shows: text + MM:SS.ss — MM:SS.ss (start — end)
      │ User can stop safely; worker disposes pipeline on stop
      ▼
 [Transcription session completes entirely in browser]

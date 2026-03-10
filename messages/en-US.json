@@ -390,8 +390,15 @@
       "zh": "Chinese"
     },
     "preparingAudio": "Preparing vocals audio...",
+    "preparingDetecting": "Detecting silences in vocals...",
+    "preparingRemoving": "Removing silences from vocals...",
+    "preparingDecoding": "Preparing audio for transcription...",
     "stopToClose": "Stop the transcription and wait for the worker to finish before closing this window.",
     "loadingProgress": "Loading model files",
+    "cutMapLabel": "Silence map",
+    "cutMapShow": "Show silence map",
+    "cutMapHide": "Hide silence map",
+    "wordListLabel": "Words (aligned to original audio)",
     "emptyState": "Start transcription to see real-time segments.",
     "emptyChunk": "...",
     "fullTranscriptLabel": "Live transcript",
@@ -402,6 +409,7 @@
     "closeButton": "Close",
     "errors": {
       "noVocals": "Vocals track is not available for this song.",
+      "audioProcess": "Failed to process vocals audio: {message}",
       "audioDecode": "Failed to load vocals audio: {message}",
       "transcription": "Transcription failed: {message}",
       "unknown": "Unknown error"
