@@ -388,8 +388,15 @@
       "zh": "Chinês"
     },
     "preparingAudio": "Preparando áudio vocal...",
+    "preparingDetecting": "Detectando silêncios nos vocais...",
+    "preparingRemoving": "Removendo silêncios dos vocais...",
+    "preparingDecoding": "Preparando áudio para transcrição...",
     "stopToClose": "Pare a transcrição e aguarde o worker finalizar antes de fechar esta janela.",
     "loadingProgress": "Carregando arquivos do modelo",
+    "cutMapLabel": "Mapa de silêncios",
+    "cutMapShow": "Mostrar mapa de silêncios",
+    "cutMapHide": "Ocultar mapa de silêncios",
+    "wordListLabel": "Palavras (alinhadas ao áudio original)",
     "emptyState": "Inicie a transcrição para ver segmentos em tempo real.",
     "emptyChunk": "...",
     "fullTranscriptLabel": "Transcrição ao vivo",
@@ -400,6 +407,7 @@
     "closeButton": "Fechar",
     "errors": {
       "noVocals": "A faixa vocal não está disponível para esta música.",
+      "audioProcess": "Falha ao processar áudio vocal: {message}",
       "audioDecode": "Falha ao carregar áudio vocal: {message}",
       "transcription": "Falha na transcrição: {message}",
       "unknown": "Erro desconhecido"
