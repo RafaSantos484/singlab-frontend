@@ -235,7 +235,7 @@ async function transcribe(
       stride_length_s: isDistilWhisper ? 3 : 5,
       language: request.language,
       task: request.subtask,
-      return_timestamps: 'word',
+      return_timestamps: true,
       force_full_sequences: false,
       callback_function: callbackFunction,
       chunk_callback: chunkCallback,
