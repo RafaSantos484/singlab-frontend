@@ -42,3 +42,5 @@ yarn-error.log*
 next-env.d.ts
 
 cors.json
+ai-prompt.txt
+ai-pr-prompt.txt

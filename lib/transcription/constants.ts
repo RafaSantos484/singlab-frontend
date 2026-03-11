@@ -41,11 +41,6 @@ export const WHISPER_MODEL_OPTIONS: WhisperModelOption[] = [
     quantizedSizeMb: 402,
     supportsMultilingual: false,
   },
-  {
-    id: 'distil-whisper/distil-large-v2',
-    quantizedSizeMb: 767,
-    supportsMultilingual: true,
-  },
 ];
 
 export const WHISPER_LANGUAGE_OPTIONS: WhisperLanguageOption[] = [

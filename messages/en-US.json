@@ -395,6 +395,8 @@
     "preparingDecoding": "Preparing audio for transcription...",
     "stopToClose": "Stop the transcription and wait for the worker to finish before closing this window.",
     "loadingProgress": "Loading model files",
+    "vocalsPlayerLabel": "Vocals",
+    "processedVocalsPlayerLabel": "Vocals (silence removed)",
     "cutMapLabel": "Silence map",
     "cutMapShow": "Show silence map",
     "cutMapHide": "Hide silence map",

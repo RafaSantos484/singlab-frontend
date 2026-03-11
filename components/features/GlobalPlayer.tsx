@@ -185,6 +185,7 @@ import { useStorageDownloadUrls } from '@/lib/hooks/useStorageDownloadUrls';
 import {
   emitGlobalPlayerSnapshot,
   requestPracticeDialogOpen,
+  subscribeGlobalPause,
 } from '@/lib/player/practiceSync';
 import { normalizeSeparationInfo } from '@/lib/separations';
 import { getFirebaseAuth } from '@/lib/firebase/auth';
@@ -1561,6 +1562,13 @@ function GlobalPlayerInner({
     dispatch({ type: 'PLAYER_STOP' });
     requestPracticeDialogOpen(song.id);
   }, [dispatch, song.id]);
+
+  // Subscribe to external pause requests (e.g. TranscriptionDialog opening).
+  useEffect(() => {
+    return subscribeGlobalPause(() => {
+      setPlayer((p) => ({ ...p, isPlaying: false }));
+    });
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Derived UI state
