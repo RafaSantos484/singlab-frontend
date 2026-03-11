@@ -92,13 +92,18 @@ Components are split into two groups:
           multilingual language selection, inline audio players for original and
           silence-removed vocals, and collapsible silence cut map display.
           Automatically pauses GlobalPlayer on open via `requestGlobalPlayerPause`.
-          Includes a collapsible **Lyrics Adaptation** panel: the user pastes the
-          canonical song lyrics, and a Flan-T5 LLM (running in a dedicated Web
-          Worker via transformers.js) aligns each Whisper chunk to the closest
-          lyric span using Levenshtein similarity + optional LLM text2text
-          refinement. Results are colour-coded (`matched` / `corrected` /
-          `unmatched`). The LLM model is downloaded and cached on first use;
-          subsequent runs reuse the warm pipeline from the worker.
+          Includes a **Lyrics Adaptation** panel (always visible, with an inline
+          help tooltip): the user pastes the canonical song lyrics, and a
+          Flan-T5 LLM (running in a dedicated Web Worker via transformers.js)
+          aligns each Whisper chunk to the closest lyric span using Levenshtein
+          similarity + optional LLM text2text refinement. During the batch run,
+          any unmatched chunk is automatically retried up to 3 times with a
+          progressively broader prompt before the result is finalised. Each
+          result can also be retried individually after the run. Results are
+          colour-coded (`matched` / `corrected` / `unmatched`), with a retry
+          count badge on chunks that needed multiple attempts. The LLM model is
+          downloaded and cached on first use; subsequent runs reuse the warm
+          pipeline from the worker.
      - `SingingPracticeDialog` — synchronized practice experience with
           dual pitch tracking (vocals stem + user microphone), seek controls,
           dynamic pitch axis, and graceful fallback when Storage CORS blocks
@@ -121,11 +126,11 @@ Shared utilities used across the app:
 | `lib/async/` | Pending activity tracking for navigation guards (prevents leaving during uploads) |
 | `lib/firebase/` | Firebase app initialization (singleton), auth helpers, Firestore CRUD (songs, users), Storage utilities |
 | `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`, `useSeparationStatus`, `useStemAutoProcessor`, etc.) |
-| `lib/hooks/useLyricsAdaptation.ts` | Manages the lyrics adaptation Worker lifecycle: lazy worker creation, per-job ID tracking (stale message filtering), synchronous `adapt()` that posts to the worker, and `cancel()`/`reset()` that set state immediately and discard in-flight results. Exposes a 5-phase state machine (`idle` → `loading-model` → `adapting` → `done` / `error`). |
+| `lib/hooks/useLyricsAdaptation.ts` | Manages the lyrics adaptation Worker lifecycle: lazy worker creation, per-job ID tracking (stale message filtering), synchronous `adapt()` that posts to the worker, `retryChunk()` that re-adapts a single chunk with a progressively broadened prompt, and `cancel()`/`reset()` that set state immediately and discard in-flight results. Exposes a 5-phase state machine (`idle` → `loading-model` → `adapting` → `done` / `error`). Also tracks `retryingIndex` (which chunk is being retried) and `retryError` (last retry error, shown without replacing the results list). Wraps retries with `startPendingActivity` to block page navigation while the worker is running. |
 | `lib/hooks/useWhisperTranscriber.ts` | Custom React hook managing Whisper Web Worker lifecycle: model loading, transcription start/stop, progress tracking, and incremental transcript state. Accepts silence-removed `Float32Array` audio and a `SpeechSegment[]` cut map; automatically remaps word-level timestamps from the processed audio back to the original vocals timeline after the worker completes, then filters out any backtracking chunks (segments whose start time regresses below the highest end time seen so far) to eliminate duplicates caused by Whisper re-processing already-transcribed audio. Supports multiple model sizes and multilingual transcription with configurable language. |
 | `lib/transcription/` | Web Worker entry point (`loader.worker.ts`) that loads and runs OpenAI Whisper via transformers.js, handles inference requests with word-level timestamps (`return_timestamps: 'word'`), emits progress events, and streams incremental transcript chunks. Also includes TypeScript types and model/language configuration (`constants.ts`). |
-| `lib/transcription/lyricsAdapter.ts` | Pure types and text-processing utilities for lyrics alignment: Levenshtein similarity, span picking over 1–`SPAN_MAX` consecutive lyric lines, punctuation/capitalisation helpers, `parseLyricsLines`. No side effects — safe to import from SSR and the worker alike. Also defines the typed worker message protocol (`LyricsAdapterRequest` / `LyricsAdapterResponse`). |
-| `lib/transcription/lyricsAdapter.worker.ts` | Web Worker that runs Flan-T5 text2text-generation (via transformers.js) for lyrics alignment. Per-file download progress is tracked in a `Map` and reported as a running average to avoid progress appearing to reset on each new model file. Processes chunks sequentially, posting a `chunk-done` message per adapted chunk. Supports cancellation via an `activeJobId` guard checked after each `await`. |
+| `lib/transcription/lyricsAdapter.ts` | Pure types and text-processing utilities for lyrics alignment: Levenshtein similarity, span picking over 1–`SPAN_MAX` consecutive lyric lines, punctuation/capitalisation helpers, `parseLyricsLines`. No side effects — safe to import from SSR and the worker alike. Also defines the typed worker message protocol (`LyricsAdapterRequest` / `LyricsAdapterResponse`), including the `retry-chunk` / `retry-chunk-done` messages added for per-chunk retry. The `AdaptedChunk` type carries a `retryCount` field incremented on each retry. |
+| `lib/transcription/lyricsAdapter.worker.ts` | Web Worker that runs Flan-T5 text2text-generation (via transformers.js) for lyrics alignment. Per-file download progress is tracked in a `Map` and reported as a running average to avoid progress appearing to reset on each new model file. Handles two request types: `adapt` processes all chunks sequentially — for each chunk, tries heuristic + LLM matching, then automatically retries unmatched chunks up to `MAX_AUTO_RETRIES` (3) times with escalating prompt breadth before posting `chunk-done`; `retry-chunk` re-adapts a single chunk with an escalated strategy controlled by `retryCount` — higher `retryCount` widens `SPAN_MAX`, relaxes similarity thresholds, and appends a progressively stronger retry instruction to the LLM prompt. Both paths support cancellation via an `activeJobId` guard checked after each `await`. |
 | `lib/player/practiceSync.ts` | Publish/subscribe bus for inter-component player communication. Provides typed channels: `emitGlobalPlayerSnapshot`/`subscribeGlobalPlayerSnapshots` for player state broadcasts, `requestPracticeMode`/`subscribePracticeCommands` for practice mode commands, `requestPracticeDialogOpen`/`subscribePracticeDialogOpenRequests` for dialog launch requests, and `requestGlobalPlayerPause`/`subscribeGlobalPause` for external pause requests (e.g. pausing on TranscriptionDialog open). |
 | `lib/player/practiceSync.ts` | Publish/subscribe bus for inter-component player communication. Provides typed channels: `emitGlobalPlayerSnapshot`/`subscribeGlobalPlayerSnapshots` for player state broadcasts, `requestPracticeMode`/`subscribePracticeCommands` for practice mode commands, `requestPracticeDialogOpen`/`subscribePracticeDialogOpenRequests` for dialog launch requests, and `requestGlobalPlayerPause`/`subscribeGlobalPause` for external pause requests (e.g. pausing on TranscriptionDialog open). |
 | `lib/separations/` | Adapter pattern for provider-agnostic separation normalization and stem URL extraction |
@@ -337,9 +342,25 @@ Two provider paths are supported: `poyo` (async backend-proxied AI task) and
      │   3. Score < CORRECT_THRESHOLD → LLM prompt to Flan-T5
      │      (lazy-loaded, cached; progress reported as per-file running average)
      │   4. LLM output re-scored; accepted if >= POSSIBLE_THRESHOLD (0.72)
-     │   5. Posts 'chunk-done' per chunk; 'complete' when all done
+     │   5. If still unmatched: auto-retry up to MAX_AUTO_RETRIES (3) times
+     │      with escalating prompt breadth (wider SPAN_MAX, relaxed thresholds,
+     │      stronger retry instruction). retryCount on the result reflects how
+     │      many auto-retries were needed.
+     │   6. Posts 'chunk-done' per chunk; 'complete' when all done
      ▼
 [Dialog renders colour-coded results: matched / corrected / unmatched]
+     │
+     │ [Optional] User clicks retry on any chunk
+     ▼
+[useLyricsAdaptation posts 'retry-chunk' with retryCount + 1]
+     │
+     │ Worker re-adapts the single chunk with an escalated strategy:
+     │   - SPAN_MAX widened by retryCount (up to +3 lines)
+     │   - Similarity thresholds relaxed by retryCount × 0.06 (floor 0.6/0.4)
+     │   - LLM prompt appended with a retry instruction (mild → broad)
+     │ Posts 'retry-chunk-done'; hook patches only that result in the list
+     ▼
+[Results list updated in place; retryCount badge shown on retried chunks]
 ```
 
 ## State Management
