@@ -28,6 +28,7 @@ import { useLocale, useTranslations } from 'next-intl';
 
 import { removeSilencesFromVocals } from '@/lib/audio/ffmpegVocals';
 import { useWhisperTranscriber } from '@/lib/hooks/useWhisperTranscriber';
+import { requestGlobalPlayerPause } from '@/lib/player/practiceSync';
 import {
   getTranscriptionLanguageFromLocale,
   TRANSCRIPTION_SAMPLE_RATE,
@@ -98,12 +99,13 @@ async function decodeProcessedAudio(wavBlob: Blob): Promise<Float32Array> {
  * 6. Word list with original-audio timestamps is displayed
  *
  * **Features:**
- * - Model size selection (tiny, base, small, medium, large)
+ * - Model size selection (tiny, base, small, medium)
  * - Quantization toggle (8-bit vs. full precision)
- * - Multilingual support with configurable language and task
+ * - Multilingual support with configurable language
  * - Automatic locale-based language defaults
  * - Real-time transcript streaming during inference
  * - Collapsible silence cut map for debugging/inspection
+ * - Inline audio players for original and silence-removed vocals
  *
  * @param open — Dialog visibility
  * @param onClose — Called when user closes dialog (must not be busy)
@@ -127,6 +129,11 @@ export function TranscriptionDialog({
   const [cutMapLines, setCutMapLines] = useState<string[]>([]);
   const [showCutMap, setShowCutMap] = useState(false);
 
+  const processedAudioUrlRef = useRef<string | null>(null);
+  const [processedAudioUrl, setProcessedAudioUrl] = useState<string | null>(
+    null,
+  );
+
   const isPreparingAudio = preparingStage !== null;
   const isEnglishLocale = locale.toLowerCase().startsWith('en');
 
@@ -143,6 +150,24 @@ export function TranscriptionDialog({
       return true;
     });
   }, [transcriber.settings.multilingual, transcriber.settings.quantized]);
+
+  // Pause GlobalPlayer when the dialog opens.
+  useEffect(() => {
+    if (open) {
+      requestGlobalPlayerPause();
+    }
+  }, [open]);
+
+  // Revoke the processed audio object URL when the dialog closes.
+  useEffect(() => {
+    if (!open) {
+      if (processedAudioUrlRef.current) {
+        URL.revokeObjectURL(processedAudioUrlRef.current);
+        processedAudioUrlRef.current = null;
+      }
+      setProcessedAudioUrl(null);
+    }
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
@@ -222,6 +247,14 @@ export function TranscriptionDialog({
         cutMapLines: newCutMap,
       } = await removeSilencesFromVocals(audioBlob);
       setCutMapLines(newCutMap);
+
+      // Update the processed vocals player URL.
+      if (processedAudioUrlRef.current) {
+        URL.revokeObjectURL(processedAudioUrlRef.current);
+      }
+      const newProcessedUrl = URL.createObjectURL(processedBlob);
+      processedAudioUrlRef.current = newProcessedUrl;
+      setProcessedAudioUrl(newProcessedUrl);
 
       // Step 3: Decode processed WAV to Float32Array for the transcription worker.
       setPreparingStage('decoding');
@@ -317,42 +350,58 @@ export function TranscriptionDialog({
           </Stack>
 
           {transcriber.settings.multilingual && (
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-              <FormControl fullWidth>
-                <InputLabel>{t('languageLabel')}</InputLabel>
-                <Select
-                  value={transcriber.settings.language}
-                  label={t('languageLabel')}
-                  onChange={(event) =>
-                    transcriber.setLanguage(event.target.value)
-                  }
-                >
-                  {WHISPER_LANGUAGE_OPTIONS.map((option) => (
-                    <MenuItem key={option.code} value={option.code}>
-                      {t(`languages.${option.code}` as Parameters<typeof t>[0])}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-
-              <FormControl fullWidth>
-                <InputLabel>{t('taskLabel')}</InputLabel>
-                <Select
-                  value={transcriber.settings.subtask}
-                  label={t('taskLabel')}
-                  onChange={(event) =>
-                    transcriber.setSubtask(
-                      event.target.value as 'transcribe' | 'translate',
-                    )
-                  }
-                >
-                  <MenuItem value="transcribe">
-                    {t('tasks.transcribe')}
+            <FormControl fullWidth>
+              <InputLabel>{t('languageLabel')}</InputLabel>
+              <Select
+                value={transcriber.settings.language}
+                label={t('languageLabel')}
+                onChange={(event) =>
+                  transcriber.setLanguage(event.target.value)
+                }
+              >
+                {WHISPER_LANGUAGE_OPTIONS.map((option) => (
+                  <MenuItem key={option.code} value={option.code}>
+                    {t(`languages.${option.code}` as Parameters<typeof t>[0])}
                   </MenuItem>
-                  <MenuItem value="translate">{t('tasks.translate')}</MenuItem>
-                </Select>
-              </FormControl>
-            </Stack>
+                ))}
+              </Select>
+            </FormControl>
+          )}
+
+          {vocalsUrl && (
+            <Box>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: 'block', mb: 0.5 }}
+              >
+                {t('vocalsPlayerLabel')}
+              </Typography>
+              <Box
+                component="audio"
+                controls
+                src={vocalsUrl}
+                sx={{ width: '100%', display: 'block' }}
+              />
+            </Box>
+          )}
+
+          {processedAudioUrl && (
+            <Box>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ display: 'block', mb: 0.5 }}
+              >
+                {t('processedVocalsPlayerLabel')}
+              </Typography>
+              <Box
+                component="audio"
+                controls
+                src={processedAudioUrl}
+                sx={{ width: '100%', display: 'block' }}
+              />
+            </Box>
           )}
 
           {!canClose && <Alert severity="warning">{t('stopToClose')}</Alert>}
@@ -426,7 +475,7 @@ export function TranscriptionDialog({
                   </Typography>
                   <LinearProgress
                     variant="determinate"
-                    value={Math.min(100, Math.max(0, item.progress * 100))}
+                    value={Math.min(100, Math.max(0, item.progress))}
                   />
                 </Box>
               ))}

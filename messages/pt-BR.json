@@ -393,6 +393,8 @@
     "preparingDecoding": "Preparando áudio para transcrição...",
     "stopToClose": "Pare a transcrição e aguarde o worker finalizar antes de fechar esta janela.",
     "loadingProgress": "Carregando arquivos do modelo",
+    "vocalsPlayerLabel": "Vocais",
+    "processedVocalsPlayerLabel": "Vocais (silêncios removidos)",
     "cutMapLabel": "Mapa de silêncios",
     "cutMapShow": "Mostrar mapa de silêncios",
     "cutMapHide": "Ocultar mapa de silêncios",

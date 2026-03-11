@@ -88,8 +88,10 @@ Components are split into two groups:
           and removes silences from the vocals track, builds a cut map, Whisper
           transcribes the silence-removed audio with word-level timestamps, and
           timestamps are automatically remapped back to the original audio timeline.
-          Configurable model size, quantization, multilingual language/task, and
-          collapsible silence cut map display.
+          Configurable model size (tiny, base, small, medium), quantization,
+          multilingual language selection, inline audio players for original and
+          silence-removed vocals, and collapsible silence cut map display.
+          Automatically pauses GlobalPlayer on open via `requestGlobalPlayerPause`.
      - `SingingPracticeDialog` — synchronized practice experience with
           dual pitch tracking (vocals stem + user microphone), seek controls,
           dynamic pitch axis, and graceful fallback when Storage CORS blocks
@@ -112,8 +114,10 @@ Shared utilities used across the app:
 | `lib/async/` | Pending activity tracking for navigation guards (prevents leaving during uploads) |
 | `lib/firebase/` | Firebase app initialization (singleton), auth helpers, Firestore CRUD (songs, users), Storage utilities |
 | `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`, `useSeparationStatus`, `useStemAutoProcessor`, etc.) |
-| `lib/hooks/useWhisperTranscriber.ts` | Custom React hook managing Whisper Web Worker lifecycle: model loading, transcription start/stop, progress tracking, and incremental transcript state. Accepts silence-removed `Float32Array` audio and a `SpeechSegment[]` cut map; automatically remaps word-level timestamps from the processed audio back to the original vocals timeline after the worker completes, then filters out any backtracking chunks (segments whose start time regresses below the highest end time seen so far) to eliminate duplicates caused by Whisper re-processing already-transcribed audio. Supports multiple model sizes and multilingual transcription with configurable language/task (transcribe vs. translate). |
+| `lib/hooks/useWhisperTranscriber.ts` | Custom React hook managing Whisper Web Worker lifecycle: model loading, transcription start/stop, progress tracking, and incremental transcript state. Accepts silence-removed `Float32Array` audio and a `SpeechSegment[]` cut map; automatically remaps word-level timestamps from the processed audio back to the original vocals timeline after the worker completes, then filters out any backtracking chunks (segments whose start time regresses below the highest end time seen so far) to eliminate duplicates caused by Whisper re-processing already-transcribed audio. Supports multiple model sizes and multilingual transcription with configurable language. |
 | `lib/transcription/` | Web Worker entry point (`loader.worker.ts`) that loads and runs OpenAI Whisper via transformers.js, handles inference requests with word-level timestamps (`return_timestamps: 'word'`), emits progress events, and streams incremental transcript chunks. Also includes TypeScript types and model/language configuration (`constants.ts`). |
+| `lib/player/practiceSync.ts` | Publish/subscribe bus for inter-component player communication. Provides typed channels: `emitGlobalPlayerSnapshot`/`subscribeGlobalPlayerSnapshots` for player state broadcasts, `requestPracticeMode`/`subscribePracticeCommands` for practice mode commands, `requestPracticeDialogOpen`/`subscribePracticeDialogOpenRequests` for dialog launch requests, and `requestGlobalPlayerPause`/`subscribeGlobalPause` for external pause requests (e.g. pausing on TranscriptionDialog open). |
+| `lib/player/practiceSync.ts` | Publish/subscribe bus for inter-component player communication. Provides typed channels: `emitGlobalPlayerSnapshot`/`subscribeGlobalPlayerSnapshots` for player state broadcasts, `requestPracticeMode`/`subscribePracticeCommands` for practice mode commands, `requestPracticeDialogOpen`/`subscribePracticeDialogOpenRequests` for dialog launch requests, and `requestGlobalPlayerPause`/`subscribeGlobalPause` for external pause requests (e.g. pausing on TranscriptionDialog open). |
 | `lib/separations/` | Adapter pattern for provider-agnostic separation normalization and stem URL extraction |
 | `lib/storage/` | Firebase Storage upload utilities (raw songs and separated stems) with rollback support. Automatically invalidates cache after upload/delete operations. |
 | `lib/storage/StorageUrlManager.ts` | Centralized Firebase Storage download URL caching with TTL (1 day) based expiration, deduplication of concurrent requests, and automatic refresh on expiry. Supports selective path invalidation on upload/delete and full cache clearing on sign-out. Ensures fast URL access for real-time playback switching without redundant Firebase calls or stale URLs. |
@@ -276,7 +280,7 @@ Two provider paths are supported: `poyo` (async backend-proxied AI task) and
 [Stage 1: Silence detection — FFmpeg WASM silencedetect]
      │
      │ Fetch vocals stem as Blob
-     │ Run silencedetect filter (-45 dB, min 0.3 s)
+     │ Run silencedetect filter (-45 dB, min 2.0 s)
      │ Parse silence intervals + total duration from FFmpeg log
      ▼
 [Stage 2: Silence removal — FFmpeg WASM atrim+concat]
