@@ -231,7 +231,7 @@ async function transcribe(
     return await transcriber(request.audio, {
       top_k: 0,
       do_sample: false,
-      chunk_length_s: isDistilWhisper ? 20 : 30,
+      chunk_length_s: isDistilWhisper ? 20 : 25,
       stride_length_s: isDistilWhisper ? 3 : 5,
       language: request.language,
       task: request.subtask,
