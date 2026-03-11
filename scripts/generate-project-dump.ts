@@ -64,16 +64,6 @@ function toPosix(p: string): string {
   return p.split(path.sep).join('/');
 }
 
-function existsFile(relOrAbsPath: string): boolean {
-  const abs = path.resolve(process.cwd(), relOrAbsPath);
-  return fs.existsSync(abs) && fs.statSync(abs).isFile();
-}
-
-function existsDir(relOrAbsPath: string): boolean {
-  const abs = path.resolve(process.cwd(), relOrAbsPath);
-  return fs.existsSync(abs) && fs.statSync(abs).isDirectory();
-}
-
 const TEXT_FILE_EXTENSIONS = new Set([
   '.ts',
   '.tsx',
