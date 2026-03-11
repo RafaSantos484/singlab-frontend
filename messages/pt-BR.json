@@ -399,6 +399,7 @@
     "cutMapShow": "Mostrar mapa de silêncios",
     "cutMapHide": "Ocultar mapa de silêncios",
     "wordListLabel": "Palavras (alinhadas ao áudio original)",
+    "segmentListLabel": "Segmentos (alinhados ao áudio original)",
     "emptyState": "Inicie a transcrição para ver segmentos em tempo real.",
     "emptyChunk": "...",
     "fullTranscriptLabel": "Transcrição ao vivo",
@@ -413,6 +414,29 @@
       "audioDecode": "Falha ao carregar áudio vocal: {message}",
       "transcription": "Falha na transcrição: {message}",
       "unknown": "Erro desconhecido"
+    },
+    "lyricsAdaptation": {
+      "panelTitle": "Adaptar à letra",
+      "panelHelper": "Cole a letra original da música (um verso por linha). Ao clicar em Adaptar, cada segmento transcrito é comparado ao verso mais próximo usando similaridade de texto. Em casos incertos, um modelo de IA local refina o resultado. Os segmentos recebem o rótulo Correspondência, Corrigido ou Sem correspondência. Cada um pode ser tentado novamente com uma busca progressivamente mais abrangente.",
+      "lyricsInputLabel": "Letra da música",
+      "lyricsInputPlaceholder": "Cole a letra completa aqui (um verso por linha)…",
+      "adaptButton": "Adaptar segmentos à letra",
+      "adaptingButton": "Adaptando…",
+      "cancelButton": "Cancelar",
+      "resetButton": "Limpar resultados",
+      "loadingModel": "Carregando modelo {model} ({progress}%)…",
+      "adaptError": "Falha na adaptação: {message}",
+      "adaptDisabledNoTranscript": "Execute a transcrição primeiro.",
+      "adaptDisabledNoLyrics": "Cole a letra para habilitar a adaptação.",
+      "rawLabel": "Whisper",
+      "retryChunkTooltip": "Refazer revisão LLM deste trecho",
+      "retryChunkAriaLabel": "Refazer revisão LLM",
+      "retryCountLabel": "{count, plural, =1 {1 tentativa} other {# tentativas}}",
+      "status": {
+        "matched": "Correspondência",
+        "corrected": "Corrigido",
+        "unmatched": "Sem correspondência"
+      }
     }
   },
   "Validation": {

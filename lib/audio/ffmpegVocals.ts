@@ -5,7 +5,7 @@ import { fetchFile, toBlobURL } from '@ffmpeg/util';
 
 // === Fixed internal parameters (not exposed to callers) ===
 const SILENCE_NOISE_DB = -45;
-const SILENCE_MIN_DURATION_S = 2.0;
+const SILENCE_MIN_DURATION_S = 3.0;
 const OUTPUT_SAMPLE_RATE = 16000;
 const OUTPUT_CHANNELS = 1;
 const FFMPEG_CORE_CDN =
