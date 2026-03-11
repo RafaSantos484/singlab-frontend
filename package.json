@@ -12,7 +12,8 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "generate-ai-commit-prompt": "tsx scripts/generate-ai-commit-prompt.ts --out scripts/ai-prompt.txt --max-lines 12000"
+    "generate-ai-commit-prompt": "tsx scripts/generate-ai-commit-prompt.ts --out scripts/ai-prompt.txt --max-lines 12000",
+    "generate-ai-pr-prompt": "tsx scripts/generate-ai-pr-prompt.ts --out scripts/ai-pr-prompt.txt --max-lines 12000"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
