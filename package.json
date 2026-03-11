@@ -12,8 +12,9 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "generate-ai-commit-prompt": "tsx scripts/generate-ai-commit-prompt.ts --out scripts/ai-prompt.txt --max-lines 12000",
-    "generate-ai-pr-prompt": "tsx scripts/generate-ai-pr-prompt.ts --out scripts/ai-pr-prompt.txt --max-lines 12000"
+    "generate-ai-commit-prompt": "tsx scripts/generate-ai-commit-prompt.ts --out scripts/ai-commit-prompt.txt --max-lines 12000",
+    "generate-ai-pr-prompt": "tsx scripts/generate-ai-pr-prompt.ts --out scripts/ai-pr-prompt.txt --max-lines 12000",
+    "generate-project-dump": "tsx scripts/generate-project-dump.ts --out scripts/project-code.txt app components lib hooks providers styles utils context messages middleware.ts .github/copilot-instructions .github/copilot-instructions.md"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -52,6 +53,7 @@
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "ignore": "^5.3.1"
   }
 }
