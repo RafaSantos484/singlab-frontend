@@ -92,6 +92,13 @@ Components are split into two groups:
           multilingual language selection, inline audio players for original and
           silence-removed vocals, and collapsible silence cut map display.
           Automatically pauses GlobalPlayer on open via `requestGlobalPlayerPause`.
+          Includes a collapsible **Lyrics Adaptation** panel: the user pastes the
+          canonical song lyrics, and a Flan-T5 LLM (running in a dedicated Web
+          Worker via transformers.js) aligns each Whisper chunk to the closest
+          lyric span using Levenshtein similarity + optional LLM text2text
+          refinement. Results are colour-coded (`matched` / `corrected` /
+          `unmatched`). The LLM model is downloaded and cached on first use;
+          subsequent runs reuse the warm pipeline from the worker.
      - `SingingPracticeDialog` — synchronized practice experience with
           dual pitch tracking (vocals stem + user microphone), seek controls,
           dynamic pitch axis, and graceful fallback when Storage CORS blocks
@@ -114,8 +121,11 @@ Shared utilities used across the app:
 | `lib/async/` | Pending activity tracking for navigation guards (prevents leaving during uploads) |
 | `lib/firebase/` | Firebase app initialization (singleton), auth helpers, Firestore CRUD (songs, users), Storage utilities |
 | `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`, `useSeparationStatus`, `useStemAutoProcessor`, etc.) |
+| `lib/hooks/useLyricsAdaptation.ts` | Manages the lyrics adaptation Worker lifecycle: lazy worker creation, per-job ID tracking (stale message filtering), synchronous `adapt()` that posts to the worker, and `cancel()`/`reset()` that set state immediately and discard in-flight results. Exposes a 5-phase state machine (`idle` → `loading-model` → `adapting` → `done` / `error`). |
 | `lib/hooks/useWhisperTranscriber.ts` | Custom React hook managing Whisper Web Worker lifecycle: model loading, transcription start/stop, progress tracking, and incremental transcript state. Accepts silence-removed `Float32Array` audio and a `SpeechSegment[]` cut map; automatically remaps word-level timestamps from the processed audio back to the original vocals timeline after the worker completes, then filters out any backtracking chunks (segments whose start time regresses below the highest end time seen so far) to eliminate duplicates caused by Whisper re-processing already-transcribed audio. Supports multiple model sizes and multilingual transcription with configurable language. |
 | `lib/transcription/` | Web Worker entry point (`loader.worker.ts`) that loads and runs OpenAI Whisper via transformers.js, handles inference requests with word-level timestamps (`return_timestamps: 'word'`), emits progress events, and streams incremental transcript chunks. Also includes TypeScript types and model/language configuration (`constants.ts`). |
+| `lib/transcription/lyricsAdapter.ts` | Pure types and text-processing utilities for lyrics alignment: Levenshtein similarity, span picking over 1–`SPAN_MAX` consecutive lyric lines, punctuation/capitalisation helpers, `parseLyricsLines`. No side effects — safe to import from SSR and the worker alike. Also defines the typed worker message protocol (`LyricsAdapterRequest` / `LyricsAdapterResponse`). |
+| `lib/transcription/lyricsAdapter.worker.ts` | Web Worker that runs Flan-T5 text2text-generation (via transformers.js) for lyrics alignment. Per-file download progress is tracked in a `Map` and reported as a running average to avoid progress appearing to reset on each new model file. Processes chunks sequentially, posting a `chunk-done` message per adapted chunk. Supports cancellation via an `activeJobId` guard checked after each `await`. |
 | `lib/player/practiceSync.ts` | Publish/subscribe bus for inter-component player communication. Provides typed channels: `emitGlobalPlayerSnapshot`/`subscribeGlobalPlayerSnapshots` for player state broadcasts, `requestPracticeMode`/`subscribePracticeCommands` for practice mode commands, `requestPracticeDialogOpen`/`subscribePracticeDialogOpenRequests` for dialog launch requests, and `requestGlobalPlayerPause`/`subscribeGlobalPause` for external pause requests (e.g. pausing on TranscriptionDialog open). |
 | `lib/player/practiceSync.ts` | Publish/subscribe bus for inter-component player communication. Provides typed channels: `emitGlobalPlayerSnapshot`/`subscribeGlobalPlayerSnapshots` for player state broadcasts, `requestPracticeMode`/`subscribePracticeCommands` for practice mode commands, `requestPracticeDialogOpen`/`subscribePracticeDialogOpenRequests` for dialog launch requests, and `requestGlobalPlayerPause`/`subscribeGlobalPause` for external pause requests (e.g. pausing on TranscriptionDialog open). |
 | `lib/separations/` | Adapter pattern for provider-agnostic separation normalization and stem URL extraction |
@@ -316,6 +326,20 @@ Two provider paths are supported: `poyo` (async backend-proxied AI task) and
      │ User can stop safely; worker disposes pipeline on stop
      ▼
 [Transcription session completes entirely in browser]
+     │
+     │ [Optional] User pastes canonical song lyrics into the Lyrics Adaptation panel
+     ▼
+[useLyricsAdaptation posts 'adapt' message to lyricsAdapter.worker.ts]
+     │
+     │ Worker: for each non-empty chunk
+     │   1. Levenshtein span-matching over lyric lines (maxSpan=3)
+     │   2. Score >= CORRECT_THRESHOLD (0.88) → matched, no LLM
+     │   3. Score < CORRECT_THRESHOLD → LLM prompt to Flan-T5
+     │      (lazy-loaded, cached; progress reported as per-file running average)
+     │   4. LLM output re-scored; accepted if >= POSSIBLE_THRESHOLD (0.72)
+     │   5. Posts 'chunk-done' per chunk; 'complete' when all done
+     ▼
+[Dialog renders colour-coded results: matched / corrected / unmatched]
 ```
 
 ## State Management
