@@ -5,7 +5,6 @@
  * anywhere, including SSR. The heavy work (LLM inference) lives entirely
  * in lyricsAdapter.worker.ts.
  */
-
 import type { TranscriptChunk } from './types';
 
 // ---------------------------------------------------------------------------
@@ -27,6 +26,11 @@ export interface AdaptedChunk {
   status: AdaptationStatus;
   /** Similarity score in [0, 1] against the chosen lyric span. */
   score: number;
+  /**
+   * How many times this chunk has been retried.
+   * 0 = never retried (first adaptation run).
+   */
+  retryCount: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -40,6 +44,25 @@ export type LyricsAdapterRequest =
       chunks: TranscriptChunk[];
       lyrics: string;
       skipLLM: boolean;
+    }
+  | {
+      /** Retry a single chunk with an escalated prompt. */
+      type: 'retry-chunk';
+      jobId: number;
+      /** Original chunk index in the transcript. */
+      index: number;
+      /** Raw Whisper text for this chunk. */
+      rawText: string;
+      /** Original chunk timestamp. */
+      timestamp: [number, number | null];
+      /** Full lyrics text (needed to build the prompt). */
+      lyrics: string;
+      /**
+       * Number of retries already attempted for this chunk.
+       * The worker uses this to escalate prompt breadth.
+       * 0 = first retry (prompt is already wider than the initial pass).
+       */
+      retryCount: number;
     }
   | { type: 'cancel' };
 
@@ -56,6 +79,12 @@ export type LyricsAdapterResponse =
       jobId: number;
       done: number;
       total: number;
+      result: AdaptedChunk;
+    }
+  | {
+      /** Emitted after a retry-chunk completes (success or fallback). */
+      type: 'retry-chunk-done';
+      jobId: number;
       result: AdaptedChunk;
     }
   | { type: 'complete'; jobId: number; results: AdaptedChunk[] }
@@ -81,7 +110,7 @@ export function normalizeLine(s: string): string {
     .toLowerCase()
     .replace(/[""]/g, '"')
     .replace(/['']/g, "'")
-    .replace(/[.,;:!?()[\]{}"'-]/g, '')
+    .replace(/[.,;:!?()\[\]{}"'-]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -92,10 +121,8 @@ function levenshtein(a: string, b: string): number {
   const dp: number[][] = Array.from({ length: m + 1 }, () =>
     new Array<number>(n + 1).fill(0),
   );
-
   for (let i = 0; i <= m; i++) dp[i][0] = i;
   for (let j = 0; j <= n; j++) dp[0][j] = j;
-
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
@@ -106,7 +133,6 @@ function levenshtein(a: string, b: string): number {
       );
     }
   }
-
   return dp[m][n];
 }
 
@@ -140,7 +166,6 @@ export function pickBestSpan(
     idxEnd: -1,
     score: 0,
   };
-
   for (let i = 0; i < lyricsLines.length; i++) {
     for (let k = 1; k <= maxSpan && i + k <= lyricsLines.length; k++) {
       const spanLines = lyricsLines.slice(i, i + k);
@@ -150,7 +175,6 @@ export function pickBestSpan(
       }
     }
   }
-
   return best;
 }
 
@@ -183,9 +207,7 @@ function shouldKeepCased(word: string): boolean {
 function startsWithLowercaseLeader(s: string): boolean {
   const m = /^([^\s]+)/.exec(s.trim());
   if (!m) return false;
-  return LOWERCASE_LEADERS.some(
-    (w) => w.toLowerCase() === m[1].toLowerCase(),
-  );
+  return LOWERCASE_LEADERS.some((w) => w.toLowerCase() === m[1].toLowerCase());
 }
 
 function decapitalizeFirstWord(s: string): string {
@@ -193,7 +215,6 @@ function decapitalizeFirstWord(s: string): string {
   if (!trimmed) return s;
   const parts = trimmed.split(/\s+/);
   const first = parts[0];
-
   if (shouldKeepCased(first)) return s;
   if (startsWithLowercaseLeader(first)) {
     parts[0] = first.toLowerCase();
@@ -203,7 +224,6 @@ function decapitalizeFirstWord(s: string): string {
     parts[0] = first.charAt(0).toLowerCase() + first.slice(1);
     return parts.join(' ');
   }
-
   return s;
 }
 
@@ -218,9 +238,7 @@ function endsWithTerminalPunct(s: string): boolean {
 export function joinSpanWithPunctuation(lines: string[]): string {
   const trimmed = lines.map((l) => l.trim()).filter(Boolean);
   if (trimmed.length === 0) return '';
-
   let out = trimmed[0];
-
   for (let i = 1; i < trimmed.length; i++) {
     const cur = trimmed[i];
     if (endsWithTerminalPunct(out)) {
@@ -229,11 +247,9 @@ export function joinSpanWithPunctuation(lines: string[]): string {
       out = `${out}, ${decapitalizeFirstWord(cur)}`;
     }
   }
-
   if (!endsWithTerminalPunct(out)) {
     out = `${out}.`;
   }
-
   return out;
 }
 
@@ -247,4 +263,3 @@ export function parseLyricsLines(lyrics: string): string[] {
     .map((l) => l.trim())
     .filter((l) => l.length > 0 && !/^\[.*\]$/.test(l));
 }
-
