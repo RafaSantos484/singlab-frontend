@@ -401,6 +401,7 @@
     "cutMapShow": "Show silence map",
     "cutMapHide": "Hide silence map",
     "wordListLabel": "Words (aligned to original audio)",
+    "segmentListLabel": "Segments (aligned to original audio)",
     "emptyState": "Start transcription to see real-time segments.",
     "emptyChunk": "...",
     "fullTranscriptLabel": "Live transcript",
@@ -415,6 +416,27 @@
       "audioDecode": "Failed to load vocals audio: {message}",
       "transcription": "Transcription failed: {message}",
       "unknown": "Unknown error"
+    },
+    "lyricsAdaptation": {
+      "panelTitle": "Adapt to lyrics",
+      "showPanel": "Show",
+      "hidePanel": "Hide",
+      "lyricsInputLabel": "Song lyrics",
+      "lyricsInputPlaceholder": "Paste the full song lyrics here (one verse per line)…",
+      "adaptButton": "Adapt segments to lyrics",
+      "adaptingButton": "Adapting…",
+      "cancelButton": "Cancel",
+      "resetButton": "Clear results",
+      "loadingModel": "Loading model {model} ({progress}%)…",
+      "adaptError": "Adaptation failed: {message}",
+      "adaptDisabledNoTranscript": "Run the transcription first.",
+      "adaptDisabledNoLyrics": "Paste the lyrics to enable adaptation.",
+      "rawLabel": "Whisper",
+      "status": {
+        "matched": "Matched",
+        "corrected": "Corrected",
+        "unmatched": "Unmatched"
+      }
     }
   },
   "Validation": {

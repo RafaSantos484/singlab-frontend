@@ -399,6 +399,7 @@
     "cutMapShow": "Mostrar mapa de silêncios",
     "cutMapHide": "Ocultar mapa de silêncios",
     "wordListLabel": "Palavras (alinhadas ao áudio original)",
+    "segmentListLabel": "Segmentos (alinhados ao áudio original)",
     "emptyState": "Inicie a transcrição para ver segmentos em tempo real.",
     "emptyChunk": "...",
     "fullTranscriptLabel": "Transcrição ao vivo",
@@ -413,6 +414,27 @@
       "audioDecode": "Falha ao carregar áudio vocal: {message}",
       "transcription": "Falha na transcrição: {message}",
       "unknown": "Erro desconhecido"
+    },
+    "lyricsAdaptation": {
+      "panelTitle": "Adaptar à letra",
+      "showPanel": "Exibir",
+      "hidePanel": "Ocultar",
+      "lyricsInputLabel": "Letra da música",
+      "lyricsInputPlaceholder": "Cole a letra completa aqui (um verso por linha)…",
+      "adaptButton": "Adaptar segmentos à letra",
+      "adaptingButton": "Adaptando…",
+      "cancelButton": "Cancelar",
+      "resetButton": "Limpar resultados",
+      "loadingModel": "Carregando modelo {model} ({progress}%)…",
+      "adaptError": "Falha na adaptação: {message}",
+      "adaptDisabledNoTranscript": "Execute a transcrição primeiro.",
+      "adaptDisabledNoLyrics": "Cole a letra para habilitar a adaptação.",
+      "rawLabel": "Whisper",
+      "status": {
+        "matched": "Correspondência",
+        "corrected": "Corrigido",
+        "unmatched": "Sem correspondência"
+      }
     }
   },
   "Validation": {
