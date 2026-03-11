@@ -40,10 +40,12 @@ type CommandSubscriber = (command: PracticeCommand) => void;
 type PracticeDialogOpenSubscriber = (
   request: PracticeDialogOpenRequest,
 ) => void;
+type GlobalPauseSubscriber = () => void;
 
 const snapshotSubscribers = new Set<SnapshotSubscriber>();
 const commandSubscribers = new Set<CommandSubscriber>();
 const practiceDialogOpenSubscribers = new Set<PracticeDialogOpenSubscriber>();
+const globalPauseSubscribers = new Set<GlobalPauseSubscriber>();
 
 /**
  * Subscribes to global player state snapshots emitted by GlobalPlayer.
@@ -145,5 +147,27 @@ export function requestPracticeDialogOpen(songId: string): void {
 
   practiceDialogOpenSubscribers.forEach((listener) => {
     listener(request);
+  });
+}
+
+/**
+ * Subscribes to global player pause requests emitted by any component.
+ */
+export function subscribeGlobalPause(
+  listener: GlobalPauseSubscriber,
+): () => void {
+  globalPauseSubscribers.add(listener);
+  return (): void => {
+    globalPauseSubscribers.delete(listener);
+  };
+}
+
+/**
+ * Requests GlobalPlayer to pause playback immediately.
+ * Does nothing when the player is already paused or idle.
+ */
+export function requestGlobalPlayerPause(): void {
+  globalPauseSubscribers.forEach((listener) => {
+    listener();
   });
 }

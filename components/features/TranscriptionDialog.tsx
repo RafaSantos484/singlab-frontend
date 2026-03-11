@@ -28,6 +28,7 @@ import { useLocale, useTranslations } from 'next-intl';
 
 import { removeSilencesFromVocals } from '@/lib/audio/ffmpegVocals';
 import { useWhisperTranscriber } from '@/lib/hooks/useWhisperTranscriber';
+import { requestGlobalPlayerPause } from '@/lib/player/practiceSync';
 import {
   getTranscriptionLanguageFromLocale,
   TRANSCRIPTION_SAMPLE_RATE,
@@ -143,6 +144,24 @@ export function TranscriptionDialog({
       return true;
     });
   }, [transcriber.settings.multilingual, transcriber.settings.quantized]);
+
+  // Pause GlobalPlayer when the dialog opens.
+  useEffect(() => {
+    if (open) {
+      requestGlobalPlayerPause();
+    }
+  }, [open]);
+
+  // Revoke the processed audio object URL when the dialog closes.
+  useEffect(() => {
+    if (!open) {
+      if (processedAudioUrlRef.current) {
+        URL.revokeObjectURL(processedAudioUrlRef.current);
+        processedAudioUrlRef.current = null;
+      }
+      setProcessedAudioUrl(null);
+    }
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
