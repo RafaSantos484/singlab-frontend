@@ -401,6 +401,7 @@
     "cutMapShow": "Show silence map",
     "cutMapHide": "Hide silence map",
     "wordListLabel": "Words (aligned to original audio)",
+    "segmentListLabel": "Segments (aligned to original audio)",
     "emptyState": "Start transcription to see real-time segments.",
     "emptyChunk": "...",
     "fullTranscriptLabel": "Live transcript",
@@ -415,6 +416,29 @@
       "audioDecode": "Failed to load vocals audio: {message}",
       "transcription": "Transcription failed: {message}",
       "unknown": "Unknown error"
+    },
+    "lyricsAdaptation": {
+      "panelTitle": "Adapt to lyrics",
+      "panelHelper": "Paste the song's original lyrics (one verse per line). When you click Adapt, each transcribed segment is matched to the nearest lyric line using text similarity. If the match is uncertain, a local AI model refines the result. Segments are labelled Matched, Corrected, or Unmatched. Any segment can be individually retried with a progressively broader search.",
+      "lyricsInputLabel": "Song lyrics",
+      "lyricsInputPlaceholder": "Paste the full song lyrics here (one verse per line)…",
+      "adaptButton": "Adapt segments to lyrics",
+      "adaptingButton": "Adapting…",
+      "cancelButton": "Cancel",
+      "resetButton": "Clear results",
+      "loadingModel": "Loading model {model} ({progress}%)…",
+      "adaptError": "Adaptation failed: {message}",
+      "adaptDisabledNoTranscript": "Run the transcription first.",
+      "adaptDisabledNoLyrics": "Paste the lyrics to enable adaptation.",
+      "rawLabel": "Whisper",
+      "retryChunkTooltip": "Retry LLM review for this segment",
+      "retryChunkAriaLabel": "Retry LLM review",
+      "retryCountLabel": "{count, plural, =1 {1 retry} other {# retries}}",
+      "status": {
+        "matched": "Matched",
+        "corrected": "Corrected",
+        "unmatched": "Unmatched"
+      }
     }
   },
   "Validation": {
