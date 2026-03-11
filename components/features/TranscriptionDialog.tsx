@@ -5,12 +5,14 @@ import {
   Alert,
   Box,
   Button,
+  Chip,
   CircularProgress,
   Collapse,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   FormControl,
   FormControlLabel,
   InputLabel,
@@ -22,12 +24,17 @@ import {
   Select,
   Stack,
   Switch,
+  TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import { useLocale, useTranslations } from 'next-intl';
 
 import { removeSilencesFromVocals } from '@/lib/audio/ffmpegVocals';
+import { useLyricsAdaptation } from '@/lib/hooks/useLyricsAdaptation';
 import { useWhisperTranscriber } from '@/lib/hooks/useWhisperTranscriber';
+import { LLM_MODEL_ID } from '@/lib/transcription/lyricsAdapter';
+import type { AdaptedChunk } from '@/lib/transcription/lyricsAdapter';
 import { requestGlobalPlayerPause } from '@/lib/player/practiceSync';
 import {
   getTranscriptionLanguageFromLocale,
@@ -112,6 +119,14 @@ async function decodeProcessedAudio(wavBlob: Blob): Promise<Float32Array> {
  * @param songTitle — Song title for dialog header
  * @param vocalsUrl — URL to the vocals stem audio file
  */
+function adaptationStatusColor(
+  status: AdaptedChunk['status'],
+): 'success' | 'warning' | 'default' {
+  if (status === 'matched') return 'success';
+  if (status === 'corrected') return 'warning';
+  return 'default';
+}
+
 export function TranscriptionDialog({
   open,
   onClose,
@@ -121,6 +136,8 @@ export function TranscriptionDialog({
   const locale = useLocale();
   const t = useTranslations('Transcription');
   const transcriber = useWhisperTranscriber();
+  const lyricsAdaptation = useLyricsAdaptation();
+  const lyricsAdaptationReset = lyricsAdaptation.reset;
   const hasAppliedLocaleDefaultsRef = useRef(false);
 
   type PreparingStage = 'detecting' | 'removing' | 'decoding' | null;
@@ -128,6 +145,7 @@ export function TranscriptionDialog({
   const [audioError, setAudioError] = useState<string | null>(null);
   const [cutMapLines, setCutMapLines] = useState<string[]>([]);
   const [showCutMap, setShowCutMap] = useState(false);
+  const [showLyricsPanel, setShowLyricsPanel] = useState(false);
 
   const processedAudioUrlRef = useRef<string | null>(null);
   const [processedAudioUrl, setProcessedAudioUrl] = useState<string | null>(
@@ -166,8 +184,9 @@ export function TranscriptionDialog({
         processedAudioUrlRef.current = null;
       }
       setProcessedAudioUrl(null);
+      lyricsAdaptationReset();
     }
-  }, [open]);
+  }, [open, lyricsAdaptationReset]);
 
   useEffect(() => {
     if (!open) {
@@ -280,6 +299,17 @@ export function TranscriptionDialog({
   const canStop =
     transcriber.isBusy || transcriber.isModelLoading || transcriber.isStopping;
   const canClose = !canStop && !isPreparingAudio;
+
+  const hasTranscriptChunks =
+    (transcriber.output?.chunks.length ?? 0) > 0;
+  const isAdaptationBusy =
+    lyricsAdaptation.state.phase === 'adapting' ||
+    lyricsAdaptation.state.phase === 'loading-model';
+  const canAdapt =
+    hasTranscriptChunks &&
+    lyricsAdaptation.lyrics.trim().length > 0 &&
+    !isAdaptationBusy &&
+    !transcriber.isBusy;
 
   const handleStop = useCallback(async (): Promise<void> => {
     await transcriber.stop();
@@ -484,7 +514,7 @@ export function TranscriptionDialog({
 
           <Box>
             <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
-              {t('wordListLabel')}
+              {t('segmentListLabel')}
             </Typography>
             <Box
               sx={{
@@ -547,6 +577,216 @@ export function TranscriptionDialog({
             >
               {transcriber.output?.text?.trim() || t('noTranscriptYet')}
             </Typography>
+          </Box>
+
+          {/* ---- Lyrics Adaptation Panel ---- */}
+          <Divider />
+
+          <Box>
+            <Stack
+              direction="row"
+              alignItems="center"
+              justifyContent="space-between"
+              sx={{ mb: showLyricsPanel ? 1.5 : 0 }}
+            >
+              <Typography variant="subtitle2">
+                {t('lyricsAdaptation.panelTitle')}
+              </Typography>
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => setShowLyricsPanel((prev) => !prev)}
+                sx={{ textTransform: 'none', p: 0 }}
+              >
+                {showLyricsPanel
+                  ? t('lyricsAdaptation.hidePanel')
+                  : t('lyricsAdaptation.showPanel')}
+              </Button>
+            </Stack>
+
+            <Collapse in={showLyricsPanel}>
+              <Stack spacing={1.5}>
+                <TextField
+                  label={t('lyricsAdaptation.lyricsInputLabel')}
+                  placeholder={t('lyricsAdaptation.lyricsInputPlaceholder')}
+                  multiline
+                  minRows={4}
+                  maxRows={10}
+                  fullWidth
+                  value={lyricsAdaptation.lyrics}
+                  onChange={(e) => lyricsAdaptation.setLyrics(e.target.value)}
+                  disabled={isAdaptationBusy}
+                  inputProps={{ 'aria-label': t('lyricsAdaptation.lyricsInputLabel') }}
+                />
+
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Tooltip
+                    title={
+                      !hasTranscriptChunks
+                        ? t('lyricsAdaptation.adaptDisabledNoTranscript')
+                        : !lyricsAdaptation.lyrics.trim()
+                          ? t('lyricsAdaptation.adaptDisabledNoLyrics')
+                          : ''
+                    }
+                  >
+                    <span>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        disabled={!canAdapt}
+                        onClick={() => {
+                          lyricsAdaptation.adapt(
+                            transcriber.output?.chunks ?? [],
+                          );
+                        }}
+                        startIcon={
+                          isAdaptationBusy ? (
+                            <CircularProgress size={14} color="inherit" />
+                          ) : undefined
+                        }
+                      >
+                        {isAdaptationBusy
+                          ? t('lyricsAdaptation.adaptingButton')
+                          : t('lyricsAdaptation.adaptButton')}
+                      </Button>
+                    </span>
+                  </Tooltip>
+
+                  {isAdaptationBusy && (
+                    <Button
+                      size="small"
+                      variant="text"
+                      color="warning"
+                      onClick={lyricsAdaptation.cancel}
+                    >
+                      {t('lyricsAdaptation.cancelButton')}
+                    </Button>
+                  )}
+
+                  {lyricsAdaptation.state.phase === 'done' && (
+                    <Button
+                      size="small"
+                      variant="text"
+                      onClick={lyricsAdaptation.reset}
+                    >
+                      {t('lyricsAdaptation.resetButton')}
+                    </Button>
+                  )}
+                </Stack>
+
+                {/* Model loading progress */}
+                {lyricsAdaptation.state.phase === 'loading-model' && (
+                  <Alert severity="info" icon={<CircularProgress size={16} />}>
+                    {t('lyricsAdaptation.loadingModel', {
+                      model: LLM_MODEL_ID,
+                      progress: lyricsAdaptation.state.progress,
+                    })}
+                  </Alert>
+                )}
+
+                {/* Adaptation progress */}
+                {lyricsAdaptation.state.phase === 'adapting' && (
+                  <Box>
+                    <LinearProgress
+                      variant={
+                        lyricsAdaptation.state.total > 0
+                          ? 'determinate'
+                          : 'indeterminate'
+                      }
+                      value={
+                        lyricsAdaptation.state.total > 0
+                          ? (lyricsAdaptation.state.done /
+                              lyricsAdaptation.state.total) *
+                            100
+                          : undefined
+                      }
+                    />
+                  </Box>
+                )}
+
+                {/* Error */}
+                {lyricsAdaptation.state.phase === 'error' && (
+                  <Alert severity="error">
+                    {t('lyricsAdaptation.adaptError', {
+                      message: lyricsAdaptation.state.message,
+                    })}
+                  </Alert>
+                )}
+
+                {/* Results */}
+                {lyricsAdaptation.state.phase === 'done' && (
+                  <Box
+                    sx={{
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      borderRadius: 1,
+                      maxHeight: 300,
+                      overflowY: 'auto',
+                      px: 1,
+                      py: 0.5,
+                    }}
+                  >
+                    <List dense disablePadding>
+                      {lyricsAdaptation.state.results.map((item) => (
+                        <ListItem
+                          key={item.index}
+                          disableGutters
+                          sx={{ py: 0.5, alignItems: 'flex-start' }}
+                          secondaryAction={
+                            <Chip
+                              size="small"
+                              label={t(
+                                `lyricsAdaptation.status.${
+                                  item.status
+                                }` as Parameters<typeof t>[0],
+                              )}
+                              color={adaptationStatusColor(item.status)}
+                              sx={{ fontSize: '0.65rem', height: 20 }}
+                            />
+                          }
+                        >
+                          <ListItemText
+                            primary={item.adaptedText || item.rawText}
+                            secondary={
+                              <>
+                                <Typography
+                                  component="span"
+                                  variant="caption"
+                                  sx={{
+                                    fontFamily: 'monospace',
+                                    display: 'block',
+                                  }}
+                                >
+                                  {formatTimestamp(item.timestamp[0])}{' '}
+                                  &mdash;{' '}
+                                  {formatTimestamp(item.timestamp[1])}
+                                </Typography>
+                                {item.status !== 'unmatched' &&
+                                  item.rawText !== item.adaptedText && (
+                                    <Typography
+                                      component="span"
+                                      variant="caption"
+                                      sx={{
+                                        color: 'text.disabled',
+                                        display: 'block',
+                                        fontStyle: 'italic',
+                                      }}
+                                    >
+                                      {t('lyricsAdaptation.rawLabel')}:{' '}
+                                      {item.rawText}
+                                    </Typography>
+                                  )}
+                              </>
+                            }
+                            primaryTypographyProps={{ variant: 'body2' }}
+                          />
+                        </ListItem>
+                      ))}
+                    </List>
+                  </Box>
+                )}
+              </Stack>
+            </Collapse>
           </Box>
         </Stack>
       </DialogContent>
