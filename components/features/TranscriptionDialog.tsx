@@ -581,153 +581,154 @@ export function TranscriptionDialog({
           {/* ---- Lyrics Adaptation Panel ---- */}
           <Divider />
           <Box>
-            <Stack
-              direction="row"
-              alignItems="center"
-              sx={{ mb: 1.5 }}
-            >
+            <Stack direction="row" alignItems="center" sx={{ mb: 1.5 }}>
               <Typography variant="subtitle2">
                 {t('lyricsAdaptation.panelTitle')}
               </Typography>
               <Tooltip title={t('lyricsAdaptation.panelHelper')}>
                 <HelpOutlineIcon
-                  sx={{ fontSize: 15, color: 'text.secondary', ml: 0.75, cursor: 'help' }}
+                  sx={{
+                    fontSize: 15,
+                    color: 'text.secondary',
+                    ml: 0.75,
+                    cursor: 'help',
+                  }}
                 />
               </Tooltip>
             </Stack>
 
             <Stack spacing={1.5}>
-                <TextField
-                  label={t('lyricsAdaptation.lyricsInputLabel')}
-                  placeholder={t('lyricsAdaptation.lyricsInputPlaceholder')}
-                  multiline
-                  minRows={4}
-                  maxRows={10}
-                  fullWidth
-                  value={lyricsAdaptation.lyrics}
-                  onChange={(e) => lyricsAdaptation.setLyrics(e.target.value)}
-                  disabled={adaptationControlsDisabled}
-                  inputProps={{
-                    'aria-label': t('lyricsAdaptation.lyricsInputLabel'),
-                  }}
-                />
+              <TextField
+                label={t('lyricsAdaptation.lyricsInputLabel')}
+                placeholder={t('lyricsAdaptation.lyricsInputPlaceholder')}
+                multiline
+                minRows={4}
+                maxRows={10}
+                fullWidth
+                value={lyricsAdaptation.lyrics}
+                onChange={(e) => lyricsAdaptation.setLyrics(e.target.value)}
+                disabled={adaptationControlsDisabled}
+                inputProps={{
+                  'aria-label': t('lyricsAdaptation.lyricsInputLabel'),
+                }}
+              />
 
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Tooltip
-                    title={
-                      !hasTranscriptChunks
-                        ? t('lyricsAdaptation.adaptDisabledNoTranscript')
-                        : !lyricsAdaptation.lyrics.trim()
-                          ? t('lyricsAdaptation.adaptDisabledNoLyrics')
-                          : ''
-                    }
-                  >
-                    <span>
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        disabled={!canAdapt}
-                        onClick={() => {
-                          lyricsAdaptation.adapt(
-                            transcriber.output?.chunks ?? [],
-                          );
-                        }}
-                        startIcon={
-                          isAdaptationBusy ? (
-                            <CircularProgress size={14} color="inherit" />
-                          ) : undefined
-                        }
-                      >
-                        {isAdaptationBusy
-                          ? t('lyricsAdaptation.adaptingButton')
-                          : t('lyricsAdaptation.adaptButton')}
-                      </Button>
-                    </span>
-                  </Tooltip>
-
-                  {isAdaptationBusy && (
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Tooltip
+                  title={
+                    !hasTranscriptChunks
+                      ? t('lyricsAdaptation.adaptDisabledNoTranscript')
+                      : !lyricsAdaptation.lyrics.trim()
+                        ? t('lyricsAdaptation.adaptDisabledNoLyrics')
+                        : ''
+                  }
+                >
+                  <span>
                     <Button
+                      variant="outlined"
                       size="small"
-                      variant="text"
-                      color="warning"
-                      onClick={lyricsAdaptation.cancel}
-                    >
-                      {t('lyricsAdaptation.cancelButton')}
-                    </Button>
-                  )}
-
-                  {lyricsAdaptation.state.phase === 'done' && (
-                    <Button
-                      size="small"
-                      variant="text"
-                      onClick={lyricsAdaptation.reset}
-                      disabled={isRetrying}
-                    >
-                      {t('lyricsAdaptation.resetButton')}
-                    </Button>
-                  )}
-                </Stack>
-
-                {/* Model loading progress */}
-                {lyricsAdaptation.state.phase === 'loading-model' && (
-                  <Alert severity="info" icon={<CircularProgress size={16} />}>
-                    {t('lyricsAdaptation.loadingModel', {
-                      model: LLM_MODEL_ID,
-                      progress: lyricsAdaptation.state.progress,
-                    })}
-                  </Alert>
-                )}
-
-                {/* Adaptation progress */}
-                {lyricsAdaptation.state.phase === 'adapting' && (
-                  <Box>
-                    <LinearProgress
-                      variant={
-                        lyricsAdaptation.state.total > 0
-                          ? 'determinate'
-                          : 'indeterminate'
-                      }
-                      value={
-                        lyricsAdaptation.state.total > 0
-                          ? (lyricsAdaptation.state.done /
-                              lyricsAdaptation.state.total) *
-                            100
-                          : undefined
-                      }
-                    />
-                  </Box>
-                )}
-
-                {/* Error */}
-                {lyricsAdaptation.state.phase === 'error' && (
-                  <Alert severity="error">
-                    {t('lyricsAdaptation.adaptError', {
-                      message: lyricsAdaptation.state.message,
-                    })}
-                  </Alert>
-                )}
-
-                {/* Results */}
-                {lyricsAdaptation.state.phase === 'done' && (
-                  <>
-                    {lyricsAdaptation.retryError && (
-                      <Alert severity="error">
-                        {t('lyricsAdaptation.adaptError', {
-                          message: lyricsAdaptation.retryError,
-                        })}
-                      </Alert>
-                    )}
-                    <Box
-                      sx={{
-                        border: '1px solid',
-                        borderColor: 'divider',
-                        borderRadius: 1,
-                        maxHeight: 300,
-                        overflowY: 'auto',
-                        px: 1,
-                        py: 0.5,
+                      disabled={!canAdapt}
+                      onClick={() => {
+                        lyricsAdaptation.adapt(
+                          transcriber.output?.chunks ?? [],
+                        );
                       }}
+                      startIcon={
+                        isAdaptationBusy ? (
+                          <CircularProgress size={14} color="inherit" />
+                        ) : undefined
+                      }
                     >
+                      {isAdaptationBusy
+                        ? t('lyricsAdaptation.adaptingButton')
+                        : t('lyricsAdaptation.adaptButton')}
+                    </Button>
+                  </span>
+                </Tooltip>
+
+                {isAdaptationBusy && (
+                  <Button
+                    size="small"
+                    variant="text"
+                    color="warning"
+                    onClick={lyricsAdaptation.cancel}
+                  >
+                    {t('lyricsAdaptation.cancelButton')}
+                  </Button>
+                )}
+
+                {lyricsAdaptation.state.phase === 'done' && (
+                  <Button
+                    size="small"
+                    variant="text"
+                    onClick={lyricsAdaptation.reset}
+                    disabled={isRetrying}
+                  >
+                    {t('lyricsAdaptation.resetButton')}
+                  </Button>
+                )}
+              </Stack>
+
+              {/* Model loading progress */}
+              {lyricsAdaptation.state.phase === 'loading-model' && (
+                <Alert severity="info" icon={<CircularProgress size={16} />}>
+                  {t('lyricsAdaptation.loadingModel', {
+                    model: LLM_MODEL_ID,
+                    progress: lyricsAdaptation.state.progress,
+                  })}
+                </Alert>
+              )}
+
+              {/* Adaptation progress */}
+              {lyricsAdaptation.state.phase === 'adapting' && (
+                <Box>
+                  <LinearProgress
+                    variant={
+                      lyricsAdaptation.state.total > 0
+                        ? 'determinate'
+                        : 'indeterminate'
+                    }
+                    value={
+                      lyricsAdaptation.state.total > 0
+                        ? (lyricsAdaptation.state.done /
+                            lyricsAdaptation.state.total) *
+                          100
+                        : undefined
+                    }
+                  />
+                </Box>
+              )}
+
+              {/* Error */}
+              {lyricsAdaptation.state.phase === 'error' && (
+                <Alert severity="error">
+                  {t('lyricsAdaptation.adaptError', {
+                    message: lyricsAdaptation.state.message,
+                  })}
+                </Alert>
+              )}
+
+              {/* Results */}
+              {lyricsAdaptation.state.phase === 'done' && (
+                <>
+                  {lyricsAdaptation.retryError && (
+                    <Alert severity="error">
+                      {t('lyricsAdaptation.adaptError', {
+                        message: lyricsAdaptation.retryError,
+                      })}
+                    </Alert>
+                  )}
+                  <Box
+                    sx={{
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      borderRadius: 1,
+                      maxHeight: 300,
+                      overflowY: 'auto',
+                      px: 1,
+                      py: 0.5,
+                    }}
+                  >
                     <List dense disablePadding>
                       {lyricsAdaptation.state.results.map((item) => {
                         const isThisRetrying =
@@ -841,10 +842,10 @@ export function TranscriptionDialog({
                         );
                       })}
                     </List>
-                    </Box>
-                  </>
-                )}
-              </Stack>
+                  </Box>
+                </>
+              )}
+            </Stack>
           </Box>
         </Stack>
       </DialogContent>
