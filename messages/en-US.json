@@ -419,8 +419,7 @@
     },
     "lyricsAdaptation": {
       "panelTitle": "Adapt to lyrics",
-      "showPanel": "Show",
-      "hidePanel": "Hide",
+      "panelHelper": "Paste the song's original lyrics (one verse per line). When you click Adapt, each transcribed segment is matched to the nearest lyric line using text similarity. If the match is uncertain, a local AI model refines the result. Segments are labelled Matched, Corrected, or Unmatched. Any segment can be individually retried with a progressively broader search.",
       "lyricsInputLabel": "Song lyrics",
       "lyricsInputPlaceholder": "Paste the full song lyrics here (one verse per line)…",
       "adaptButton": "Adapt segments to lyrics",
@@ -432,6 +431,9 @@
       "adaptDisabledNoTranscript": "Run the transcription first.",
       "adaptDisabledNoLyrics": "Paste the lyrics to enable adaptation.",
       "rawLabel": "Whisper",
+      "retryChunkTooltip": "Retry LLM review for this segment",
+      "retryChunkAriaLabel": "Retry LLM review",
+      "retryCountLabel": "{count, plural, =1 {1 retry} other {# retries}}",
       "status": {
         "matched": "Matched",
         "corrected": "Corrected",

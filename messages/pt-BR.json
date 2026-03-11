@@ -417,8 +417,7 @@
     },
     "lyricsAdaptation": {
       "panelTitle": "Adaptar à letra",
-      "showPanel": "Exibir",
-      "hidePanel": "Ocultar",
+      "panelHelper": "Cole a letra original da música (um verso por linha). Ao clicar em Adaptar, cada segmento transcrito é comparado ao verso mais próximo usando similaridade de texto. Em casos incertos, um modelo de IA local refina o resultado. Os segmentos recebem o rótulo Correspondência, Corrigido ou Sem correspondência. Cada um pode ser tentado novamente com uma busca progressivamente mais abrangente.",
       "lyricsInputLabel": "Letra da música",
       "lyricsInputPlaceholder": "Cole a letra completa aqui (um verso por linha)…",
       "adaptButton": "Adaptar segmentos à letra",
@@ -430,6 +429,9 @@
       "adaptDisabledNoTranscript": "Execute a transcrição primeiro.",
       "adaptDisabledNoLyrics": "Cole a letra para habilitar a adaptação.",
       "rawLabel": "Whisper",
+      "retryChunkTooltip": "Refazer revisão LLM deste trecho",
+      "retryChunkAriaLabel": "Refazer revisão LLM",
+      "retryCountLabel": "{count, plural, =1 {1 tentativa} other {# tentativas}}",
       "status": {
         "matched": "Correspondência",
         "corrected": "Corrigido",
