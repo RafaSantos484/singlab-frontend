@@ -1,29 +1,24 @@
 /**
  * generate-project-dump.ts
  *
- * Gera um arquivo TXT contendo o código relevante do projeto,
+ * Gera um arquivo TXT contendo o código relevante de TODO o projeto,
  * no formato:
  *
  *   // path/to/file
  *   <conteúdo>
  *
- * Melhorias:
+ * Comportamento:
+ * - Faz o dump de todos os arquivos de texto encontrados a partir da raiz do projeto
+ * - Respeita automaticamente o .gitignore (e sempre ignora node_modules e .git)
  * - Escreve, no início do arquivo, um índice com todos os paths incluídos
  * - Adiciona instruções em inglês otimizadas para uso com IA
  * - Orienta a IA a navegar pelo índice antes de ler conteúdos
  * - Mantém cada arquivo precedido por `// <file_path>`
- * - Recebe arquivos e pastas por argumentos posicionais
- * - Se o item informado for arquivo, inclui apenas aquele arquivo
- * - Se o item informado for pasta, inclui todos os arquivos de texto dentro dela
- *
- * Regras:
- * - Os alvos (arquivos/pastas) devem ser passados na linha de comando
- * - Ignora o que estiver no `.gitignore`
- * - Considera apenas arquivos de texto
+ * - Instrui a IA a retornar alterações como um único script bash executável
  *
  * Uso:
- *   npx tsx scripts/generate-project-dump.ts --out project-code.txt app components lib middleware.ts
- *   npx tsx scripts/generate-project-dump.ts app components
+ *   npx tsx scripts/generate-project-dump.ts
+ *   npx tsx scripts/generate-project-dump.ts --out scripts/project-code.txt
  */
 
 import * as fs from 'fs';
@@ -32,7 +27,6 @@ import ignore from 'ignore';
 
 type CLIOpts = {
   outPath: string;
-  targets: string[];
 };
 
 function parseArgs(argv: string[]): CLIOpts {
@@ -40,8 +34,7 @@ function parseArgs(argv: string[]): CLIOpts {
   args.shift(); // node
   args.shift(); // script
 
-  let outPath = 'project-code.txt';
-  const targets: string[] = [];
+  let outPath = 'scripts/project-code.txt';
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -51,11 +44,9 @@ function parseArgs(argv: string[]): CLIOpts {
       i++;
       continue;
     }
-
-    targets.push(arg);
   }
 
-  return { outPath, targets };
+  return { outPath };
 }
 
 const opts = parseArgs(process.argv);
@@ -259,79 +250,25 @@ function* walk(dir: string): Generator<string> {
   }
 }
 
-// ------------------------ TARGET COLLECTION ------------------------
-function collectFilesFromTargets(targets: string[]): {
-  files: string[];
-  missingTargets: string[];
-  ignoredTargets: string[];
-  nonTextTargets: string[];
-} {
+// ------------------------ COLLECT ALL PROJECT FILES ------------------------
+function collectAllFiles(): string[] {
   const collected = new Set<string>();
-  const missingTargets: string[] = [];
-  const ignoredTargets: string[] = [];
-  const nonTextTargets: string[] = [];
 
-  for (const target of targets) {
-    const abs = path.resolve(process.cwd(), target);
-    const rel = toPosix(path.relative(process.cwd(), abs));
-
-    if (!fs.existsSync(abs)) {
-      missingTargets.push(target);
-      continue;
-    }
-
-    if (ig.ignores(rel)) {
-      ignoredTargets.push(rel);
-      continue;
-    }
-
-    const stat = fs.statSync(abs);
-
-    if (stat.isDirectory()) {
-      for (const file of walk(abs)) {
-        collected.add(path.resolve(file));
-      }
-      continue;
-    }
-
-    if (stat.isFile()) {
-      if (!looksLikeTextFile(abs)) {
-        nonTextTargets.push(rel);
-        continue;
-      }
-
-      collected.add(abs);
-    }
+  for (const file of walk(process.cwd())) {
+    collected.add(path.resolve(file));
   }
 
-  const files = [...collected].sort((a, b) => {
+  return [...collected].sort((a, b) => {
     const relA = toPosix(path.relative(process.cwd(), a));
     const relB = toPosix(path.relative(process.cwd(), b));
     return relA.localeCompare(relB);
   });
-
-  return {
-    files,
-    missingTargets,
-    ignoredTargets,
-    nonTextTargets,
-  };
 }
 
 // ------------------------ AI HEADER ------------------------
-function buildAIHeader(
-  files: string[],
-  originalTargets: string[],
-  missingTargets: string[],
-  ignoredTargets: string[],
-  nonTextTargets: string[],
-): string {
+function buildAIHeader(files: string[]): string {
   const relFiles = files.map((file) =>
     toPosix(path.relative(process.cwd(), file)),
-  );
-
-  const relTargets = originalTargets.map((target) =>
-    toPosix(path.relative(process.cwd(), path.resolve(process.cwd(), target))),
   );
 
   const lines: string[] = [
@@ -340,8 +277,8 @@ function buildAIHeader(
     '// ============================================================',
     '//',
     '// PURPOSE',
-    '// This document aggregates selected project files to enable efficient AI-assisted analysis and changes.',
-    '// The included files were collected ONLY from the explicit inputs (files/folders) passed to the script.',
+    '// This document aggregates ALL project source files (respecting .gitignore) to enable',
+    '// efficient AI-assisted analysis and changes.',
     '//',
     '// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
     '// AGENT NAVIGATION — READ THIS BEFORE ANYTHING ELSE',
@@ -354,6 +291,40 @@ function buildAIHeader(
     '// 5) If a "copilot-instructions" file exists in the FILE INDEX, read it FIRST — it is authoritative.',
     '//',
     '// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '// DELIVERABLE FORMAT',
+    '// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '// All code changes MUST be delivered as a SINGLE self-contained bash script',
+    '// to be executed at the PROJECT ROOT. The script must:',
+    '//',
+    '//   • Handle ALL file operations: create, edit, rename/move, delete.',
+    "//   • Write file contents using heredoc (cat << 'EOF') or printf — never echo for multi-line.",
+    '//   • Be idempotent where possible (e.g., mkdir -p, rm -f).',
+    '//   • Precede every operation with a comment describing what is being done.',
+    '//   • Be enclosed in a SINGLE ```bash code block.',
+    '//   • Never split changes across multiple scripts or "apply manually" instructions.',
+    '//',
+    '//   Example:',
+    '//',
+    '//   ```bash',
+    '//   #!/usr/bin/env bash',
+    '//   set -euo pipefail',
+    '//',
+    '//   # Create/overwrite app/components/Button.tsx',
+    '//   mkdir -p app/components',
+    "//   cat << 'EOF' > app/components/Button.tsx",
+    '//   export function Button() {',
+    '//     return <button>Click me</button>;',
+    '//   }',
+    '//   EOF',
+    '//',
+    '//   # Delete deprecated file',
+    '//   rm -f app/components/OldButton.tsx',
+    '//',
+    '//   # Rename file',
+    '//   mv app/utils/helpers.ts app/utils/formatters.ts',
+    '//   ```',
+    '//',
+    '// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
     '// MANDATORY RESPONSE STRUCTURE',
     '// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
     '// Your reply MUST follow this exact structure — every section is required:',
@@ -363,77 +334,18 @@ function buildAIHeader(
     '//   Be concise and specific. No vague descriptions.',
     '//',
     '//   ── CHANGES ──',
-    '//   All code output MUST use Markdown code blocks with the language identifier.',
-    '//   Every file MUST be preceded by its path as a comment, then immediately followed by its code block.',
-    '//',
-    '//   Format for each file:',
-    '//',
-    '//   // <file_path>',
-    '//   ```<lang>',
-    '//   <file content>',
-    '//   ```',
-    '//',
-    '//   Example:',
-    '//   // app/components/Button.tsx',
-    '//   ```tsx',
-    '//   export function Button() { ... }',
-    '//   ```',
-    '//',
-    '//   ┌─ FULL FILE vs PARTIAL UPDATE — DECISION RULE ───────────────┐',
-    '//   │                                                             │',
-    '//   │  ≤ ~1000 lines  →  ALWAYS return the FULL FILE.             │',
-    '//   │  > ~1000 lines  →  MAY return PARTIAL UPDATE (see below).   │',
-    '//   │                                                             │',
-    '//   │  When in doubt, prefer FULL FILE. Only use partial updates  │',
-    '//   │  when the file is clearly large and returning it fully      │',
-    '//   │  would add substantial noise with no benefit.               │',
-    '//   └─────────────────────────────────────────────────────────────┘',
-    '//',
-    '//   PARTIAL UPDATE format (only for files > ~1000 lines):',
-    '//',
-    '//   // <file_path>',
-    '//   [PARTIAL UPDATE]',
-    '//',
-    '//   Change 1',
-    '//   - Operation : REPLACE BLOCK | INSERT AFTER BLOCK | INSERT BEFORE BLOCK | DELETE BLOCK',
-    '//   - Block type: function | class | component | hook | method | type | interface |',
-    '//                 constant block | JSX block | other identifiable logical block',
-    '//   - Location  : exact name of the enclosing function/component/class/block + approx. line range',
-    '//   - Search anchor:',
-    '//   ```<lang>',
-    '//   <unique existing snippet that unambiguously locates the block>',
-    '//   ```',
-    '//   - Replacement:',
-    '//   ```<lang>',
-    '//   <full replacement block>',
-    '//   ```',
-    '//',
-    '//   Change 2',
-    '//   - Operation : ...',
-    '//   (repeat for each change in the same file)',
-    '//',
-    '//   Rules for partial updates:',
-    '//   • Prefer replacing WHOLE LOGICAL BLOCKS (full function, component, hook, class, type, JSX section)',
-    '//     even when only a few lines inside changed. Avoid line-level micro-patches.',
-    '//   • Search anchors MUST be unique in the file. Use function names, exports, type declarations,',
-    '//     component names, or distinctive comments as anchors.',
-    '//   • For INSERT operations, supply both the full anchor block and the full block to insert.',
-    '//   • For DELETE, supply the exact block to remove and clearly state its location.',
-    '//   • Every change MUST be precise enough for a developer to apply without ambiguity.',
-    '//   • Number changes sequentially when multiple edits target the same file.',
-    '//   • NEVER write vague instructions like "update this function accordingly".',
-    '//     Always provide the exact code.',
+    '//   A SINGLE bash script (as described in DELIVERABLE FORMAT) that applies ALL changes.',
+    '//   Every file write MUST use heredoc or printf. Never truncate file contents.',
     '//',
     '//   ── DOCS ──',
     '//   Update or create documentation to reflect the changes:',
     '//   • README or docs/*.md files impacted by the changes',
     '//   • Inline code comments and JSDoc/TSDoc blocks where relevant',
     '//   • Usage examples if any API or public behavior changed',
-    '//   Apply the same FULL FILE / PARTIAL UPDATE rule as for code files.',
+    '//   Include doc file writes inside the same bash script under CHANGES.',
     '//',
     '//   ── NOTES ──',
     '//   • Justify key architectural decisions and trade-offs.',
-    '//   • If you chose PARTIAL UPDATE for any file, briefly explain why.',
     '//   • Include migration guidance if behavior or interfaces changed.',
     '//   • Flag any assumptions made due to missing context.',
     '//',
@@ -479,126 +391,41 @@ function buildAIHeader(
     '// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
     '// IMPORTANT REMINDERS',
     '// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-    '// - ALL code output MUST be inside Markdown code blocks (``` fences).',
-    '// - Every file block MUST be preceded by // <file_path>.',
-    '// - Files with ≤ ~500 lines MUST be returned in full. No exceptions.',
+    '// - ALL changes MUST be inside a single bash script code block. No exceptions.',
+    '// - Never instruct the developer to "manually edit" a file — automate everything.',
+    "// - heredoc (cat << 'EOF') MUST be used for multi-line file content. No inline echo chains.",
     '// - The FILE INDEX is a navigation aid only; actual content follows BEGIN FILE CONTENTS.',
     '// - If a path appears in both the index and the content area, the content area is authoritative.',
     '//',
-    '// INPUT TARGETS:',
-    ...relTargets.map((rel) => `// ${rel}`),
+    '// FILE INDEX:',
+    ...relFiles.map((rel) => `// ${rel}`),
     '//',
+    '// ============================================================',
+    '// BEGIN FILE CONTENTS',
+    '// ============================================================',
+    '',
   ];
-
-  if (missingTargets.length > 0) {
-    lines.push('// MISSING TARGETS:');
-    lines.push(
-      ...missingTargets.map((target) => {
-        const rel = toPosix(
-          path.relative(process.cwd(), path.resolve(process.cwd(), target)),
-        );
-        return `// ${rel}`;
-      }),
-    );
-    lines.push('//');
-  }
-
-  if (ignoredTargets.length > 0) {
-    lines.push('// IGNORED TARGETS (.gitignore):');
-    lines.push(...ignoredTargets.map((rel) => `// ${rel}`));
-    lines.push('//');
-  }
-
-  if (nonTextTargets.length > 0) {
-    lines.push('// NON-TEXT TARGETS SKIPPED:');
-    lines.push(...nonTextTargets.map((rel) => `// ${rel}`));
-    lines.push('//');
-  }
-
-  lines.push('// FILE INDEX:');
-  lines.push(...relFiles.map((rel) => `// ${rel}`));
-  lines.push('//');
-  lines.push('// ============================================================');
-  lines.push('// BEGIN FILE CONTENTS');
-  lines.push('// ============================================================');
-  lines.push('');
 
   return lines.join('\n');
 }
 
 // ------------------------ BUILD OUTPUT ------------------------
 function generateDump(): string {
-  if (opts.targets.length === 0) {
-    return [
-      '// ============================================================',
-      '// PROJECT CODE DUMP',
-      '// ============================================================',
-      '// No input targets were provided.',
-      '//',
-      '// Pass files and/or folders as positional arguments, for example:',
-      '//   npx tsx scripts/generate-project-dump.ts --out project-code.txt app components lib middleware.ts',
-    ].join('\n');
-  }
-
-  const { files, missingTargets, ignoredTargets, nonTextTargets } =
-    collectFilesFromTargets(opts.targets);
+  const files = collectAllFiles();
 
   if (files.length === 0) {
     return [
       '// ============================================================',
       '// PROJECT CODE DUMP',
       '// ============================================================',
-      '// No text files were found from the provided input targets.',
+      '// No text files were found in the project root.',
       '//',
-      '// Input targets:',
-      ...opts.targets.map((target) => {
-        const rel = toPosix(
-          path.relative(process.cwd(), path.resolve(process.cwd(), target)),
-        );
-        return `// ${rel}`;
-      }),
-      ...(missingTargets.length > 0
-        ? [
-            '//',
-            '// Missing targets:',
-            ...missingTargets.map((target) => {
-              const rel = toPosix(
-                path.relative(
-                  process.cwd(),
-                  path.resolve(process.cwd(), target),
-                ),
-              );
-              return `// ${rel}`;
-            }),
-          ]
-        : []),
-      ...(ignoredTargets.length > 0
-        ? [
-            '//',
-            '// Ignored by .gitignore:',
-            ...ignoredTargets.map((rel) => `// ${rel}`),
-          ]
-        : []),
-      ...(nonTextTargets.length > 0
-        ? [
-            '//',
-            '// Non-text targets skipped:',
-            ...nonTextTargets.map((rel) => `// ${rel}`),
-          ]
-        : []),
+      `// Searched from: ${toPosix(process.cwd())}`,
     ].join('\n');
   }
 
   const out: string[] = [];
-  out.push(
-    buildAIHeader(
-      files,
-      opts.targets,
-      missingTargets,
-      ignoredTargets,
-      nonTextTargets,
-    ),
-  );
+  out.push(buildAIHeader(files));
 
   for (const file of files) {
     const rel = toPosix(path.relative(process.cwd(), file));
@@ -620,15 +447,8 @@ function generateDump(): string {
 const dump = generateDump();
 const resolved = path.resolve(process.cwd(), opts.outPath);
 
+fs.mkdirSync(path.dirname(resolved), { recursive: true });
 fs.writeFileSync(resolved, dump, 'utf8');
 
-console.log('\nProject dump generated successfully!');
+console.log('\nFull project dump generated successfully!');
 console.log(`Saved at: ${resolved}\n`);
-
-if (opts.targets.length > 0) {
-  console.log('Input targets:');
-  for (const target of opts.targets) {
-    console.log(`- ${target}`);
-  }
-  console.log('');
-}
