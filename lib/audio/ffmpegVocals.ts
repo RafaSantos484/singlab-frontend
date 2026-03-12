@@ -54,6 +54,8 @@ export interface SpeechSegment {
   processedStart: number;
   /** Corresponding end time in the silence-removed audio (seconds). */
   processedEnd: number;
+  /** Segment type from the cut map: 'speech' or 'silence' (kept normalized). */
+  type: 'speech' | 'silence';
 }
 
 /** Result returned by {@link removeSilencesFromVocals}. */
@@ -357,6 +359,7 @@ function buildSpeechSegments(intervals: OutputInterval[]): SpeechSegment[] {
       originalEnd,
       processedStart: processedOffset,
       processedEnd: processedOffset + iv.keptDuration,
+      type: iv.type,
     });
     processedOffset += iv.keptDuration;
   }
