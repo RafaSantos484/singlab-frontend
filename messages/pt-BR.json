@@ -420,6 +420,7 @@
       "audioProcess": "Falha ao processar áudio vocal: {message}",
       "audioDecode": "Falha ao carregar áudio vocal: {message}",
       "transcription": "Falha na transcrição: {message}",
+      "modelOOM": "O modelo não pôde ser executado por falta de memória. Tente um modelo mais leve (por exemplo, {suggestion}) ou ative o modo quantizado.",
       "unknown": "Erro desconhecido"
     },
     "lyricsAdaptation": {

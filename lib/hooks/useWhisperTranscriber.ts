@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
+import enUSMessages from '@/messages/en-US.json';
 
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from '@/lib/transcription/constants';
 import { TRANSCRIPTION_SAMPLE_RATE } from '@/lib/transcription/constants';
@@ -90,6 +92,50 @@ function createWorker(): Worker {
  *   performs transcription-only per segment.
  */
 export function useWhisperTranscriber(): UseWhisperTranscriberResult {
+  const t = useTranslations('Transcription');
+
+  // Safe translation helper: attempt to translate via `t`, otherwise fall
+  // back to the English messages bundle and finally to a simple fallback
+  // string. This prevents exceptions when a locale is missing a key.
+  const safeT = useCallback(
+    (key: string, params?: Record<string, unknown>): string => {
+      try {
+        const translated = t(key as any, params as any);
+        if (typeof translated === 'string' && translated !== key) {
+          return translated;
+        }
+      } catch (_) {
+        // ignore and fallback
+      }
+
+      // Fallback to English messages bundle
+      try {
+        const parts = key.split('.');
+        let cur: any = enUSMessages.Transcription;
+        for (const p of parts) {
+          if (!cur) break;
+          cur = cur[p];
+        }
+        if (typeof cur === 'string') {
+          if (params && typeof params === 'object') {
+            return Object.keys(params).reduce((acc, k) => {
+              return acc.replace(new RegExp(`\\{${k}\\}`, 'g'), String((params as any)[k]));
+            }, cur);
+          }
+          return cur;
+        }
+      } catch (_) {
+        // ignore
+      }
+
+      // Final generic fallback
+      if (params && (params as any).suggestion) {
+        return `The model failed to run due to insufficient memory. Try a lighter model (e.g., ${(params as any).suggestion}) or enable quantized mode.`;
+      }
+      return 'The model failed to run due to insufficient memory. Try a lighter model or enable quantized mode.';
+    },
+    [t],
+  );
   const workerRef = useRef<Worker | null>(null);
   const speechSegmentsRef = useRef<SpeechSegment[]>([]);
   // Pending resolvers for per-segment transcription results.
@@ -212,7 +258,31 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
         case 'error':
           setIsBusy(false);
           setIsModelLoading(false);
-          setError(message.data.message ?? '');
+          try {
+            const raw = (message.data && (message.data as any).message) || '';
+            const lower = String(raw).toLowerCase();
+            // Detect common out-of-memory signatures reported by Xenova/ONNX runtime
+            if (
+              lower.includes('error code = 6') ||
+              lower.includes('bad_alloc') ||
+              lower.includes('out-of-memory') ||
+              lower.includes('out of memory') ||
+              lower.includes('ortrun')
+            ) {
+              // Suggest a lighter model to the user via safe translation.
+              setError(safeT('errors.modelOOM', { suggestion: 'Xenova/whisper-base' }));
+            } else {
+              // Use safe translate for generic transcription errors when
+              // possible; otherwise fall back to the raw message.
+              try {
+                setError(safeT('errors.transcription', { message: raw }));
+              } catch {
+                setError(raw || '');
+              }
+            }
+          } catch (e) {
+            setError('');
+          }
           endPendingActivity();
           break;
         case 'stopped':

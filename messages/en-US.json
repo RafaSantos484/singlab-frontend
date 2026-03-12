@@ -422,6 +422,7 @@
       "audioProcess": "Failed to process vocals audio: {message}",
       "audioDecode": "Failed to load vocals audio: {message}",
       "transcription": "Transcription failed: {message}",
+      "modelOOM": "The model failed to run due to insufficient memory. Try a lighter model (e.g., {suggestion}) or enable quantized mode.",
       "unknown": "Unknown error"
     },
     "lyricsAdaptation": {
