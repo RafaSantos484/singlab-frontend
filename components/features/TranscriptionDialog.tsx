@@ -32,7 +32,7 @@ import {
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import ReplayIcon from '@mui/icons-material/Replay';
 import { useLocale, useTranslations } from 'next-intl';
-import { removeSilencesFromVocals } from '@/lib/audio/ffmpegVocals';
+import { removeSilencesFromVocals, type SpeechSegment } from '@/lib/audio/ffmpegVocals';
 import { useLyricsAdaptation } from '@/lib/hooks/useLyricsAdaptation';
 import { useWhisperTranscriber } from '@/lib/hooks/useWhisperTranscriber';
 import { LLM_MODEL_ID } from '@/lib/transcription/lyricsAdapter';
@@ -149,6 +149,7 @@ export function TranscriptionDialog({
   const [processedAudioUrl, setProcessedAudioUrl] = useState<string | null>(
     null,
   );
+  const [speechSegments, setSpeechSegments] = useState<SpeechSegment[]>([]);
 
   const isPreparingAudio = preparingStage !== null;
   const isEnglishLocale = locale.toLowerCase().startsWith('en');
@@ -254,13 +255,15 @@ export function TranscriptionDialog({
       } = await removeSilencesFromVocals(audioBlob);
       setCutMapLines(newCutMap);
 
-      // Update the processed vocals player URL.
+      // Update the processed vocals player URL and the speech segments list.
       if (processedAudioUrlRef.current) {
         URL.revokeObjectURL(processedAudioUrlRef.current);
       }
       const newProcessedUrl = URL.createObjectURL(processedBlob);
       processedAudioUrlRef.current = newProcessedUrl;
       setProcessedAudioUrl(newProcessedUrl);
+      // Only expose true speech segments to the UI players.
+      setSpeechSegments(speechSegments.filter((s) => s.type === 'speech'));
 
       // Step 3: Decode processed WAV to Float32Array for the transcription worker.
       setPreparingStage('decoding');
@@ -422,12 +425,57 @@ export function TranscriptionDialog({
               >
                 {t('processedVocalsPlayerLabel')}
               </Typography>
-              <Box
-                component="audio"
-                controls
-                src={processedAudioUrl}
-                sx={{ width: '100%', display: 'block' }}
-              />
+              {/* Render one audio player per speech segment. Each player uses
+                  the same processed audio source but seeks to the segment's
+                  processed start and stops at its end so it plays only that
+                  fragment. */}
+              <Stack spacing={1}>
+                {speechSegments.length > 0 ? (
+                  speechSegments.map((seg, i) => (
+                    <Box key={`seg-player-${i}`}>
+                      <Typography variant="caption" sx={{ fontFamily: 'monospace', display: 'block' }}>
+                        {t('timestampProcessedLabel')}: {formatTimestamp(seg.processedStart)} — {formatTimestamp(seg.processedEnd)}
+                      </Typography>
+                      <Box
+                        component="audio"
+                        controls
+                        src={processedAudioUrl}
+                        onLoadedMetadata={(e) => {
+                          const audio = e.currentTarget as HTMLAudioElement;
+                          // Ensure the element is positioned at the segment start
+                          // once metadata is available.
+                          try {
+                            audio.currentTime = Math.max(0, seg.processedStart);
+                          } catch {
+                            // Some browsers may throw if seeking before ready; ignore.
+                          }
+                        }}
+                        onPlay={(e) => {
+                          const audio = e.currentTarget as HTMLAudioElement;
+                          try {
+                            if (audio.currentTime < seg.processedStart) {
+                              audio.currentTime = Math.max(0, seg.processedStart);
+                            }
+                          } catch {
+                            // ignore seek errors
+                          }
+
+                          const onTimeUpdate = () => {
+                            if (audio.currentTime >= (seg.processedEnd ?? Infinity)) {
+                              audio.pause();
+                              audio.removeEventListener('timeupdate', onTimeUpdate);
+                            }
+                          };
+                          audio.addEventListener('timeupdate', onTimeUpdate);
+                        }}
+                        sx={{ width: '100%', display: 'block' }}
+                      />
+                    </Box>
+                  ))
+                ) : (
+                  <Box component="audio" controls src={processedAudioUrl} sx={{ width: '100%', display: 'block' }} />
+                )}
+              </Stack>
             </Box>
           )}
 
