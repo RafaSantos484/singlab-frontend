@@ -203,13 +203,24 @@ export function TranscriptionDialog({
       (model) => model.id === transcriber.settings.model,
     );
     if (!selectedModelExists && availableModels.length > 0) {
-      transcriber.setModel(availableModels[0].id);
+      // Prefer `whisper-small` as the default when using the full-precision
+      // (non-quantized) models. Otherwise fall back to the first available
+      // model (quantized default ordering).
+      if (!transcriber.settings.quantized) {
+        const preferred = availableModels.find(
+          (m) => m.id === 'Xenova/whisper-small',
+        );
+        transcriber.setModel(preferred ? preferred.id : availableModels[0].id);
+      } else {
+        transcriber.setModel(availableModels[0].id);
+      }
     }
   }, [
     availableModels,
     open,
     transcriber,
     transcriber.settings.model,
+    transcriber.settings.quantized,
     transcriber.setModel,
   ]);
 
