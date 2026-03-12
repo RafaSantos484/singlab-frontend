@@ -156,6 +156,7 @@ async function transcribe(
   request: WorkerTranscriptionRequest,
   jobToken: number,
 ): Promise<WhisperPipelineResult | null> {
+  // Per-segment transcription is now the application default.
   const isDistilWhisper = request.model.startsWith('distil-whisper/');
 
   let modelName = request.model;
@@ -190,6 +191,11 @@ async function transcribe(
     if (jobToken !== activeJobToken) {
       return;
     }
+
+    // Per-segment flow: do not emit timestamped streaming updates. The
+    // main thread uses the silence map for timing and expects text-only
+    // completions for each segment.
+    return;
 
     const data = transcriber.tokenizer._decode_asr(chunksToProcess, {
       time_precision: timePrecision,
@@ -235,7 +241,9 @@ async function transcribe(
       stride_length_s: isDistilWhisper ? 3 : 5,
       language: request.language,
       task: request.subtask,
-      return_timestamps: true,
+      // In per-segment mode we request text-only output (no timestamps)
+      // from the pipeline; timestamps are derived from the silence map.
+      return_timestamps: false,
       force_full_sequences: false,
       callback_function: callbackFunction,
       chunk_callback: chunkCallback,
@@ -283,7 +291,10 @@ self.addEventListener('message', async (event: MessageEvent<WorkerRequest>) => {
   self.postMessage({
     status: 'complete',
     task: 'automatic-speech-recognition',
-    data: transcript,
+    // Per-segment completion: always return `{ text, segmentIndex }` so
+    // the main thread can attach the returned text to the corresponding
+    // speech interval from the silence map.
+    data: { text: transcript.text, segmentIndex: (event.data as any).segmentIndex },
   } satisfies WorkerMessage);
 });
 

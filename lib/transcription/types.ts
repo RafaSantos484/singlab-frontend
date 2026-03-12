@@ -43,6 +43,8 @@ export interface WorkerTranscriptionRequest {
   quantized: boolean;
   subtask: 'transcribe' | 'translate' | null;
   language: string | null;
+  /** Index of the speech segment when transcribing per-segment. */
+  segmentIndex: number;
 }
 
 export interface WorkerStopRequest {
@@ -60,9 +62,12 @@ export interface WorkerTranscriptionUpdateMessage {
 export interface WorkerTranscriptionCompleteMessage {
   status: 'complete';
   task: 'automatic-speech-recognition';
+  // For the current per-segment-only flow `data` contains text and the
+  // `segmentIndex` identifying which speech segment this transcript refers
+  // to. Legacy chunked results are no longer emitted.
   data: {
     text: string;
-    chunks: TranscriptChunk[];
+    segmentIndex: number;
   };
 }
 

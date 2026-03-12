@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from '@/lib/transcription/constants';
+import { TRANSCRIPTION_SAMPLE_RATE } from '@/lib/transcription/constants';
 import { startPendingActivity } from '@/lib/async/pendingActivity';
 import type { SpeechSegment } from '@/lib/audio/ffmpegVocals';
 import { remapWordTimestamps } from '@/lib/audio/timestampRemap';
@@ -114,6 +115,10 @@ function createWorker(): Worker {
 export function useWhisperTranscriber(): UseWhisperTranscriberResult {
   const workerRef = useRef<Worker | null>(null);
   const speechSegmentsRef = useRef<SpeechSegment[]>([]);
+  // Pending resolvers for per-segment transcription results.
+  const pendingSegmentResolversRef = useRef<Map<number, (text: string) => void>>(new Map());
+  // Keep the last speech segments so the dialog can render per-segment players.
+  const lastSpeechSegmentsRef = useRef<SpeechSegment[]>([]);
 
   const [output, setOutput] = useState<TranscriptionOutput | undefined>(
     undefined,
@@ -167,51 +172,45 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
           );
           break;
         case 'update': {
-          // Streaming update from the worker: message.data[1].chunks contains
-          // timestamps relative to the processed (silence-removed) audio.
+          // Legacy streaming update: contains timestamped chunks relative to
+          // the processed audio. Preserve existing behavior for backward
+          // compatibility.
           const processedChunks = message.data[1].chunks;
-          const remapped = remapWordTimestamps(
-            processedChunks,
-            speechSegmentsRef.current,
-          );
-          const enriched = processedChunks.map((pc, i) => ({
-            text: pc.text,
-            processedTimestamp: pc.timestamp,
-            // remapWordTimestamps keeps ordering, so remapped[i] exists.
-            timestamp: remapped[i].timestamp,
-          }));
+          if (processedChunks && processedChunks.length > 0) {
+            const remapped = remapWordTimestamps(
+              processedChunks,
+              speechSegmentsRef.current,
+            );
+            const enriched = processedChunks.map((pc, i) => ({
+              text: pc.text,
+              processedTimestamp: pc.timestamp,
+              timestamp: remapped[i].timestamp,
+            }));
 
-          setOutput({
-            isBusy: true,
-            text: message.data[0],
-            chunks: enriched,
-          });
+            setOutput({
+              isBusy: true,
+              text: message.data[0],
+              chunks: enriched,
+            });
+          }
           break;
         }
         case 'complete': {
-          // On completion, remap processed timestamps to the original timeline
-          // and preserve the original processed timestamps for UI display.
-          const processedChunks = message.data.chunks;
-          const remapped = remapWordTimestamps(
-            processedChunks,
-            speechSegmentsRef.current,
-          );
-
-          const remappedWithProcessed = remapped.map((r, i) => ({
-            text: r.text,
-            timestamp: r.timestamp,
-            processedTimestamp: processedChunks[i].timestamp,
-          }));
-
-          const filtered = filterBacktrackingChunks(remappedWithProcessed);
-          setOutput({
-            isBusy: false,
-            text: filtered.map((c) => c.text).join(''),
-            chunks: filtered,
-          });
-          setIsBusy(false);
-          endPendingActivity();
-          break;
+            // Per-segment completion: worker returns `{ text, segmentIndex }`.
+            // Resolve the pending promise created in `start()` so that the
+            // sequential transcription loop can continue and assemble chunks
+            // using the silence map timestamps.
+            if (message.status === 'complete') {
+              const data = message.data as any;
+              const idx = data.segmentIndex as number;
+              const text = data.text as string;
+              const resolver = pendingSegmentResolversRef.current.get(idx);
+              if (resolver) {
+                resolver(text);
+                pendingSegmentResolversRef.current.delete(idx);
+              }
+            }
+            break;
         }
         case 'initiate':
           setIsModelLoading(true);
@@ -367,23 +366,71 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
     (processedAudio: Float32Array, speechSegments: SpeechSegment[]): void => {
       const worker = workerRef.current ?? createAndBindWorker();
 
-      speechSegmentsRef.current = speechSegments;
+      // Keep only true speech segments for transcription — ignore kept
+      // normalized silences which are not meaningful to transcribe.
+      const speechOnly = speechSegments.filter((s) => s.type === 'speech');
+      speechSegmentsRef.current = speechOnly;
+      // Also keep lastSpeechSegments for the UI (dialog)
+      // Note: we store the original order indexes mapping so the dialog can
+      // show players in the same order.
+      // (TranscriptionDialog maintains its own copy via setSpeechSegments.)
       setOutput(undefined);
       setError(null);
       setIsBusy(true);
       beginPendingActivity();
 
-      worker.postMessage({
-        audio: processedAudio,
-        model: settings.model,
-        multilingual: settings.multilingual,
-        quantized: settings.quantized,
-        subtask: settings.multilingual ? settings.subtask : null,
-        language:
-          settings.multilingual && settings.language !== 'auto'
-            ? settings.language
-            : null,
-      } satisfies WorkerRequest);
+      // Sequentially transcribe each speech segment using per-segment
+      // worker requests. Whisper is treated as text-only per segment and
+      // the silence map is used as the timing source of truth.
+      (async () => {
+        const sr = TRANSCRIPTION_SAMPLE_RATE;
+        const chunks: any[] = [];
+
+        for (let i = 0; i < speechOnly.length; i++) {
+          const seg = speechOnly[i];
+          // Convert processedStart/end (seconds) to sample indices.
+          const startSample = Math.max(0, Math.floor(seg.processedStart * sr));
+          const endSample = Math.max(startSample, Math.floor(seg.processedEnd * sr));
+          const segmentAudio = processedAudio.slice(startSample, endSample);
+
+          // Prepare a promise that resolves when the worker returns the
+          // per-segment completion message with `segmentIndex`.
+          const textPromise = new Promise<string>((resolve) => {
+            pendingSegmentResolversRef.current.set(i, resolve);
+          });
+
+          // Post transcription request for this segment.
+          worker.postMessage({
+            audio: segmentAudio,
+            model: settings.model,
+            multilingual: settings.multilingual,
+            quantized: settings.quantized,
+            subtask: settings.multilingual ? settings.subtask : null,
+            language:
+              settings.multilingual && settings.language !== 'auto'
+                ? settings.language
+                : null,
+            segmentIndex: i,
+          } satisfies WorkerRequest);
+
+          // Await result and build a chunk using the silence map timings.
+          const text = await textPromise;
+          const chunk = {
+            text,
+            processedTimestamp: [seg.processedStart, seg.processedEnd] as [number, number | null],
+            timestamp: [seg.originalStart, seg.originalEnd] as [number, number | null],
+          };
+          chunks.push(chunk);
+
+          // Update intermediate UI progressively so users see partial results.
+          setOutput({ isBusy: true, text: chunks.map((c) => c.text).join(''), chunks });
+        }
+
+        // Finalize
+        setOutput({ isBusy: false, text: chunks.map((c) => c.text).join(''), chunks });
+        setIsBusy(false);
+        endPendingActivity();
+      })();
     },
     [beginPendingActivity, createAndBindWorker, settings],
   );
