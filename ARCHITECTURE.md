@@ -122,7 +122,7 @@ Shared utilities used across the app:
 | `lib/api/separations.ts` | API client for stem separation proxy (submit, status) |
 | `lib/audio/normalizeAudio.ts` | Client-side audio/video normalization to canonical AAC/M4A using FFmpeg WASM (singleton, lazy-loaded from CDN). Queue-based concurrency control serializes all conversion operations to prevent shared WASM instance and virtual FS collisions. Unique file tokens prevent path conflicts. |
 | `lib/audio/ffmpegVocals.ts` | FFmpeg WASM silence removal for vocals tracks. Single-pass silence detection and cut-map construction, followed by `atrim+concat` to produce a 16 kHz mono WAV with silence gaps removed. Returns a `SpeechSegment[]` cut map mapping processed ↔ original audio coordinates for timestamp reconstruction. |
-| `lib/audio/timestampRemap.ts` | Timestamp reconstruction utilities. `remapTimestamp()` maps a single processed-audio timestamp back to the original timeline via binary search over `SpeechSegment[]`. `remapWordTimestamps()` applies the remap to Whisper word arrays. |
+| `lib/audio/timestampRemap.ts` | Timestamp reconstruction utilities. `remapTimestamp()` maps a single processed-audio timestamp back to the original timeline via binary search over `SpeechSegment[]`. `remapWordTimestamps()` applies the remap to Whisper word arrays and preserves the original `processedTimestamp` when present. |
 | `lib/async/` | Pending activity tracking for navigation guards (prevents leaving during uploads) |
 | `lib/firebase/` | Firebase app initialization (singleton), auth helpers, Firestore CRUD (songs, users), Storage utilities |
 | `lib/hooks/` | Custom React hooks (`useAuthGuard`, `useSongRawUrl`, `useSeparationStatus`, `useStemAutoProcessor`, etc.) |
