@@ -88,7 +88,11 @@ Components are split into two groups:
           and removes silences from the vocals track, builds a cut map, Whisper
           transcribes the silence-removed audio with word-level timestamps, and
           timestamps are automatically remapped back to the original audio timeline.
-          Configurable model size (tiny, base, small, medium), quantization,
+          Configurable model size (tiny, base, small). Medium/large models are
+          not currently included in the default distribution. The transcription
+          pipeline defaults to a quantized `Xenova/whisper-base` model to reduce
+          client-side memory requirements; users may toggle `quantized` or
+          select a different model in the Transcription dialog.
           multilingual language selection, inline audio players for original and
           silence-removed vocals, and collapsible silence cut map display.
           Automatically pauses GlobalPlayer on open via `requestGlobalPlayerPause`.

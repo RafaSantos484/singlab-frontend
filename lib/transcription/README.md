@@ -18,9 +18,20 @@ Key points for maintainers
   avoid copies. See `useWhisperTranscriber` for `postMessage(..., [buffer])`.
 - Constants: distil/distinct model variants were removed from
   `lib/transcription/constants.ts` — adjust available model list there.
+  - Note: the default settings in `lib/transcription/constants.ts` now
+    choose a quantized `Xenova/whisper-base` model to reduce memory usage
+    on typical client devices. If you change this default, update docs
+    and translations accordingly (see `messages/en-US.json` / `pt-BR.json`).
+  - The hook and UI now cache a processed audio `Blob` per Transcription
+    dialog session to avoid re-running FFmpeg repeatedly; callers should
+    be aware of in-memory blob lifetimes when profiling memory usage.
 - New helper: `lib/audio/sliceWav.ts` — creates a valid WAV `Blob` for a
   requested time slice (reads headers and copies PCM frames). Useful for
   creating per-segment object URLs used by the UI players.
+  - The Transcription UI creates per-segment object URLs from sliced WAV
+    blobs so each segment player can use a bounded audio file. When editing
+    code that manipulates segment URLs, ensure existing object URLs are
+    revoked to avoid leaking browser memory.
 - UI: `components/features/SegmentPlayers.tsx` was added to render
   per-segment audio players using either per-segment object URLs or the
   full processed audio as fallback.
