@@ -19,7 +19,7 @@ const SILENCE_DETECTION_THRESHOLD_S = 0.01;
  * detected by the rule above become silence regions of length Tb in the
  * processed output.
  */
-const SILENCE_NORMALIZED_DURATION_S = 1.0;
+const SILENCE_NORMALIZED_DURATION_S = 2.0;
 /**
  * Minimum speech duration (seconds).
  * Speech intervals shorter than this value are treated as silence and
