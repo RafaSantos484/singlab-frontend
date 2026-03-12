@@ -10,11 +10,26 @@ import type { SpeechSegment } from './ffmpegVocals';
  *
  * @param processedTime - Timestamp in the processed audio (seconds).
  * @param segments - Ordered speech segments from {@link removeSilencesFromVocals}.
+ * @param preferNextOnBoundary - Optional boolean. When true, timestamps that
+ *  fall exactly on a processed boundary shared by adjacent segments are
+ *  mapped to the next segment's original start; when false they map to the
+ *  previous segment's original end. Defaults to `false` (preserves previous
+ *  behaviour).
  * @returns Corresponding timestamp in the original vocals audio (seconds).
  */
 export function remapTimestamp(
   processedTime: number,
   segments: SpeechSegment[],
+  /**
+   * When a processed timestamp falls exactly on a boundary shared by two
+   * adjacent segments (previous.processedEnd === next.processedStart) the
+   * mapping is ambiguous. If `preferNextOnBoundary` is true we map boundary
+   * values to the *next* segment's original start (useful for mapping
+   * processed *starts*). If false we map to the *previous* segment's
+   * original end (useful for mapping processed *ends*). Default preserves
+   * previous behaviour (prefer previous on boundary).
+   */
+  preferNextOnBoundary = false,
 ): number {
   if (segments.length === 0) return processedTime;
 
@@ -30,7 +45,26 @@ export function remapTimestamp(
     } else if (processedTime > seg.processedEnd) {
       lo = mid + 1;
     } else {
-      // Inside this segment — linear offset from the original start.
+      // Inside this segment — handle exact-boundary ambiguity deterministically
+      // so that callers can decide whether a boundary should map to the
+      // previous segment's end or the next segment's start.
+      const isAtStart = processedTime === seg.processedStart;
+      const isAtEnd = processedTime === seg.processedEnd;
+
+      if (isAtEnd && mid < segments.length - 1) {
+        const next = segments[mid + 1];
+        if (next.processedStart === seg.processedEnd && preferNextOnBoundary) {
+          return next.originalStart;
+        }
+      }
+      if (isAtStart && mid > 0) {
+        const prev = segments[mid - 1];
+        if (prev.processedEnd === seg.processedStart && !preferNextOnBoundary) {
+          return prev.originalEnd;
+        }
+      }
+
+      // Default: map linearly within this segment.
       return seg.originalStart + (processedTime - seg.processedStart);
     }
   }
@@ -38,6 +72,12 @@ export function remapTimestamp(
   // Outside all segments — clamp to the nearest boundary.
   if (hi < 0) return segments[0].originalStart;
   if (lo >= segments.length) return segments[segments.length - 1].originalEnd;
+
+  // If processedTime is between two segments we clamp to the nearest
+  // boundary. By default we return the previous segment's end which
+  // preserves a non-overlapping timeline; callers that need the opposite
+  // behaviour should call `remapTimestamp` with
+  // `preferNextOnBoundary=true` for the boundary case.
   return segments[hi].originalEnd;
 }
 
@@ -85,8 +125,14 @@ export function remapWordTimestamps(
   return words.map((word) => {
     const processed = 'processedTimestamp' in word ? word.processedTimestamp! : word.timestamp;
     const [start, end] = processed;
-    const origStart = remapTimestamp(start, segments);
-    const origEnd = end !== null ? remapTimestamp(end, segments) : null;
+    // Map start timestamps to the next segment boundary when they fall on a
+    // shared processed boundary — this ensures chunk starts do not collapse
+    // into the previous segment and swallow the intervening silence.
+    const origStart = remapTimestamp(start, segments, true);
+    // Map end timestamps to the previous segment boundary when they fall on
+    // a shared processed boundary so chunk ends align to the true end of
+    // the spoken interval.
+    const origEnd = end !== null ? remapTimestamp(end, segments, false) : null;
     return {
       text: word.text,
       processedTimestamp: processed,
