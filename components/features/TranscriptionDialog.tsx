@@ -530,17 +530,40 @@ export function TranscriptionDialog({
                 <List dense disablePadding>
                   {transcriber.output.chunks.map((chunk, index) => (
                     <ListItem
-                      key={`${index}-${chunk.timestamp[0]}`}
+                      key={`${index}-${chunk.processedTimestamp[0]}`}
                       disableGutters
                       sx={{ py: 0.25 }}
                     >
                       <ListItemText
                         primary={chunk.text.trim() || t('emptyChunk')}
-                        secondary={`${formatTimestamp(chunk.timestamp[0])} — ${formatTimestamp(chunk.timestamp[1])}`}
+                        secondary={
+                          <>
+                            <Typography
+                              component="span"
+                              variant="caption"
+                              sx={{
+                                fontFamily: 'monospace',
+                                display: 'block',
+                              }}
+                            >
+                              {t('timestampProcessedLabel')}: {formatTimestamp(chunk.processedTimestamp[0])} — {formatTimestamp(chunk.processedTimestamp[1])}
+                            </Typography>
+                            <Typography
+                              component="span"
+                              variant="caption"
+                              sx={{
+                                fontFamily: 'monospace',
+                                display: 'block',
+                                color: 'text.secondary',
+                              }}
+                            >
+                              {t('timestampOriginalLabel')}: {formatTimestamp(chunk.timestamp[0])} — {formatTimestamp(chunk.timestamp[1])}
+                            </Typography>
+                          </>
+                        }
                         primaryTypographyProps={{ variant: 'body2' }}
                         secondaryTypographyProps={{
                           variant: 'caption',
-                          sx: { fontFamily: 'monospace' },
                         }}
                       />
                     </ListItem>
