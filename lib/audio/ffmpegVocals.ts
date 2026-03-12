@@ -27,7 +27,7 @@ const SILENCE_NORMALIZED_DURATION_S = 2.0;
  * synthesis. This allows tiny spurious speech fragments (near 0s) to be
  * collapsed into the surrounding silence.
  */
-const MIN_SPEECH_DURATION_S = 0.1;
+const MIN_SPEECH_DURATION_S = 0.8;
 const OUTPUT_SAMPLE_RATE = 16000;
 const OUTPUT_CHANNELS = 1;
 const FFMPEG_CORE_CDN =
