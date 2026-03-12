@@ -148,6 +148,7 @@ export function TranscriptionDialog({
   const [showCutMap, setShowCutMap] = useState(false);
 
   const processedAudioUrlRef = useRef<string | null>(null);
+  const processedBlobRef = useRef<Blob | null>(null);
   const [processedAudioUrl, setProcessedAudioUrl] = useState<string | null>(
     null,
   );
@@ -171,6 +172,10 @@ export function TranscriptionDialog({
     });
   }, [transcriber.settings.multilingual, transcriber.settings.quantized]);
 
+  const currentModelPresent = useMemo(() => {
+    return availableModels.some((m) => m.id === transcriber.settings.model);
+  }, [availableModels, transcriber.settings.model]);
+
   // Pause GlobalPlayer when the dialog opens.
   useEffect(() => {
     if (open) {
@@ -186,6 +191,7 @@ export function TranscriptionDialog({
         processedAudioUrlRef.current = null;
       }
       setProcessedAudioUrl(null);
+      processedBlobRef.current = null;
       // Revoke any per-segment URLs
       Object.values(segmentUrlsRef.current).forEach((u) => URL.revokeObjectURL(u));
       segmentUrlsRef.current = {};
@@ -259,54 +265,72 @@ export function TranscriptionDialog({
     }
     setAudioError(null);
     try {
-      // Step 1: Fetch vocals audio as a Blob.
-      setPreparingStage('detecting');
-      const response = await fetch(vocalsUrl);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+      let processedBlob: Blob | null = null;
+      let speechOnly: SpeechSegment[] = [];
+
+      // If we already have a processed blob (from a previous run in this
+      // dialog session), reuse it instead of running FFmpeg again.
+      if (processedBlobRef.current && speechSegments.length > 0) {
+        processedBlob = processedBlobRef.current;
+        speechOnly = speechSegments.filter((s) => s.type === 'speech');
+      } else {
+        // Step 1: Fetch vocals audio as a Blob.
+        setPreparingStage('detecting');
+        const response = await fetch(vocalsUrl);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const audioBlob = await response.blob();
+
+        // Step 2: Detect silences, cut audio, and build cut map via FFmpeg WASM.
+        setPreparingStage('removing');
+        const {
+          processedBlob: newProcessedBlob,
+          speechSegments,
+          cutMapLines: newCutMap,
+        } = await removeSilencesFromVocals(audioBlob);
+        setCutMapLines(newCutMap);
+
+        // Update the processed vocals player URL and the speech segments list.
+        if (processedAudioUrlRef.current) {
+          URL.revokeObjectURL(processedAudioUrlRef.current);
+        }
+        const newProcessedUrl = URL.createObjectURL(newProcessedBlob);
+        processedAudioUrlRef.current = newProcessedUrl;
+        setProcessedAudioUrl(newProcessedUrl);
+        // Only expose true speech segments to the UI players.
+        speechOnly = speechSegments.filter((s) => s.type === 'speech');
+        setSpeechSegments(speechOnly);
+
+        // Store processed blob for potential reuse in this dialog session.
+        processedBlobRef.current = newProcessedBlob;
+        processedBlob = newProcessedBlob;
+
+        // Create per-segment sliced audio Blobs and object URLs so each
+        // rendered player has its own bounded audio file representing the
+        // exact segment duration.
+        // Revoke any existing segment URLs first.
+        Object.values(segmentUrlsRef.current).forEach((u) => URL.revokeObjectURL(u));
+        segmentUrlsRef.current = {};
+        const urls: Record<number, string> = {};
+        await Promise.all(
+          speechOnly.map(async (seg, idx) => {
+            try {
+              const blob = await sliceWavBlob(newProcessedBlob, seg.processedStart, seg.processedEnd);
+              const url = URL.createObjectURL(blob);
+              urls[idx] = url;
+              segmentUrlsRef.current[idx] = url;
+            } catch {
+              // If slicing fails, silently fall back to using the full processed audio URL.
+            }
+          }),
+        );
+        setSegmentUrls(urls);
       }
-      const audioBlob = await response.blob();
 
-      // Step 2: Detect silences, cut audio, and build cut map via FFmpeg WASM.
-      setPreparingStage('removing');
-      const {
-        processedBlob,
-        speechSegments,
-        cutMapLines: newCutMap,
-      } = await removeSilencesFromVocals(audioBlob);
-      setCutMapLines(newCutMap);
-
-      // Update the processed vocals player URL and the speech segments list.
-      if (processedAudioUrlRef.current) {
-        URL.revokeObjectURL(processedAudioUrlRef.current);
+      if (!processedBlob) {
+        throw new Error('Processed audio not available');
       }
-      const newProcessedUrl = URL.createObjectURL(processedBlob);
-      processedAudioUrlRef.current = newProcessedUrl;
-      setProcessedAudioUrl(newProcessedUrl);
-      // Only expose true speech segments to the UI players.
-      const speechOnly = speechSegments.filter((s) => s.type === 'speech');
-      setSpeechSegments(speechOnly);
-
-      // Create per-segment sliced audio Blobs and object URLs so each
-      // rendered player has its own bounded audio file representing the
-      // exact segment duration.
-      // Revoke any existing segment URLs first.
-      Object.values(segmentUrlsRef.current).forEach((u) => URL.revokeObjectURL(u));
-      segmentUrlsRef.current = {};
-      const urls: Record<number, string> = {};
-      await Promise.all(
-        speechOnly.map(async (seg, idx) => {
-          try {
-            const blob = await sliceWavBlob(processedBlob, seg.processedStart, seg.processedEnd);
-            const url = URL.createObjectURL(blob);
-            urls[idx] = url;
-            segmentUrlsRef.current[idx] = url;
-          } catch {
-            // If slicing fails, silently fall back to using the full processed audio URL.
-          }
-        }),
-      );
-      setSegmentUrls(urls);
 
       // Step 3: Decode processed WAV to Float32Array for the transcription worker.
       setPreparingStage('decoding');
@@ -398,6 +422,14 @@ export function TranscriptionDialog({
                     {modelLabel(model, transcriber.settings.quantized)}
                   </MenuItem>
                 ))}
+                {/* If the current model isn't in the filtered availableModels,
+                    render a fallback MenuItem so the Select value is valid
+                    for MUI and no warning is emitted. */}
+                {!currentModelPresent && transcriber.settings.model && (
+                  <MenuItem value={transcriber.settings.model}>
+                    {transcriber.settings.model}
+                  </MenuItem>
+                )}
               </Select>
             </FormControl>
             <FormControlLabel
