@@ -9,6 +9,16 @@ export interface TranscriptionProgressItem {
 
 export interface TranscriptChunk {
   text: string;
+  /**
+   * Timestamp range relative to the processed (silence-removed) audio.
+   * This value is always provided by the transcription worker as it
+   * produces streaming updates.
+   */
+  processedTimestamp: [number, number | null];
+  /**
+   * Timestamp range remapped to the original vocals timeline. When a
+   * remapping is not available yet this will equal `processedTimestamp`.
+   */
   timestamp: [number, number | null];
 }
 

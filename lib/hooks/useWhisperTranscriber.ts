@@ -26,6 +26,7 @@ function filterBacktrackingChunks(
   let maxEndTime = -1;
 
   return chunks.filter((chunk) => {
+    // Prefer the remapped/original timeline for backtracking detection.
     const start = chunk.timestamp[0];
 
     if (start < maxEndTime) {
@@ -165,19 +166,44 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
             }),
           );
           break;
-        case 'update':
+        case 'update': {
+          // Streaming update from the worker: message.data[1].chunks contains
+          // timestamps relative to the processed (silence-removed) audio.
+          const processedChunks = message.data[1].chunks;
+          const remapped = remapWordTimestamps(
+            processedChunks,
+            speechSegmentsRef.current,
+          );
+          const enriched = processedChunks.map((pc, i) => ({
+            text: pc.text,
+            processedTimestamp: pc.timestamp,
+            // remapWordTimestamps keeps ordering, so remapped[i] exists.
+            timestamp: remapped[i].timestamp,
+          }));
+
           setOutput({
             isBusy: true,
             text: message.data[0],
-            chunks: message.data[1].chunks,
+            chunks: enriched,
           });
           break;
+        }
         case 'complete': {
+          // On completion, remap processed timestamps to the original timeline
+          // and preserve the original processed timestamps for UI display.
+          const processedChunks = message.data.chunks;
           const remapped = remapWordTimestamps(
-            message.data.chunks,
+            processedChunks,
             speechSegmentsRef.current,
           );
-          const filtered = filterBacktrackingChunks(remapped);
+
+          const remappedWithProcessed = remapped.map((r, i) => ({
+            text: r.text,
+            timestamp: r.timestamp,
+            processedTimestamp: processedChunks[i].timestamp,
+          }));
+
+          const filtered = filterBacktrackingChunks(remappedWithProcessed);
           setOutput({
             isBusy: false,
             text: filtered.map((c) => c.text).join(''),

@@ -45,24 +45,52 @@ export function remapTimestamp(
  * Remaps word-level timestamps from the processed (silence-removed) audio
  * timeline back to the original vocals audio timeline.
  *
- * @param words - Whisper word chunks containing processed-audio timestamps.
+ * The function accepts word objects that may optionally include a
+ * `processedTimestamp` field (the original timestamps emitted by the
+ * transcription worker). When present the returned objects will preserve
+ * `processedTimestamp` and set `timestamp` to the remapped original-audio
+ * coordinates. When `processedTimestamp` is absent we treat the incoming
+ * `timestamp` as the processed timeline and return an object that includes
+ * `processedTimestamp` (copied from the input) as well as the remapped
+ * `timestamp`.
+ *
+ * @param words - Array of word chunks. Each item must contain `text` and
+ *  `timestamp` (processed-audio range). It may also include
+ *  `processedTimestamp` in cases where upstream code already attached it.
  * @param segments - Speech segment cut map from {@link removeSilencesFromVocals}.
- * @returns New array with identical words but original-audio timestamps.
+ * @returns New array with words carrying both `processedTimestamp` and
+ *  a remapped `timestamp` aligned to the original vocals audio timeline.
  */
 export function remapWordTimestamps(
-  words: Array<{ text: string; timestamp: [number, number | null] }>,
+  words: Array<{
+    text: string;
+    timestamp: [number, number | null];
+    processedTimestamp?: [number, number | null];
+  }>,
   segments: SpeechSegment[],
-): Array<{ text: string; timestamp: [number, number | null] }> {
-  if (segments.length === 0) return words;
+): Array<{
+  text: string;
+  timestamp: [number, number | null];
+  processedTimestamp: [number, number | null];
+}> {
+  if (segments.length === 0) {
+    // If there's no cut map, normalize shape: ensure processedTimestamp exists
+    return words.map((word) => ({
+      text: word.text,
+      processedTimestamp: 'processedTimestamp' in word ? word.processedTimestamp! : word.timestamp,
+      timestamp: 'processedTimestamp' in word ? word.timestamp : word.timestamp,
+    }));
+  }
 
   return words.map((word) => {
-    const [start, end] = word.timestamp;
+    const processed = 'processedTimestamp' in word ? word.processedTimestamp! : word.timestamp;
+    const [start, end] = processed;
+    const origStart = remapTimestamp(start, segments);
+    const origEnd = end !== null ? remapTimestamp(end, segments) : null;
     return {
-      ...word,
-      timestamp: [
-        remapTimestamp(start, segments),
-        end !== null ? remapTimestamp(end, segments) : null,
-      ] as [number, number | null],
+      text: word.text,
+      processedTimestamp: processed,
+      timestamp: [origStart, origEnd] as [number, number | null],
     };
   });
 }
