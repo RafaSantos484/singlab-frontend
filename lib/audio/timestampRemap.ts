@@ -64,8 +64,16 @@ export function remapTimestamp(
         }
       }
 
-      // Default: map linearly within this segment.
-      return seg.originalStart + (processedTime - seg.processedStart);
+      // Default: map proportionally within this segment. Processed and
+      // original segments may have different durations (for example when
+      // silences are normalized to a fixed Tb). We scale the processed
+      // offset into the original span so remapped timestamps remain
+      // consistent with the original audio timeline.
+      const processedSpan = seg.processedEnd - seg.processedStart;
+      const originalSpan = seg.originalEnd - seg.originalStart;
+      if (processedSpan <= 0) return seg.originalStart;
+      const ratio = originalSpan / processedSpan;
+      return seg.originalStart + (processedTime - seg.processedStart) * ratio;
     }
   }
 
