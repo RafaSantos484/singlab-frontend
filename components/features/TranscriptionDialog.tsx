@@ -33,6 +33,8 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import ReplayIcon from '@mui/icons-material/Replay';
 import { useLocale, useTranslations } from 'next-intl';
 import { removeSilencesFromVocals, type SpeechSegment } from '@/lib/audio/ffmpegVocals';
+import sliceWavBlob from '@/lib/audio/sliceWav';
+import { SegmentPlayers } from '@/components/features/SegmentPlayers';
 import { useLyricsAdaptation } from '@/lib/hooks/useLyricsAdaptation';
 import { useWhisperTranscriber } from '@/lib/hooks/useWhisperTranscriber';
 import { LLM_MODEL_ID } from '@/lib/transcription/lyricsAdapter';
@@ -150,6 +152,9 @@ export function TranscriptionDialog({
     null,
   );
   const [speechSegments, setSpeechSegments] = useState<SpeechSegment[]>([]);
+  const [segmentUrls, setSegmentUrls] = useState<Record<number, string>>({});
+  const segmentUrlsRef = useRef<Record<number, string>>({});
+  const [showSegmentPlayers, setShowSegmentPlayers] = useState<boolean>(false);
 
   const isPreparingAudio = preparingStage !== null;
   const isEnglishLocale = locale.toLowerCase().startsWith('en');
@@ -181,6 +186,11 @@ export function TranscriptionDialog({
         processedAudioUrlRef.current = null;
       }
       setProcessedAudioUrl(null);
+      // Revoke any per-segment URLs
+      Object.values(segmentUrlsRef.current).forEach((u) => URL.revokeObjectURL(u));
+      segmentUrlsRef.current = {};
+      setSegmentUrls({});
+      // clear any internal references
       lyricsAdaptationReset();
     }
   }, [open, lyricsAdaptationReset]);
@@ -263,14 +273,38 @@ export function TranscriptionDialog({
       processedAudioUrlRef.current = newProcessedUrl;
       setProcessedAudioUrl(newProcessedUrl);
       // Only expose true speech segments to the UI players.
-      setSpeechSegments(speechSegments.filter((s) => s.type === 'speech'));
+      const speechOnly = speechSegments.filter((s) => s.type === 'speech');
+      setSpeechSegments(speechOnly);
+
+      // Create per-segment sliced audio Blobs and object URLs so each
+      // rendered player has its own bounded audio file representing the
+      // exact segment duration.
+      // Revoke any existing segment URLs first.
+      Object.values(segmentUrlsRef.current).forEach((u) => URL.revokeObjectURL(u));
+      segmentUrlsRef.current = {};
+      const urls: Record<number, string> = {};
+      await Promise.all(
+        speechOnly.map(async (seg, idx) => {
+          try {
+            const blob = await sliceWavBlob(processedBlob, seg.processedStart, seg.processedEnd);
+            const url = URL.createObjectURL(blob);
+            urls[idx] = url;
+            segmentUrlsRef.current[idx] = url;
+          } catch {
+            // If slicing fails, silently fall back to using the full processed audio URL.
+          }
+        }),
+      );
+      setSegmentUrls(urls);
 
       // Step 3: Decode processed WAV to Float32Array for the transcription worker.
       setPreparingStage('decoding');
       const processedAudio = await decodeProcessedAudio(processedBlob);
 
       // Step 4: Start transcription. The hook remaps word timestamps after completion.
-      transcriber.start(processedAudio, speechSegments);
+      // Pass the filtered `speechOnly` array (don't rely on state being
+      // synchronously updated via setSpeechSegments).
+      transcriber.start(processedAudio, speechOnly);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : t('errors.unknown');
@@ -425,56 +459,23 @@ export function TranscriptionDialog({
               >
                 {t('processedVocalsPlayerLabel')}
               </Typography>
-              {/* Render one audio player per speech segment. Each player uses
-                  the same processed audio source but seeks to the segment's
-                  processed start and stops at its end so it plays only that
-                  fragment. */}
               <Stack spacing={1}>
-                {speechSegments.length > 0 ? (
-                  speechSegments.map((seg, i) => (
-                    <Box key={`seg-player-${i}`}>
-                      <Typography variant="caption" sx={{ fontFamily: 'monospace', display: 'block' }}>
-                        {t('timestampProcessedLabel')}: {formatTimestamp(seg.processedStart)} — {formatTimestamp(seg.processedEnd)}
-                      </Typography>
-                      <Box
-                        component="audio"
-                        controls
-                        src={processedAudioUrl}
-                        onLoadedMetadata={(e) => {
-                          const audio = e.currentTarget as HTMLAudioElement;
-                          // Ensure the element is positioned at the segment start
-                          // once metadata is available.
-                          try {
-                            audio.currentTime = Math.max(0, seg.processedStart);
-                          } catch {
-                            // Some browsers may throw if seeking before ready; ignore.
-                          }
-                        }}
-                        onPlay={(e) => {
-                          const audio = e.currentTarget as HTMLAudioElement;
-                          try {
-                            if (audio.currentTime < seg.processedStart) {
-                              audio.currentTime = Math.max(0, seg.processedStart);
-                            }
-                          } catch {
-                            // ignore seek errors
-                          }
+                <Button
+                  size="small"
+                  variant="text"
+                  onClick={() => setShowSegmentPlayers((s) => !s)}
+                  sx={{ mb: 0.5, textTransform: 'none', p: 0 }}
+                >
+                  {showSegmentPlayers ? t('hideSegments') : t('showSegments')}
+                </Button>
 
-                          const onTimeUpdate = () => {
-                            if (audio.currentTime >= (seg.processedEnd ?? Infinity)) {
-                              audio.pause();
-                              audio.removeEventListener('timeupdate', onTimeUpdate);
-                            }
-                          };
-                          audio.addEventListener('timeupdate', onTimeUpdate);
-                        }}
-                        sx={{ width: '100%', display: 'block' }}
-                      />
-                    </Box>
-                  ))
-                ) : (
-                  <Box component="audio" controls src={processedAudioUrl} sx={{ width: '100%', display: 'block' }} />
-                )}
+                <SegmentPlayers
+                  speechSegments={speechSegments}
+                  segmentUrls={segmentUrls}
+                  processedAudioUrl={processedAudioUrl}
+                  show={showSegmentPlayers}
+                  t={(k, p) => t(k as any, p as any)}
+                />
               </Stack>
             </Box>
           )}
@@ -678,7 +679,14 @@ export function TranscriptionDialog({
                 fullWidth
                 value={lyricsAdaptation.lyrics}
                 onChange={(e) => lyricsAdaptation.setLyrics(e.target.value)}
-                disabled={adaptationControlsDisabled}
+                // Keep the lyrics input enabled during async events; only
+                // disable it when the adaptation model is loading or an
+                // adaptation batch is actively running or when retrying.
+                disabled={
+                  lyricsAdaptation.state.phase === 'loading-model' ||
+                  lyricsAdaptation.state.phase === 'adapting' ||
+                  lyricsAdaptation.retryingIndex !== null
+                }
                 inputProps={{
                   'aria-label': t('lyricsAdaptation.lyricsInputLabel'),
                 }}
