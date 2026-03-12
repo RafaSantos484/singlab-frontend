@@ -32,7 +32,6 @@ export interface TranscriptionSettings {
   model: string;
   multilingual: boolean;
   quantized: boolean;
-  subtask: 'transcribe' | 'translate';
   language: string;
 }
 
@@ -41,7 +40,6 @@ export interface WorkerTranscriptionRequest {
   model: string;
   multilingual: boolean;
   quantized: boolean;
-  subtask: 'transcribe' | 'translate' | null;
   language: string | null;
   /** Index of the speech segment when transcribing per-segment. */
   segmentIndex: number;

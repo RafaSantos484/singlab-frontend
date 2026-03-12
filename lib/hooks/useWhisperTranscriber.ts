@@ -54,7 +54,7 @@ interface UseWhisperTranscriberResult {
   setModel: (model: string) => void;
   setMultilingual: (value: boolean) => void;
   setQuantized: (value: boolean) => void;
-  setSubtask: (subtask: 'transcribe' | 'translate') => void;
+  // `subtask` removed — transcription always uses 'transcribe'
   setLanguage: (language: string) => void;
   start: (
     processedAudio: Float32Array,
@@ -79,38 +79,15 @@ function createWorker(): Worker {
  * Handles model loading (quantized or full precision), inference on
  * silence-removed audio, streaming progress updates, and incremental
  * transcript chunks. Supports multilingual transcription with configurable
- * language and task (transcribe or translate).
+ * language.
  *
- * **Silence-removal pipeline:**
- * The caller (e.g. TranscriptionDialog) is responsible for running FFmpeg
- * silence removal before calling `start()`. The hook receives the processed
- * audio and a speech segment cut map. After the worker returns word-level
- * timestamps relative to the processed audio, the hook automatically:
- * 1. Remaps them back to the original vocals timeline using the cut map.
- * 2. Filters out any backtracking chunks — segments whose start timestamp
- *    regresses below the highest end time seen so far — to eliminate
- *    duplicates produced when Whisper re-processes already-transcribed audio.
- *
- * **States:**
- * - `isBusy` — transcription is running
- * - `isModelLoading` — model is downloading and initializing
- * - `isStopping` — graceful stop in progress
- * - `progressItems` — array of model/inference progress events
- * - `output` — transcript with timestamps remapped to the original audio
- * - `settings` — model, quantization, language, task configuration
- *
- * **Controls:**
- * - `start(processedAudio, speechSegments)` — begin transcription on
- *   silence-removed audio with its corresponding cut map
- * - `stop()` — gracefully halt transcription; worker disposes pipeline
- * - `reset()` — clear output and progress; ready for new session
- * - `setModel/setMultilingual/setQuantized/setLanguage/setSubtask` — configure
- *
- * **Pending Activity:**
- * Calls `startPendingActivity()` during transcription to integrate with
- * navigation guards (prevents leaving page mid-transcription).
- *
- * @returns Hook result with state, controls, and settings setter functions.
+ * Notes:
+ * - This hook implements a per-segment transcription flow: the caller
+ *   provides processed (silence-removed) audio and an array of speech
+ *   segments. Each segment is sent to the worker independently and the
+ *   hook assembles the final transcript from per-segment completions.
+ * - The previous `subtask`/translate option has been removed; the app
+ *   performs transcription-only per segment.
  */
 export function useWhisperTranscriber(): UseWhisperTranscriberResult {
   const workerRef = useRef<Worker | null>(null);
@@ -196,21 +173,19 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
           break;
         }
         case 'complete': {
-            // Per-segment completion: worker returns `{ text, segmentIndex }`.
-            // Resolve the pending promise created in `start()` so that the
-            // sequential transcription loop can continue and assemble chunks
-            // using the silence map timestamps.
-            if (message.status === 'complete') {
-              const data = message.data as any;
-              const idx = data.segmentIndex as number;
-              const text = data.text as string;
-              const resolver = pendingSegmentResolversRef.current.get(idx);
-              if (resolver) {
-                resolver(text);
-                pendingSegmentResolversRef.current.delete(idx);
-              }
-            }
-            break;
+          // Per-segment completion: worker returns `{ text, segmentIndex }`.
+          // Resolve the pending promise created in `start()` so that the
+          // sequential transcription loop can continue and assemble chunks
+          // using the silence map timestamps.
+          const data = message.data as any;
+          const idx = data.segmentIndex as number;
+          const text = data.text as string;
+          const resolver = pendingSegmentResolversRef.current.get(idx);
+          if (resolver) {
+            resolver(text);
+            pendingSegmentResolversRef.current.delete(idx);
+          }
+          break;
         }
         case 'initiate':
           setIsModelLoading(true);
@@ -333,7 +308,6 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
     setSettings((previous) => ({
       ...previous,
       multilingual: value,
-      subtask: value ? previous.subtask : 'transcribe',
       language: value ? previous.language : 'auto',
     }));
   }, []);
@@ -344,16 +318,6 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
       quantized: value,
     }));
   }, []);
-
-  const setSubtask = useCallback(
-    (subtask: 'transcribe' | 'translate'): void => {
-      setSettings((previous) => ({
-        ...previous,
-        subtask,
-      }));
-    },
-    [],
-  );
 
   const setLanguage = useCallback((language: string): void => {
     setSettings((previous) => ({
@@ -400,18 +364,19 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
           });
 
           // Post transcription request for this segment.
+          // Transfer the underlying ArrayBuffer to the worker to avoid
+          // copying large Float32Array buffers on each segment.
           worker.postMessage({
             audio: segmentAudio,
             model: settings.model,
             multilingual: settings.multilingual,
             quantized: settings.quantized,
-            subtask: settings.multilingual ? settings.subtask : null,
             language:
               settings.multilingual && settings.language !== 'auto'
                 ? settings.language
                 : null,
             segmentIndex: i,
-          } satisfies WorkerRequest);
+          } satisfies WorkerRequest, [segmentAudio.buffer]);
 
           // Await result and build a chunk using the silence map timings.
           const text = await textPromise;
@@ -453,7 +418,6 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
       setModel,
       setMultilingual,
       setQuantized,
-      setSubtask,
       setLanguage,
       start,
       stop,
@@ -471,7 +435,6 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
       setModel,
       setMultilingual,
       setQuantized,
-      setSubtask,
       settings,
       start,
       stop,

@@ -31,16 +31,7 @@ export const WHISPER_MODEL_OPTIONS: WhisperModelOption[] = [
     quantizedSizeMb: 249,
     supportsMultilingual: true,
   },
-  {
-    id: 'Xenova/whisper-medium',
-    quantizedSizeMb: 776,
-    supportsMultilingual: true,
-  },
-  {
-    id: 'distil-whisper/distil-medium.en',
-    quantizedSizeMb: 402,
-    supportsMultilingual: false,
-  },
+  // Note: distil variants removed — not used by this application.
 ];
 
 export const WHISPER_LANGUAGE_OPTIONS: WhisperLanguageOption[] = [
@@ -60,7 +51,6 @@ export const DEFAULT_TRANSCRIPTION_SETTINGS: TranscriptionSettings = {
   model: 'Xenova/whisper-tiny',
   multilingual: false,
   quantized: true,
-  subtask: 'transcribe',
   language: 'auto',
 };
 
