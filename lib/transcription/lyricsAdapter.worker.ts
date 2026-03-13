@@ -269,13 +269,8 @@ async function adaptChunk(
 
 let activeJobId = -1;
 
-/**
- * Maximum number of automatic retries performed for unmatched chunks during a
- * batch `adapt` run. Mirrors the manual retry button so that `retryCount` on
- * the returned chunk accurately reflects all prior attempts, and the user's
- * first manual retry continues from where the automatic ones left off.
- */
-const MAX_AUTO_RETRIES = 3;
+// Automatic retries removed: manual retry via UI remains available.
+// This worker no longer performs any automatic retry attempts.
 
 // ---------------------------------------------------------------------------
 // Message handler
@@ -438,32 +433,9 @@ async function handleMessage(request: LyricsAdapterRequest): Promise<void> {
         onProgress,
       );
 
-      // Automatically retry unmatched chunks up to MAX_AUTO_RETRIES times,
-      // escalating the prompt breadth on each attempt. This mirrors the manual
-      // retry button so that retryCount reflects all attempts — if the user
-      // triggers an additional manual retry afterwards, the count continues
-      // from here rather than restarting from 1.
-      let autoRetryCount = 0;
-      while (
-        adapted.status === 'unmatched' &&
-        autoRetryCount < MAX_AUTO_RETRIES &&
-        activeJobId === jobId
-      ) {
-        autoRetryCount += 1;
-        console.debug(
-          `[lyricsAdapter.worker] auto-retry ${autoRetryCount}/${MAX_AUTO_RETRIES} — ` +
-            `jobId=${jobId} index=${i}`,
-        );
-        adapted = await adaptChunk(
-          verse,
-          lyricsLines,
-          lyrics,
-          false, // always use LLM on auto-retry
-          jobId,
-          autoRetryCount,
-          onProgress,
-        );
-      }
+      // Note: automatic retries were intentionally removed. If the chunk
+      // remains 'unmatched' the UI may allow the user to trigger a manual
+      // retry (via `retry-chunk`) after the initial LLM pass completes.
 
       if (activeJobId !== jobId) break;
 
@@ -475,7 +447,7 @@ async function handleMessage(request: LyricsAdapterRequest): Promise<void> {
         timestamp: chunk.timestamp,
         status: adapted.status,
         score: adapted.score,
-        retryCount: autoRetryCount,
+        retryCount: 0,
       };
       results.push(result);
       self.postMessage({
