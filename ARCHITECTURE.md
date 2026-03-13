@@ -100,15 +100,27 @@ Components are split into two groups:
           help tooltip): the user pastes the canonical song lyrics, and a
           Flan-T5 LLM (running in a dedicated Web Worker via transformers.js)
           aligns each Whisper chunk to the closest lyric span using Levenshtein
-          similarity + optional LLM text2text refinement. During the batch run,
-          the worker performs a single LLM pass per chunk and does not run
-          automatic retry loops. If a chunk remains unmatched it is returned
-          as `unmatched` and the UI exposes a manual `retry` action that
-          re-adapts that specific chunk with an escalated prompt. Results are
-          colour-coded (`matched` / `corrected` / `unmatched`), with a retry
-          count badge on chunks that have been manually retried. The LLM model
-          is downloaded and cached on first use; subsequent runs reuse the warm
-          pipeline from the worker.
+          similarity plus an optional LLM text2text refinement. The initial
+          adaptation pass runs once per chunk inside the worker and returns an
+          `AdaptedChunk` result for each segment. After the first pass the
+          client-side hook `useLyricsAdaptation` may automatically run an
+          iterative, bounded auto-retry pass over any remaining `unmatched`
+          segments: each retry narrows the lyric prompt to a bounded excerpt
+          derived from the nearest resolved neighbours and re-dispatches a
+          per-chunk retry request to the worker. This auto-retry loop repeats
+          until no further segments are newly resolved in a round or all
+          segments become resolved. Manual `retry` remains available in the
+          UI and behaves identically to a single explicit retry request.
+
+          Results are colour-coded (`matched` / `corrected` / `unmatched`),
+          with a retry count badge on chunks that have been retried (manual or
+          automatic). The worker and adapter types now include optional
+          `lyricIdxStart`/`lyricIdxEnd` fields that indicate the matched line
+          range in the full parsed lyrics array; retry requests may set
+          `isBoundedRetry` and `lyricsLineOffset` so that bounded excerpts and
+          returned indexes remain aligned with the full-lyrics coordinates.
+          The LLM model is downloaded and cached on first use; subsequent
+          runs reuse the warm pipeline from the worker.
      - `SingingPracticeDialog` — synchronized practice experience with
           dual pitch tracking (vocals stem + user microphone), seek controls,
           dynamic pitch axis, and graceful fallback when Storage CORS blocks
