@@ -272,7 +272,6 @@ function buildOutputIntervals(
     }
 
     // Silence interval
-    const silenceDuration = iv.end - iv.start;
     const isLeading = firstSpeechIdx === -1 || idx < firstSpeechIdx;
     const isTrailing =
       lastSpeechIdxFromStart === -1 || idx > lastSpeechIdxFromStart;

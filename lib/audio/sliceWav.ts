@@ -18,8 +18,8 @@ export async function sliceWavBlob(
   endSeconds: number,
 ): Promise<Blob> {
   let ab: ArrayBuffer;
-  if (wavBlob && typeof (wavBlob as any).arrayBuffer === 'function') {
-    ab = await (wavBlob as any).arrayBuffer();
+  if (typeof (Object(wavBlob) as Blob).arrayBuffer === 'function') {
+    ab = await (wavBlob as Blob).arrayBuffer();
   } else if (wavBlob instanceof ArrayBuffer) {
     ab = wavBlob;
   } else if (ArrayBuffer.isView(wavBlob)) {

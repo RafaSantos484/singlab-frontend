@@ -47,9 +47,6 @@ interface DecodeChunk {
   is_last?: boolean;
 }
 
-interface TokenItem {
-  output_token_ids: number[];
-}
 
 type DecodeResult = [
   string,
@@ -152,7 +149,6 @@ async function disposeCurrentPipeline(): Promise<void> {
 
 async function transcribe(
   request: WorkerTranscriptionRequest,
-  jobToken: number,
 ): Promise<WhisperPipelineResult | null> {
   // Per-segment transcription is the application default. Choose chunk and
   // stride sizes appropriate for short isolated segments.
@@ -222,7 +218,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerRequest>) => {
 
   const jobToken = activeJobToken + 1;
   activeJobToken = jobToken;
-  const transcript = await transcribe(event.data, jobToken);
+  const transcript = await transcribe(event.data);
   if (!transcript) {
     return;
   }
@@ -231,7 +227,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerRequest>) => {
     return;
   }
 
-  self.postMessage({
+    self.postMessage({
     status: 'complete',
     task: 'automatic-speech-recognition',
     // Per-segment completion: always return `{ text, segmentIndex }` so
@@ -239,7 +235,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerRequest>) => {
     // speech interval from the silence map.
     data: {
       text: transcript.text,
-      segmentIndex: (event.data as any).segmentIndex,
+        segmentIndex: (event.data as WorkerTranscriptionRequest).segmentIndex,
     },
   } satisfies WorkerMessage);
 });

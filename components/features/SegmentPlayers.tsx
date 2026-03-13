@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Box, Button, Collapse, Typography } from '@mui/material';
+import { Box, Collapse, Typography } from '@mui/material';
 import type { SpeechSegment } from '@/lib/audio/ffmpegVocals';
 
 interface Props {

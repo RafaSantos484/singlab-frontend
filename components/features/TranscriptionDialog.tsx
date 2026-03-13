@@ -350,7 +350,7 @@ export function TranscriptionDialog({
     } finally {
       setPreparingStage(null);
     }
-  }, [t, transcriber, vocalsUrl]);
+  }, [t, transcriber, vocalsUrl, speechSegments]);
 
   const canStart =
     Boolean(vocalsUrl) &&
@@ -540,7 +540,7 @@ export function TranscriptionDialog({
                   segmentUrls={segmentUrls}
                   processedAudioUrl={processedAudioUrl}
                   show={showSegmentPlayers}
-                  t={(k, p) => t(k as any, p as any)}
+                  t={t as unknown as (key: string, params?: Record<string, unknown>) => string}
                 />
               </Stack>
             </Box>

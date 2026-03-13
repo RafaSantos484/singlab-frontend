@@ -16,6 +16,8 @@ import type {
   WorkerRequest,
   TranscriptionSettings,
   WorkerMessage,
+  WorkerTranscriptionCompleteMessage,
+  WorkerErrorMessage,
 } from '@/lib/transcription/types';
 
 /**
@@ -23,27 +25,7 @@ import type {
  * seen so far. This eliminates duplicate/repeated segments produced when
  * Whisper backtracks over already-transcribed audio.
  */
-function filterBacktrackingChunks(
-  chunks: TranscriptChunk[],
-): TranscriptChunk[] {
-  let maxEndTime = -1;
-
-  return chunks.filter((chunk) => {
-    // Prefer the remapped/original timeline for backtracking detection.
-    const start = chunk.timestamp[0];
-
-    if (start < maxEndTime) {
-      return false;
-    }
-
-    const end = chunk.timestamp[1];
-    if (end !== null && end > maxEndTime) {
-      maxEndTime = end;
-    }
-
-    return true;
-  });
-}
+// Backtracking filter removed (unused in current flow).
 
 interface UseWhisperTranscriberResult {
   isBusy: boolean;
@@ -100,37 +82,39 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
   const safeT = useCallback(
     (key: string, params?: Record<string, unknown>): string => {
       try {
-        const translated = t(key as any, params as any);
+        const translated = t(key as unknown as Parameters<typeof t>[0], params as unknown as Parameters<typeof t>[1]);
         if (typeof translated === 'string' && translated !== key) {
           return translated;
         }
-      } catch (_) {
+      } catch {
         // ignore and fallback
       }
 
       // Fallback to English messages bundle
       try {
         const parts = key.split('.');
-        let cur: any = enUSMessages.Transcription;
+        let cur: unknown = (enUSMessages as unknown as Record<string, unknown>)['Transcription'];
         for (const p of parts) {
-          if (!cur) break;
-          cur = cur[p];
+          if (!cur || typeof cur !== 'object') break;
+          cur = (cur as Record<string, unknown>)[p];
         }
         if (typeof cur === 'string') {
           if (params && typeof params === 'object') {
             return Object.keys(params).reduce((acc, k) => {
-              return acc.replace(new RegExp(`\\{${k}\\}`, 'g'), String((params as any)[k]));
+              const v = (params as Record<string, unknown>)[k];
+              return acc.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v));
             }, cur);
           }
           return cur;
         }
-      } catch (_) {
+      } catch {
         // ignore
       }
 
       // Final generic fallback
-      if (params && (params as any).suggestion) {
-        return `The model failed to run due to insufficient memory. Try a lighter model (e.g., ${(params as any).suggestion}) or enable quantized mode.`;
+      const suggestion = params && (params as Record<string, unknown>)['suggestion'];
+      if (suggestion) {
+        return `The model failed to run due to insufficient memory. Try a lighter model (e.g., ${String(suggestion)}) or enable quantized mode.`;
       }
       return 'The model failed to run due to insufficient memory. Try a lighter model or enable quantized mode.';
     },
@@ -140,8 +124,6 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
   const speechSegmentsRef = useRef<SpeechSegment[]>([]);
   // Pending resolvers for per-segment transcription results.
   const pendingSegmentResolversRef = useRef<Map<number, (text: string) => void>>(new Map());
-  // Keep the last speech segments so the dialog can render per-segment players.
-  const lastSpeechSegmentsRef = useRef<SpeechSegment[]>([]);
 
   const [output, setOutput] = useState<TranscriptionOutput | undefined>(
     undefined,
@@ -223,9 +205,9 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
           // Resolve the pending promise created in `start()` so that the
           // sequential transcription loop can continue and assemble chunks
           // using the silence map timestamps.
-          const data = message.data as any;
-          const idx = data.segmentIndex as number;
-          const text = data.text as string;
+          const completeMsg = message as WorkerTranscriptionCompleteMessage;
+          const idx = completeMsg.data.segmentIndex;
+          const text = completeMsg.data.text;
           const resolver = pendingSegmentResolversRef.current.get(idx);
           if (resolver) {
             resolver(text);
@@ -255,12 +237,12 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
         case 'ready':
           setIsModelLoading(false);
           break;
-        case 'error':
+        case 'error': {
           setIsBusy(false);
           setIsModelLoading(false);
           try {
-            const raw = (message.data && (message.data as any).message) || '';
-            const lower = String(raw).toLowerCase();
+            const errMsg = (message as WorkerErrorMessage).data?.message ?? '';
+            const lower = String(errMsg).toLowerCase();
             // Detect common out-of-memory signatures reported by Xenova/ONNX runtime
             if (
               lower.includes('error code = 6') ||
@@ -275,16 +257,17 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
               // Use safe translate for generic transcription errors when
               // possible; otherwise fall back to the raw message.
               try {
-                setError(safeT('errors.transcription', { message: raw }));
+                setError(safeT('errors.transcription', { message: errMsg }));
               } catch {
-                setError(raw || '');
+                setError(errMsg || '');
               }
             }
-          } catch (e) {
+          } catch {
             setError('');
           }
           endPendingActivity();
           break;
+        }
         case 'stopped':
           setIsBusy(false);
           setIsModelLoading(false);
@@ -295,7 +278,7 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
           break;
       }
     },
-    [endPendingActivity],
+    [endPendingActivity, safeT],
   );
 
   const createAndBindWorker = useCallback((): Worker => {
@@ -418,7 +401,7 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
       // the silence map is used as the timing source of truth.
       (async () => {
         const sr = TRANSCRIPTION_SAMPLE_RATE;
-        const chunks: any[] = [];
+        const chunks: TranscriptChunk[] = [];
 
         for (let i = 0; i < speechOnly.length; i++) {
           const seg = speechOnly[i];
@@ -467,7 +450,7 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
         endPendingActivity();
       })();
     },
-    [beginPendingActivity, createAndBindWorker, settings],
+    [beginPendingActivity, createAndBindWorker, settings, endPendingActivity],
   );
 
   const reset = useCallback((): void => {
