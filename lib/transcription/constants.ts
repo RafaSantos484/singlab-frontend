@@ -29,17 +29,8 @@ export const WHISPER_MODEL_OPTIONS: WhisperModelOption[] = [
   {
     id: 'Xenova/whisper-small',
     quantizedSizeMb: 249,
+    fullPrecisionSizeMb: 920,
     supportsMultilingual: true,
-  },
-  {
-    id: 'Xenova/whisper-medium',
-    quantizedSizeMb: 776,
-    supportsMultilingual: true,
-  },
-  {
-    id: 'distil-whisper/distil-medium.en',
-    quantizedSizeMb: 402,
-    supportsMultilingual: false,
   },
 ];
 
@@ -57,10 +48,12 @@ export const WHISPER_LANGUAGE_OPTIONS: WhisperLanguageOption[] = [
 ];
 
 export const DEFAULT_TRANSCRIPTION_SETTINGS: TranscriptionSettings = {
-  model: 'Xenova/whisper-tiny',
+  // Default to a quantized `whisper-base` model to reduce memory
+  // requirements on typical client devices. Users may switch models
+  // or disable `quantized` in the Transcription dialog if desired.
+  model: 'Xenova/whisper-base',
   multilingual: false,
   quantized: true,
-  subtask: 'transcribe',
   language: 'auto',
 };
 

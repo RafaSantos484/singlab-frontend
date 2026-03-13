@@ -110,3 +110,12 @@ npm run dev
 npm install        # sync dependencies
 npm run type-check # verify
 ```
+
+### Linting / Pre-commit checks
+
+Before committing changes, run the linter and type-check to catch issues early:
+
+```bash
+npm run lint
+npm run type-check
+```

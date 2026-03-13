@@ -14,7 +14,7 @@
     "test:coverage": "jest --coverage",
     "generate-ai-commit-prompt": "tsx scripts/generate-ai-commit-prompt.ts --out scripts/ai-commit-prompt.txt --max-lines 12000",
     "generate-ai-pr-prompt": "tsx scripts/generate-ai-pr-prompt.ts --out scripts/ai-pr-prompt.txt --max-lines 12000",
-    "generate-project-dump": "tsx scripts/generate-project-dump.ts --out scripts/project-code.txt app components lib hooks providers styles utils context messages middleware.ts .github/copilot-instructions .github/copilot-instructions.md"
+    "generate-project-dump": "tsx scripts/generate-project-dump.ts --out scripts/project-code.txt"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
