@@ -446,6 +446,7 @@
       "editConfirmAriaLabel": "Confirmar edição",
       "editCancelTooltip": "Cancelar edição",
       "editCancelAriaLabel": "Cancelar edição",
+      "autoRetrying": "Repetindo automaticamente os segmentos sem correspondência com contexto limitado de letra…",
       "status": {
         "matched": "Correspondência",
         "corrected": "Corrigido",

@@ -448,6 +448,7 @@
       "editConfirmAriaLabel": "Confirm edit",
       "editCancelTooltip": "Cancel edit",
       "editCancelAriaLabel": "Cancel edit",
+      "autoRetrying": "Automatically retrying unmatched segments with bounded lyric context…",
       "status": {
         "matched": "Matched",
         "corrected": "Corrected",

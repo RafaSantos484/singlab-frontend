@@ -856,6 +856,14 @@ export function TranscriptionDialog({
               {/* Results */}
               {lyricsAdaptation.state.phase === 'done' && (
                 <>
+                  {lyricsAdaptation.isAutoRetrying && (
+                    <Alert
+                      severity="info"
+                      icon={<CircularProgress size={16} />}
+                    >
+                      {t('lyricsAdaptation.autoRetrying')}
+                    </Alert>
+                  )}
                   {lyricsAdaptation.retryError && (
                     <Alert severity="error">
                       {t('lyricsAdaptation.adaptError', {
