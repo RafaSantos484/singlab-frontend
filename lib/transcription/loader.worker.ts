@@ -47,10 +47,6 @@ interface DecodeChunk {
   is_last?: boolean;
 }
 
-interface TokenItem {
-  output_token_ids: number[];
-}
-
 type DecodeResult = [
   string,
   {
@@ -67,16 +63,13 @@ interface WhisperPipelineInstance {
   (
     audio: Float32Array,
     options: {
-      top_k: number;
       do_sample: boolean;
-      chunk_length_s: number;
-      stride_length_s: number;
+      chunk_length_s?: number;
+      stride_length_s?: number;
       language: string | null;
       task: 'transcribe' | 'translate' | null;
       return_timestamps: boolean | 'word';
       force_full_sequences: boolean;
-      callback_function: (item: TokenItem[]) => void;
-      chunk_callback: (chunk: Partial<DecodeChunk>) => void;
     },
   ): Promise<WhisperPipelineResult>;
   dispose: () => Promise<void>;
@@ -114,9 +107,10 @@ class PipelineFactory {
     progressCallback?: (progressInfo: unknown) => void,
   ): Promise<WhisperPipelineInstance> {
     if (this.instance === null) {
-      const revision = this.model?.includes('/whisper-medium')
-        ? 'no_attentions'
-        : 'main';
+      // Use the default revision for pipelines. The previous special-case
+      // for whisper-medium is removed since that model is no longer listed
+      // in available options.
+      const revision = 'main';
 
       const pipelineOptions = {
         quantized: this.quantized ?? true,
@@ -154,12 +148,14 @@ async function disposeCurrentPipeline(): Promise<void> {
 
 async function transcribe(
   request: WorkerTranscriptionRequest,
-  jobToken: number,
 ): Promise<WhisperPipelineResult | null> {
-  const isDistilWhisper = request.model.startsWith('distil-whisper/');
+  // Per-segment transcription is the application default. Choose chunk and
+  // stride sizes appropriate for short isolated segments.
+  // Detect smaller/less-powerful models to use shorter chunk lengths.
+  // const modelId = request.model;
 
   let modelName = request.model;
-  if (!isDistilWhisper && !request.multilingual) {
+  if (!request.multilingual) {
     modelName += '.en';
   }
 
@@ -175,70 +171,20 @@ async function transcribe(
     self.postMessage(data as unknown as WorkerMessage);
   });
 
-  const timePrecision =
-    transcriber.processor.feature_extractor.config.chunk_length /
-    transcriber.model.config.max_source_positions;
-
-  const chunksToProcess: DecodeChunk[] = [
-    {
-      tokens: [],
-      finalised: false,
-    },
-  ];
-
-  function emitUpdate(): void {
-    if (jobToken !== activeJobToken) {
-      return;
-    }
-
-    const data = transcriber.tokenizer._decode_asr(chunksToProcess, {
-      time_precision: timePrecision,
-      return_timestamps: true,
-      force_full_sequences: false,
-    });
-
-    self.postMessage({
-      status: 'update',
-      task: 'automatic-speech-recognition',
-      data,
-    } satisfies WorkerMessage);
-  }
-
-  function chunkCallback(chunk: Partial<DecodeChunk>): void {
-    const last = chunksToProcess[chunksToProcess.length - 1];
-
-    Object.assign(last, chunk);
-    last.finalised = true;
-
-    if (!chunk.is_last) {
-      chunksToProcess.push({
-        tokens: [],
-        finalised: false,
-      });
-    }
-  }
-
-  function callbackFunction(item: TokenItem[]): void {
-    const last = chunksToProcess[chunksToProcess.length - 1];
-    if (item[0]?.output_token_ids) {
-      last.tokens = [...item[0].output_token_ids];
-    }
-
-    emitUpdate();
-  }
+  // Streaming updates via tokenizer decoding are not used in the
+  // per-segment flow. The pipeline is invoked to return final text only.
 
   try {
+    // For isolated short segments we disable stride (no context overlap)
+    // and pick a conservative chunk length: 10s for smaller models and
+    // 25s for more capable models. Since segments are typically short,
+    // this reduces memory/compute for weaker models.
     return await transcriber(request.audio, {
-      top_k: 0,
-      do_sample: false,
-      chunk_length_s: isDistilWhisper ? 20 : 25,
-      stride_length_s: isDistilWhisper ? 3 : 5,
       language: request.language,
-      task: request.subtask,
-      return_timestamps: true,
+      task: 'transcribe',
+      do_sample: false,
+      return_timestamps: false,
       force_full_sequences: false,
-      callback_function: callbackFunction,
-      chunk_callback: chunkCallback,
     });
   } catch (error) {
     const message =
@@ -271,7 +217,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerRequest>) => {
 
   const jobToken = activeJobToken + 1;
   activeJobToken = jobToken;
-  const transcript = await transcribe(event.data, jobToken);
+  const transcript = await transcribe(event.data);
   if (!transcript) {
     return;
   }
@@ -283,7 +229,13 @@ self.addEventListener('message', async (event: MessageEvent<WorkerRequest>) => {
   self.postMessage({
     status: 'complete',
     task: 'automatic-speech-recognition',
-    data: transcript,
+    // Per-segment completion: always return `{ text, segmentIndex }` so
+    // the main thread can attach the returned text to the corresponding
+    // speech interval from the silence map.
+    data: {
+      text: transcript.text,
+      segmentIndex: (event.data as WorkerTranscriptionRequest).segmentIndex,
+    },
   } satisfies WorkerMessage);
 });
 

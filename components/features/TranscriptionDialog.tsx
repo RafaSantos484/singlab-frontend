@@ -31,8 +31,16 @@ import {
 } from '@mui/material';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import ReplayIcon from '@mui/icons-material/Replay';
+import EditIcon from '@mui/icons-material/Edit';
+import CheckIcon from '@mui/icons-material/Check';
+import CloseIcon from '@mui/icons-material/Close';
 import { useLocale, useTranslations } from 'next-intl';
-import { removeSilencesFromVocals } from '@/lib/audio/ffmpegVocals';
+import {
+  removeSilencesFromVocals,
+  type SpeechSegment,
+} from '@/lib/audio/ffmpegVocals';
+import sliceWavBlob from '@/lib/audio/sliceWav';
+import { SegmentPlayers } from '@/components/features/SegmentPlayers';
 import { useLyricsAdaptation } from '@/lib/hooks/useLyricsAdaptation';
 import { useWhisperTranscriber } from '@/lib/hooks/useWhisperTranscriber';
 import { LLM_MODEL_ID } from '@/lib/transcription/lyricsAdapter';
@@ -146,9 +154,14 @@ export function TranscriptionDialog({
   const [showCutMap, setShowCutMap] = useState(false);
 
   const processedAudioUrlRef = useRef<string | null>(null);
+  const processedBlobRef = useRef<Blob | null>(null);
   const [processedAudioUrl, setProcessedAudioUrl] = useState<string | null>(
     null,
   );
+  const [speechSegments, setSpeechSegments] = useState<SpeechSegment[]>([]);
+  const [segmentUrls, setSegmentUrls] = useState<Record<number, string>>({});
+  const segmentUrlsRef = useRef<Record<number, string>>({});
+  const [showSegmentPlayers, setShowSegmentPlayers] = useState<boolean>(false);
 
   const isPreparingAudio = preparingStage !== null;
   const isEnglishLocale = locale.toLowerCase().startsWith('en');
@@ -165,6 +178,10 @@ export function TranscriptionDialog({
     });
   }, [transcriber.settings.multilingual, transcriber.settings.quantized]);
 
+  const currentModelPresent = useMemo(() => {
+    return availableModels.some((m) => m.id === transcriber.settings.model);
+  }, [availableModels, transcriber.settings.model]);
+
   // Pause GlobalPlayer when the dialog opens.
   useEffect(() => {
     if (open) {
@@ -180,6 +197,14 @@ export function TranscriptionDialog({
         processedAudioUrlRef.current = null;
       }
       setProcessedAudioUrl(null);
+      processedBlobRef.current = null;
+      // Revoke any per-segment URLs
+      Object.values(segmentUrlsRef.current).forEach((u) =>
+        URL.revokeObjectURL(u),
+      );
+      segmentUrlsRef.current = {};
+      setSegmentUrls({});
+      // clear any internal references
       lyricsAdaptationReset();
     }
   }, [open, lyricsAdaptationReset]);
@@ -192,13 +217,24 @@ export function TranscriptionDialog({
       (model) => model.id === transcriber.settings.model,
     );
     if (!selectedModelExists && availableModels.length > 0) {
-      transcriber.setModel(availableModels[0].id);
+      // Prefer `whisper-small` as the default when using the full-precision
+      // (non-quantized) models. Otherwise fall back to the first available
+      // model (quantized default ordering).
+      if (!transcriber.settings.quantized) {
+        const preferred = availableModels.find(
+          (m) => m.id === 'Xenova/whisper-small',
+        );
+        transcriber.setModel(preferred ? preferred.id : availableModels[0].id);
+      } else {
+        transcriber.setModel(availableModels[0].id);
+      }
     }
   }, [
     availableModels,
     open,
     transcriber,
     transcriber.settings.model,
+    transcriber.settings.quantized,
     transcriber.setModel,
   ]);
 
@@ -237,37 +273,87 @@ export function TranscriptionDialog({
     }
     setAudioError(null);
     try {
-      // Step 1: Fetch vocals audio as a Blob.
-      setPreparingStage('detecting');
-      const response = await fetch(vocalsUrl);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      const audioBlob = await response.blob();
+      let processedBlob: Blob | null = null;
+      let speechOnly: SpeechSegment[] = [];
 
-      // Step 2: Detect silences, cut audio, and build cut map via FFmpeg WASM.
-      setPreparingStage('removing');
-      const {
-        processedBlob,
-        speechSegments,
-        cutMapLines: newCutMap,
-      } = await removeSilencesFromVocals(audioBlob);
-      setCutMapLines(newCutMap);
+      // If we already have a processed blob (from a previous run in this
+      // dialog session), reuse it instead of running FFmpeg again.
+      if (processedBlobRef.current && speechSegments.length > 0) {
+        processedBlob = processedBlobRef.current;
+        speechOnly = speechSegments.filter((s) => s.type === 'speech');
+      } else {
+        // Step 1: Fetch vocals audio as a Blob.
+        setPreparingStage('detecting');
+        const response = await fetch(vocalsUrl);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const audioBlob = await response.blob();
 
-      // Update the processed vocals player URL.
-      if (processedAudioUrlRef.current) {
-        URL.revokeObjectURL(processedAudioUrlRef.current);
+        // Step 2: Detect silences, cut audio, and build cut map via FFmpeg WASM.
+        setPreparingStage('removing');
+        const {
+          processedBlob: newProcessedBlob,
+          speechSegments,
+          cutMapLines: newCutMap,
+        } = await removeSilencesFromVocals(audioBlob);
+        setCutMapLines(newCutMap);
+
+        // Update the processed vocals player URL and the speech segments list.
+        if (processedAudioUrlRef.current) {
+          URL.revokeObjectURL(processedAudioUrlRef.current);
+        }
+        const newProcessedUrl = URL.createObjectURL(newProcessedBlob);
+        processedAudioUrlRef.current = newProcessedUrl;
+        setProcessedAudioUrl(newProcessedUrl);
+        // Only expose true speech segments to the UI players.
+        speechOnly = speechSegments.filter((s) => s.type === 'speech');
+        setSpeechSegments(speechOnly);
+
+        // Store processed blob for potential reuse in this dialog session.
+        processedBlobRef.current = newProcessedBlob;
+        processedBlob = newProcessedBlob;
+
+        // Create per-segment sliced audio Blobs and object URLs so each
+        // rendered player has its own bounded audio file representing the
+        // exact segment duration.
+        // Revoke any existing segment URLs first.
+        Object.values(segmentUrlsRef.current).forEach((u) =>
+          URL.revokeObjectURL(u),
+        );
+        segmentUrlsRef.current = {};
+        const urls: Record<number, string> = {};
+        await Promise.all(
+          speechOnly.map(async (seg, idx) => {
+            try {
+              const blob = await sliceWavBlob(
+                newProcessedBlob,
+                seg.processedStart,
+                seg.processedEnd,
+              );
+              const url = URL.createObjectURL(blob);
+              urls[idx] = url;
+              segmentUrlsRef.current[idx] = url;
+            } catch {
+              // If slicing fails, silently fall back to using the full processed audio URL.
+            }
+          }),
+        );
+        setSegmentUrls(urls);
       }
-      const newProcessedUrl = URL.createObjectURL(processedBlob);
-      processedAudioUrlRef.current = newProcessedUrl;
-      setProcessedAudioUrl(newProcessedUrl);
+
+      if (!processedBlob) {
+        throw new Error('Processed audio not available');
+      }
 
       // Step 3: Decode processed WAV to Float32Array for the transcription worker.
       setPreparingStage('decoding');
       const processedAudio = await decodeProcessedAudio(processedBlob);
 
       // Step 4: Start transcription. The hook remaps word timestamps after completion.
-      transcriber.start(processedAudio, speechSegments);
+      // Pass the filtered `speechOnly` array (don't rely on state being
+      // synchronously updated via setSpeechSegments).
+      transcriber.start(processedAudio, speechOnly);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : t('errors.unknown');
@@ -275,7 +361,7 @@ export function TranscriptionDialog({
     } finally {
       setPreparingStage(null);
     }
-  }, [t, transcriber, vocalsUrl]);
+  }, [t, transcriber, vocalsUrl, speechSegments]);
 
   const canStart =
     Boolean(vocalsUrl) &&
@@ -297,14 +383,34 @@ export function TranscriptionDialog({
 
   const canClose = !canStop && !isPreparingAudio && !isRetrying;
 
+  // ---- Inline chunk edit state ----
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editingDraft, setEditingDraft] = useState('');
+  const isEditing = editingIndex !== null;
+
+  const handleEditConfirm = useCallback((): void => {
+    if (editingIndex === null) return;
+    const trimmed = editingDraft.trim();
+    if (!trimmed) return;
+    lyricsAdaptation.editChunk(editingIndex, trimmed);
+    setEditingIndex(null);
+    setEditingDraft('');
+  }, [editingIndex, editingDraft, lyricsAdaptation]);
+
+  const handleEditCancel = useCallback((): void => {
+    setEditingIndex(null);
+    setEditingDraft('');
+  }, []);
+
   /**
    * All interactive controls in the adaptation panel are disabled when:
    * - an adaptation batch is running, OR
    * - a retry is in progress, OR
-   * - a transcription is running.
+   * - a transcription is running, OR
+   * - a chunk edit is in progress.
    */
   const adaptationControlsDisabled =
-    isAdaptationBusy || isRetrying || transcriber.isBusy;
+    isAdaptationBusy || isRetrying || transcriber.isBusy || isEditing;
 
   const canAdapt =
     hasTranscriptChunks &&
@@ -350,6 +456,14 @@ export function TranscriptionDialog({
                     {modelLabel(model, transcriber.settings.quantized)}
                   </MenuItem>
                 ))}
+                {/* If the current model isn't in the filtered availableModels,
+                    render a fallback MenuItem so the Select value is valid
+                    for MUI and no warning is emitted. */}
+                {!currentModelPresent && transcriber.settings.model && (
+                  <MenuItem value={transcriber.settings.model}>
+                    {transcriber.settings.model}
+                  </MenuItem>
+                )}
               </Select>
             </FormControl>
             <FormControlLabel
@@ -422,12 +536,29 @@ export function TranscriptionDialog({
               >
                 {t('processedVocalsPlayerLabel')}
               </Typography>
-              <Box
-                component="audio"
-                controls
-                src={processedAudioUrl}
-                sx={{ width: '100%', display: 'block' }}
-              />
+              <Stack spacing={1}>
+                <Button
+                  size="small"
+                  variant="text"
+                  onClick={() => setShowSegmentPlayers((s) => !s)}
+                  sx={{ mb: 0.5, textTransform: 'none', p: 0 }}
+                >
+                  {showSegmentPlayers ? t('hideSegments') : t('showSegments')}
+                </Button>
+
+                <SegmentPlayers
+                  speechSegments={speechSegments}
+                  segmentUrls={segmentUrls}
+                  processedAudioUrl={processedAudioUrl}
+                  show={showSegmentPlayers}
+                  t={
+                    t as unknown as (
+                      key: string,
+                      params?: Record<string, unknown>,
+                    ) => string
+                  }
+                />
+              </Stack>
             </Box>
           )}
 
@@ -530,17 +661,44 @@ export function TranscriptionDialog({
                 <List dense disablePadding>
                   {transcriber.output.chunks.map((chunk, index) => (
                     <ListItem
-                      key={`${index}-${chunk.timestamp[0]}`}
+                      key={`${index}-${chunk.processedTimestamp[0]}`}
                       disableGutters
                       sx={{ py: 0.25 }}
                     >
                       <ListItemText
                         primary={chunk.text.trim() || t('emptyChunk')}
-                        secondary={`${formatTimestamp(chunk.timestamp[0])} — ${formatTimestamp(chunk.timestamp[1])}`}
+                        secondary={
+                          <>
+                            <Typography
+                              component="span"
+                              variant="caption"
+                              sx={{
+                                fontFamily: 'monospace',
+                                display: 'block',
+                              }}
+                            >
+                              {t('timestampProcessedLabel')}:{' '}
+                              {formatTimestamp(chunk.processedTimestamp[0])} —{' '}
+                              {formatTimestamp(chunk.processedTimestamp[1])}
+                            </Typography>
+                            <Typography
+                              component="span"
+                              variant="caption"
+                              sx={{
+                                fontFamily: 'monospace',
+                                display: 'block',
+                                color: 'text.secondary',
+                              }}
+                            >
+                              {t('timestampOriginalLabel')}:{' '}
+                              {formatTimestamp(chunk.timestamp[0])} —{' '}
+                              {formatTimestamp(chunk.timestamp[1])}
+                            </Typography>
+                          </>
+                        }
                         primaryTypographyProps={{ variant: 'body2' }}
                         secondaryTypographyProps={{
                           variant: 'caption',
-                          sx: { fontFamily: 'monospace' },
                         }}
                       />
                     </ListItem>
@@ -607,7 +765,14 @@ export function TranscriptionDialog({
                 fullWidth
                 value={lyricsAdaptation.lyrics}
                 onChange={(e) => lyricsAdaptation.setLyrics(e.target.value)}
-                disabled={adaptationControlsDisabled}
+                // Keep the lyrics input enabled during async events; only
+                // disable it when the adaptation model is loading or an
+                // adaptation batch is actively running or when retrying.
+                disabled={
+                  lyricsAdaptation.state.phase === 'loading-model' ||
+                  lyricsAdaptation.state.phase === 'adapting' ||
+                  lyricsAdaptation.retryingIndex !== null
+                }
                 inputProps={{
                   'aria-label': t('lyricsAdaptation.lyricsInputLabel'),
                 }}
@@ -662,7 +827,7 @@ export function TranscriptionDialog({
                     size="small"
                     variant="text"
                     onClick={lyricsAdaptation.reset}
-                    disabled={isRetrying}
+                    disabled={isRetrying || isEditing}
                   >
                     {t('lyricsAdaptation.resetButton')}
                   </Button>
@@ -711,6 +876,14 @@ export function TranscriptionDialog({
               {/* Results */}
               {lyricsAdaptation.state.phase === 'done' && (
                 <>
+                  {lyricsAdaptation.isAutoRetrying && (
+                    <Alert
+                      severity="info"
+                      icon={<CircularProgress size={16} />}
+                    >
+                      {t('lyricsAdaptation.autoRetrying')}
+                    </Alert>
+                  )}
                   {lyricsAdaptation.retryError && (
                     <Alert severity="error">
                       {t('lyricsAdaptation.adaptError', {
@@ -733,6 +906,7 @@ export function TranscriptionDialog({
                       {lyricsAdaptation.state.results.map((item) => {
                         const isThisRetrying =
                           lyricsAdaptation.retryingIndex === item.index;
+                        const isThisEditing = editingIndex === item.index;
                         return (
                           <ListItem
                             key={item.index}
@@ -744,54 +918,171 @@ export function TranscriptionDialog({
                                 spacing={0.5}
                                 alignItems="center"
                               >
-                                {/* Status chip */}
-                                <Chip
-                                  size="small"
-                                  label={t(
-                                    `lyricsAdaptation.status.${item.status}` as Parameters<
-                                      typeof t
-                                    >[0],
-                                  )}
-                                  color={adaptationStatusColor(item.status)}
-                                  sx={{ fontSize: '0.65rem', height: 20 }}
-                                />
-                                {/* Retry button */}
-                                <Tooltip
-                                  title={t(
-                                    'lyricsAdaptation.retryChunkTooltip',
-                                  )}
-                                >
-                                  <span>
-                                    <IconButton
-                                      size="small"
-                                      aria-label={t(
-                                        'lyricsAdaptation.retryChunkAriaLabel',
+                                {isThisEditing ? (
+                                  <>
+                                    {/* Confirm edit */}
+                                    <Tooltip
+                                      title={t(
+                                        'lyricsAdaptation.editConfirmTooltip',
                                       )}
-                                      disabled={adaptationControlsDisabled}
-                                      onClick={() =>
-                                        lyricsAdaptation.retryChunk(item)
-                                      }
-                                      sx={{
-                                        color: 'text.secondary',
-                                        '&:hover': { color: 'primary.main' },
-                                      }}
                                     >
-                                      {isThisRetrying ? (
-                                        <CircularProgress
-                                          size={14}
-                                          color="inherit"
-                                        />
-                                      ) : (
-                                        <ReplayIcon sx={{ fontSize: 16 }} />
+                                      <span>
+                                        <IconButton
+                                          size="small"
+                                          aria-label={t(
+                                            'lyricsAdaptation.editConfirmAriaLabel',
+                                          )}
+                                          disabled={!editingDraft.trim()}
+                                          onClick={handleEditConfirm}
+                                          sx={{
+                                            color: 'success.main',
+                                            '&:hover': {
+                                              color: 'success.dark',
+                                            },
+                                          }}
+                                        >
+                                          <CheckIcon sx={{ fontSize: 16 }} />
+                                        </IconButton>
+                                      </span>
+                                    </Tooltip>
+                                    {/* Cancel edit */}
+                                    <Tooltip
+                                      title={t(
+                                        'lyricsAdaptation.editCancelTooltip',
                                       )}
-                                    </IconButton>
-                                  </span>
-                                </Tooltip>
+                                    >
+                                      <span>
+                                        <IconButton
+                                          size="small"
+                                          aria-label={t(
+                                            'lyricsAdaptation.editCancelAriaLabel',
+                                          )}
+                                          onClick={handleEditCancel}
+                                          sx={{
+                                            color: 'text.secondary',
+                                            '&:hover': { color: 'error.main' },
+                                          }}
+                                        >
+                                          <CloseIcon sx={{ fontSize: 16 }} />
+                                        </IconButton>
+                                      </span>
+                                    </Tooltip>
+                                  </>
+                                ) : (
+                                  <>
+                                    {/* Status chip */}
+                                    <Chip
+                                      size="small"
+                                      label={t(
+                                        `lyricsAdaptation.status.${item.status}` as Parameters<
+                                          typeof t
+                                        >[0],
+                                      )}
+                                      color={adaptationStatusColor(item.status)}
+                                      sx={{ fontSize: '0.65rem', height: 20 }}
+                                    />
+                                    {/* Edit button */}
+                                    <Tooltip
+                                      title={t(
+                                        'lyricsAdaptation.editChunkTooltip',
+                                      )}
+                                    >
+                                      <span>
+                                        <IconButton
+                                          size="small"
+                                          aria-label={t(
+                                            'lyricsAdaptation.editChunkAriaLabel',
+                                          )}
+                                          disabled={adaptationControlsDisabled}
+                                          onClick={() => {
+                                            setEditingIndex(item.index);
+                                            setEditingDraft(
+                                              item.adaptedText || item.rawText,
+                                            );
+                                          }}
+                                          sx={{
+                                            color: 'text.secondary',
+                                            '&:hover': {
+                                              color: 'primary.main',
+                                            },
+                                          }}
+                                        >
+                                          <EditIcon sx={{ fontSize: 16 }} />
+                                        </IconButton>
+                                      </span>
+                                    </Tooltip>
+                                    {/* Retry button */}
+                                    <Tooltip
+                                      title={t(
+                                        'lyricsAdaptation.retryChunkTooltip',
+                                      )}
+                                    >
+                                      <span>
+                                        <IconButton
+                                          size="small"
+                                          aria-label={t(
+                                            'lyricsAdaptation.retryChunkAriaLabel',
+                                          )}
+                                          disabled={adaptationControlsDisabled}
+                                          onClick={() =>
+                                            lyricsAdaptation.retryChunk(item)
+                                          }
+                                          sx={{
+                                            color: 'text.secondary',
+                                            '&:hover': {
+                                              color: 'primary.main',
+                                            },
+                                          }}
+                                        >
+                                          {isThisRetrying ? (
+                                            <CircularProgress
+                                              size={14}
+                                              color="inherit"
+                                            />
+                                          ) : (
+                                            <ReplayIcon sx={{ fontSize: 16 }} />
+                                          )}
+                                        </IconButton>
+                                      </span>
+                                    </Tooltip>
+                                  </>
+                                )}
                               </Stack>
                             }
                           >
                             <ListItemText
-                              primary={item.adaptedText || item.rawText}
+                              primary={
+                                isThisEditing ? (
+                                  <TextField
+                                    size="small"
+                                    fullWidth
+                                    value={editingDraft}
+                                    onChange={(e) =>
+                                      setEditingDraft(e.target.value)
+                                    }
+                                    onKeyDown={(e) => {
+                                      if (
+                                        e.key === 'Enter' &&
+                                        editingDraft.trim()
+                                      ) {
+                                        handleEditConfirm();
+                                      }
+                                      if (e.key === 'Escape') {
+                                        handleEditCancel();
+                                      }
+                                    }}
+                                    autoFocus
+                                    inputProps={{
+                                      'aria-label': t(
+                                        'lyricsAdaptation.editChunkAriaLabel',
+                                      ),
+                                    }}
+                                    sx={{ pr: 9 }}
+                                  />
+                                ) : (
+                                  item.adaptedText || item.rawText
+                                )
+                              }
                               secondary={
                                 <>
                                   <Typography
@@ -836,7 +1127,10 @@ export function TranscriptionDialog({
                                   )}
                                 </>
                               }
-                              primaryTypographyProps={{ variant: 'body2' }}
+                              primaryTypographyProps={{
+                                variant: 'body2',
+                                component: 'div' as React.ElementType,
+                              }}
                             />
                           </ListItem>
                         );

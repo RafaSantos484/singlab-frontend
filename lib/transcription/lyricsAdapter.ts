@@ -31,6 +31,16 @@ export interface AdaptedChunk {
    * 0 = never retried (first adaptation run).
    */
   retryCount: number;
+  /**
+   * 0-based index of the first matched line in the full parsed lyrics array.
+   * Undefined for unmatched segments or when the lyric position is unknown.
+   */
+  lyricIdxStart?: number;
+  /**
+   * 0-based index of the last matched line in the full parsed lyrics array.
+   * Undefined for unmatched segments or when the lyric position is unknown.
+   */
+  lyricIdxEnd?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -55,7 +65,11 @@ export type LyricsAdapterRequest =
       rawText: string;
       /** Original chunk timestamp. */
       timestamp: [number, number | null];
-      /** Full lyrics text (needed to build the prompt). */
+      /**
+       * Lyrics text used to build the prompt.
+       * When `isBoundedRetry` is true this is a narrowed excerpt; otherwise
+       * it is the full lyrics string.
+       */
       lyrics: string;
       /**
        * Number of retries already attempted for this chunk.
@@ -63,6 +77,19 @@ export type LyricsAdapterRequest =
        * 0 = first retry (prompt is already wider than the initial pass).
        */
       retryCount: number;
+      /**
+       * When true, `lyrics` is a deliberately narrowed scope derived from the
+       * nearest resolved neighbours. The worker uses a different prompt that
+       * instructs the model to stay within this bounded excerpt.
+       */
+      isBoundedRetry?: boolean;
+      /**
+       * When `isBoundedRetry` is true, the 0-based index of the first line of
+       * `lyrics` within the full parsed lyrics array. Applied as an offset to
+       * the returned `lyricIdxStart` / `lyricIdxEnd` so that subsequently
+       * resolved chunks keep accurate full-lyrics positions.
+       */
+      lyricsLineOffset?: number;
     }
   | { type: 'cancel' };
 
@@ -262,4 +289,119 @@ export function parseLyricsLines(lyrics: string): string[] {
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter((l) => l.length > 0 && !/^\[.*\]$/.test(l));
+}
+
+// ---------------------------------------------------------------------------
+// Auto-retry boundary helpers (pure, SSR-safe)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when a chunk is considered resolved for boundary purposes:
+ * status is 'matched' or 'corrected'. User edits produce 'corrected'.
+ */
+export function isResolvedChunk(chunk: AdaptedChunk): boolean {
+  return chunk.status === 'matched' || chunk.status === 'corrected';
+}
+
+/**
+ * Finds the nearest resolved chunk strictly before `chunkIndex`.
+ * Returns null when none exists.
+ */
+export function findPrevResolved(
+  results: AdaptedChunk[],
+  chunkIndex: number,
+): AdaptedChunk | null {
+  let nearest: AdaptedChunk | null = null;
+  for (const r of results) {
+    if (r.index < chunkIndex && isResolvedChunk(r)) {
+      if (nearest === null || r.index > nearest.index) {
+        nearest = r;
+      }
+    }
+  }
+  return nearest;
+}
+
+/**
+ * Finds the nearest resolved chunk strictly after `chunkIndex`.
+ * Returns null when none exists.
+ */
+export function findNextResolved(
+  results: AdaptedChunk[],
+  chunkIndex: number,
+): AdaptedChunk | null {
+  let nearest: AdaptedChunk | null = null;
+  for (const r of results) {
+    if (r.index > chunkIndex && isResolvedChunk(r)) {
+      if (nearest === null || r.index < nearest.index) {
+        nearest = r;
+      }
+    }
+  }
+  return nearest;
+}
+
+/**
+ * Builds a reduced lyric scope for retrying an unmatched segment, bounded by
+ * the line ranges of the nearest resolved neighbours.
+ *
+ * Returns `{ lyrics, startLine }` where `lyrics` is the bounded excerpt
+ * (newline-separated) and `startLine` is the 0-based index of its first line
+ * in `allLyricsLines` — needed to restore absolute lyric positions.
+ *
+ * Returns null when no usable boundary can be established (both neighbours
+ * are null) or when the derived window is empty.
+ */
+export function buildBoundedLyricScope(
+  allLyricsLines: string[],
+  prev: AdaptedChunk | null,
+  next: AdaptedChunk | null,
+): { lyrics: string; startLine: number } | null {
+  if (!prev && !next) return null;
+
+  let startLine = 0;
+  let endLine = allLyricsLines.length - 1;
+
+  if (prev) {
+    if (prev.lyricIdxEnd !== undefined) {
+      startLine = prev.lyricIdxEnd + 1;
+    } else {
+      // Fallback: estimate the boundary by finding the best span for
+      // the adapted text in the full lyrics.
+      const span = pickBestSpan(prev.adaptedText, allLyricsLines);
+      if (span.idxEnd >= 0) startLine = span.idxEnd + 1;
+    }
+  }
+
+  if (next) {
+    if (next.lyricIdxStart !== undefined) {
+      endLine = next.lyricIdxStart - 1;
+    } else {
+      const span = pickBestSpan(next.adaptedText, allLyricsLines);
+      if (span.idxStart >= 0) endLine = span.idxStart - 1;
+    }
+  }
+
+  startLine = Math.max(0, startLine);
+  endLine = Math.min(allLyricsLines.length - 1, endLine);
+
+  if (startLine > endLine) {
+    // Boundaries are adjacent or crossed — widen to include the boundary
+    // lines themselves so the segment still has a minimal plausible window.
+    if (prev) {
+      const fall = prev.lyricIdxEnd ?? prev.lyricIdxStart;
+      if (fall !== undefined && fall >= 0) startLine = fall;
+    }
+    if (next) {
+      const fall = next.lyricIdxStart ?? next.lyricIdxEnd;
+      if (fall !== undefined && fall < allLyricsLines.length) endLine = fall;
+    }
+    startLine = Math.max(0, startLine);
+    endLine = Math.min(allLyricsLines.length - 1, endLine);
+    if (startLine > endLine) return null;
+  }
+
+  const selected = allLyricsLines.slice(startLine, endLine + 1);
+  if (selected.length === 0) return null;
+  return { lyrics: selected.join('\n'), startLine };
 }

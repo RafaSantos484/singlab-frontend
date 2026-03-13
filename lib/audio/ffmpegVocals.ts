@@ -1,11 +1,33 @@
 'use client';
-
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 
 // === Fixed internal parameters (not exposed to callers) ===
 const SILENCE_NOISE_DB = -45;
-const SILENCE_MIN_DURATION_S = 3.0;
+/**
+ * Ta: Silence detection threshold (seconds).
+ * A contiguous region is considered "silence" only when its duration is
+ * greater than or equal to this value. Passed to FFmpeg's `silencedetect`
+ * filter as the `d=` parameter.
+ */
+const SILENCE_DETECTION_THRESHOLD_S = 0.01;
+/**
+ * Tb: Normalized silence duration (seconds).
+ * Every detected silence (duration >= Ta) is replaced in the processed
+ * audio with an explicit silence segment whose duration is exactly Tb.
+ * Leading/trailing silences are removed completely; intermediate silences
+ * detected by the rule above become silence regions of length Tb in the
+ * processed output.
+ */
+const SILENCE_NORMALIZED_DURATION_S = 2.0;
+/**
+ * Minimum speech duration (seconds).
+ * Speech intervals shorter than this value are treated as silence and
+ * converted to normalized silence intervals before merging and audio
+ * synthesis. This allows tiny spurious speech fragments (near 0s) to be
+ * collapsed into the surrounding silence.
+ */
+const MIN_SPEECH_DURATION_S = 0.8;
 const OUTPUT_SAMPLE_RATE = 16000;
 const OUTPUT_CHANNELS = 1;
 const FFMPEG_CORE_CDN =
@@ -20,13 +42,8 @@ const EMPTY_WAV = new Uint8Array([
 ]);
 
 /**
- * A continuous speech segment in the vocals track with coordinates in both
- * the original and the silence-removed audio timelines.
- *
- * Used to reconstruct word timestamps after Whisper transcribes the
- * silence-removed audio: a word timestamped at `processedStart..processedEnd`
- * in the processed audio maps back to `originalStart..originalEnd` in the
- * source vocals track.
+ * A continuous segment (speech or kept silence) in the vocals track with
+ * coordinates in both the original and the silence-removed audio timelines.
  */
 export interface SpeechSegment {
   /** Start time in the original vocals audio (seconds). */
@@ -37,11 +54,13 @@ export interface SpeechSegment {
   processedStart: number;
   /** Corresponding end time in the silence-removed audio (seconds). */
   processedEnd: number;
+  /** Segment type from the cut map: 'speech' or 'silence' (kept normalized). */
+  type: 'speech' | 'silence';
 }
 
 /** Result returned by {@link removeSilencesFromVocals}. */
 export interface SilenceRemovalResult {
-  /** 16 kHz mono WAV blob with all silence gaps removed. Ready for Whisper. */
+  /** 16 kHz mono WAV blob with silence gaps trimmed. Ready for Whisper. */
   processedBlob: Blob;
   /**
    * Ordered speech segments mapping processed ↔ original timeline.
@@ -50,19 +69,18 @@ export interface SilenceRemovalResult {
   speechSegments: SpeechSegment[];
   /**
    * Human-readable cut map lines (one per interval), e.g.:
-   *   "[silence] 0:00.00 — 0:28.00 (28.00s)"
-   *   "[speech]  0:28.00 — 0:30.61 (2.61s)"
+   * "[silence] 0:00.00 — 0:28.00 (28.00s) → removed"
+   * "[speech]  0:28.00 — 0:30.61 (2.61s)"
+   * "[silence] 0:30.61 — 0:45.00 (14.39s) → kept 10.00s"
    */
   cutMapLines: string[];
 }
 
 // === Singleton FFmpeg instance ===
-
 let ffmpegInstance: FFmpeg | null = null;
 
 async function getFFmpeg(): Promise<FFmpeg> {
   if (ffmpegInstance) return ffmpegInstance;
-
   const ffmpeg = new FFmpeg();
   await ffmpeg.load({
     coreURL: await toBlobURL(
@@ -74,13 +92,11 @@ async function getFFmpeg(): Promise<FFmpeg> {
       'application/wasm',
     ),
   });
-
   ffmpegInstance = ffmpeg;
   return ffmpeg;
 }
 
 // === Internal helpers ===
-
 function uniqueId(): string {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -110,10 +126,9 @@ function safeDeleteFile(ffmpeg: FFmpeg, name: string): void {
 }
 
 // === Log parsers ===
-
 /**
  * Parses total audio duration from FFmpeg log.
- * Matches lines like: `  Duration: 00:03:25.12, start: 0.000000, ...`
+ * Matches lines like: ` Duration: 00:03:25.12, start: 0.000000, ...`
  */
 function parseDurationFromLog(lines: string[]): number | null {
   const pattern = /Duration:\s*(\d{2}):(\d{2}):(\d{2})\.(\d+)/;
@@ -145,7 +160,6 @@ interface SilenceInterval {
 function parseSilenceLog(lines: string[]): SilenceInterval[] {
   const silences: SilenceInterval[] = [];
   let pendingStart: number | null = null;
-
   const startPattern = /silence_start:\s*([0-9.]+)/i;
   const endPattern =
     /silence_end:\s*([0-9.]+).*?silence_duration:\s*([0-9.]+)/i;
@@ -156,7 +170,6 @@ function parseSilenceLog(lines: string[]): SilenceInterval[] {
       pendingStart = parseFloat(startMatch[1]);
       continue;
     }
-
     const endMatch = line.match(endPattern);
     if (endMatch) {
       const end = parseFloat(endMatch[1]);
@@ -167,56 +180,187 @@ function parseSilenceLog(lines: string[]): SilenceInterval[] {
     }
   }
 
+  // Handle a trailing silence_start with no silence_end (audio ends in silence)
+  if (pendingStart !== null) {
+    silences.push({ start: pendingStart, end: Infinity });
+  }
+
   return silences
-    .filter(
-      (s) =>
-        Number.isFinite(s.start) && Number.isFinite(s.end) && s.end > s.start,
-    )
+    .filter((s) => Number.isFinite(s.start) && s.end > s.start)
     .sort((a, b) => a.start - b.start);
 }
 
 // === Cut-map builders ===
 
 /**
- * Builds an ordered list of {@link SpeechSegment}s from detected silence
- * intervals. Each segment carries both original-audio and processed-audio
- * coordinates so timestamps can be remapped after transcription.
+ * Represents a trimmed interval in the output audio.
+ * type='speech'   → kept as-is
+ * type='silence'  → intermediate detected silences are replaced by a
+ *                   normalized silence region of length Tb (see
+ *                   `SILENCE_NORMALIZED_DURATION_S`); leading/trailing
+ *                   silences are removed completely (keptDuration = 0).
  */
-function buildSpeechSegments(
+interface OutputInterval {
+  originalStart: number;
+  originalEnd: number;
+  type: 'speech' | 'silence';
+  /** How many seconds of this interval are kept in the output (0 = removed). */
+  keptDuration: number;
+}
+
+/**
+ * Builds the list of output intervals by:
+ * 1. Replacing leading/trailing silence with removed intervals.
+ * 2. Replacing intermediate detected silences (duration >= Ta) with a
+ *    fixed-length silence of exactly Tb seconds.
+ * 3. Keeping all speech segments unchanged.
+ */
+function buildOutputIntervals(
   silences: SilenceInterval[],
   totalDuration: number,
-): SpeechSegment[] {
-  const segments: SpeechSegment[] = [];
-  let originalCursor = 0;
-  let processedOffset = 0;
+): OutputInterval[] {
+  // Clamp silence ends that extend beyond total duration
+  const clampedSilences = silences.map((s) => ({
+    start: s.start,
+    end: Math.min(s.end, totalDuration),
+  }));
 
-  for (const silence of silences) {
-    const speechStart = Math.max(0, Math.min(totalDuration, originalCursor));
-    const speechEnd = Math.max(0, Math.min(totalDuration, silence.start));
+  type RawInterval = { start: number; end: number; type: 'speech' | 'silence' };
+  const raw: RawInterval[] = [];
+  let cursor = 0;
 
-    if (speechEnd > speechStart) {
-      const len = speechEnd - speechStart;
-      segments.push({
-        originalStart: speechStart,
-        originalEnd: speechEnd,
-        processedStart: processedOffset,
-        processedEnd: processedOffset + len,
-      });
-      processedOffset += len;
+  for (const s of clampedSilences) {
+    if (s.start > cursor) {
+      raw.push({ start: cursor, end: s.start, type: 'speech' });
     }
-
-    originalCursor = Math.max(originalCursor, silence.end);
+    raw.push({ start: s.start, end: s.end, type: 'silence' });
+    cursor = s.end;
+  }
+  if (cursor < totalDuration) {
+    raw.push({ start: cursor, end: totalDuration, type: 'speech' });
   }
 
-  // Any remaining audio after the last silence is all speech.
-  if (originalCursor < totalDuration) {
-    const len = totalDuration - originalCursor;
+  // Convert tiny speech intervals into silence before determining leading/
+  // trailing silences and kept durations. This conversion happens prior to
+  // merging so adjacent short speech fragments become part of sibling
+  // silence intervals.
+  for (const iv of raw) {
+    if (iv.type === 'speech') {
+      const dur = iv.end - iv.start;
+      if (dur < MIN_SPEECH_DURATION_S) {
+        iv.type = 'silence';
+      }
+    }
+  }
+
+  // Determine first and last speech index to identify leading/trailing silences
+  const firstSpeechIdx = raw.findIndex((iv) => iv.type === 'speech');
+  const lastSpeechIdx = [...raw]
+    .reverse()
+    .findIndex((iv) => iv.type === 'speech');
+  const lastSpeechIdxFromStart =
+    lastSpeechIdx === -1 ? -1 : raw.length - 1 - lastSpeechIdx;
+
+  return raw.map((iv, idx): OutputInterval => {
+    if (iv.type === 'speech') {
+      return {
+        originalStart: iv.start,
+        originalEnd: iv.end,
+        type: 'speech',
+        keptDuration: iv.end - iv.start,
+      };
+    }
+
+    // Silence interval
+    const isLeading = firstSpeechIdx === -1 || idx < firstSpeechIdx;
+    const isTrailing =
+      lastSpeechIdxFromStart === -1 || idx > lastSpeechIdxFromStart;
+
+    if (isLeading || isTrailing) {
+      // Remove completely
+      return {
+        originalStart: iv.start,
+        originalEnd: iv.end,
+        type: 'silence',
+        keptDuration: 0,
+      };
+    }
+
+    // Intermediate silence: normalize detected silence to exactly Tb
+    const kept = SILENCE_NORMALIZED_DURATION_S;
+    return {
+      originalStart: iv.start,
+      originalEnd: iv.end,
+      type: 'silence',
+      keptDuration: kept,
+    };
+  });
+}
+
+/**
+ * Merge consecutive output intervals that have the same `type`.
+ * - For `speech` intervals we merge original ranges and sum keptDuration
+ *   (keptDuration for speech equals original span).
+ * - For `silence` intervals we merge original ranges and produce a single
+ *   normalized keptDuration: if any merged silence had keptDuration > 0
+ *   (i.e., was kept), the merged keptDuration becomes a single Tb value.
+ *   If all merged silences were removed (keptDuration === 0) the result
+ *   remains removed (keptDuration = 0).
+ */
+function mergeAdjacentIntervals(intervals: OutputInterval[]): OutputInterval[] {
+  if (intervals.length === 0) return [];
+  const out: OutputInterval[] = [];
+  for (const iv of intervals) {
+    const last = out[out.length - 1];
+    if (!last || last.type !== iv.type) {
+      out.push({ ...iv });
+      continue;
+    }
+
+    // Same type — merge into `last`.
+    last.originalEnd = iv.originalEnd;
+
+    if (last.type === 'speech') {
+      // For speech, keptDuration should equal the full original span.
+      last.keptDuration = last.originalEnd - last.originalStart;
+    } else {
+      // Silence: if any part was kept, merged keptDuration becomes exactly Tb;
+      // otherwise it's removed (0).
+      const anyKept = last.keptDuration > 0 || iv.keptDuration > 0;
+      last.keptDuration = anyKept ? SILENCE_NORMALIZED_DURATION_S : 0;
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Converts output intervals into SpeechSegments for timestamp remapping.
+ *
+ * Each kept interval (speech or partial silence) becomes a segment with
+ * both original and processed coordinates.
+ */
+function buildSpeechSegments(intervals: OutputInterval[]): SpeechSegment[] {
+  const segments: SpeechSegment[] = [];
+  let processedOffset = 0;
+
+  for (const iv of intervals) {
+    if (iv.keptDuration <= 0) continue;
+
+    // For all kept intervals (speech or silence) map to the full original
+    // interval. When processed and original durations differ the remapping
+    // logic will scale processed-time positions into the original span.
+    const originalStart = iv.originalStart;
+    const originalEnd = iv.originalEnd;
+
     segments.push({
-      originalStart: originalCursor,
-      originalEnd: totalDuration,
+      originalStart,
+      originalEnd,
       processedStart: processedOffset,
-      processedEnd: processedOffset + len,
+      processedEnd: processedOffset + iv.keptDuration,
+      type: iv.type,
     });
+    processedOffset += iv.keptDuration;
   }
 
   return segments.filter((s) => s.originalEnd > s.originalStart);
@@ -229,57 +373,41 @@ function formatTimecode(seconds: number): string {
 }
 
 /**
- * Formats a human-readable cut map showing every silence and speech interval
- * with start, end, and duration.
- *
- * Example:
- * ```
- * [silence] 0:00.00 — 0:28.00 (28.00s)
- * [speech]  0:28.00 — 0:30.61 (2.61s)
- * ```
+ * Formats a human-readable cut map showing every interval with its fate.
  */
-function formatCutMap(
-  silences: SilenceInterval[],
-  totalDuration: number,
-): string[] {
-  type Interval = { start: number; end: number; type: 'silence' | 'speech' };
-  const intervals: Interval[] = [];
-  let cursor = 0;
-
-  for (const s of silences) {
-    if (s.start > cursor) {
-      intervals.push({ start: cursor, end: s.start, type: 'speech' });
-    }
-    intervals.push({ start: s.start, end: s.end, type: 'silence' });
-    cursor = s.end;
-  }
-
-  if (cursor < totalDuration) {
-    intervals.push({ start: cursor, end: totalDuration, type: 'speech' });
-  }
-
+function formatCutMap(intervals: OutputInterval[]): string[] {
   return intervals.map((iv) => {
+    const silenceDuration = iv.originalEnd - iv.originalStart;
     const label = iv.type === 'silence' ? '[silence]' : '[speech] ';
-    const dur = (iv.end - iv.start).toFixed(2);
-    return `${label} ${formatTimecode(iv.start)} — ${formatTimecode(iv.end)} (${dur}s)`;
+    const range = `${formatTimecode(iv.originalStart)} — ${formatTimecode(iv.originalEnd)} (${silenceDuration.toFixed(2)}s)`;
+
+    if (iv.type === 'speech') {
+      return `${label} ${range}`;
+    }
+    if (iv.keptDuration <= 0) {
+      return `${label} ${range} → removed`;
+    }
+    return `${label} ${range} → kept ${iv.keptDuration.toFixed(2)}s`;
   });
 }
 
 // === Public API ===
-
 /**
- * Removes silences from a vocals audio blob using FFmpeg WASM.
+ * Removes/trims silences from a vocals audio blob using FFmpeg WASM.
  *
  * **Pipeline:**
- * 1. Runs `silencedetect` to find silence intervals. Parses total duration from
- *    the same FFmpeg pass (no extra decode step needed).
- * 2. Builds a {@link SpeechSegment} cut map linking original ↔ processed time.
- * 3. Cuts and concatenates speech segments via `atrim+asetpts+concat`.
- * 4. Exports a 16 kHz mono WAV suitable for Whisper.
+ * 1. Runs `silencedetect` to find all silence intervals.
+ * 2. Removes leading/trailing silences completely.
+ * 3. Replaces intermediate detected silences (duration >= Ta) with a fixed
+ *    silence segment of exactly Tb seconds.
+ * 4. Builds a {@link SpeechSegment} cut map linking original ↔ processed time.
+ * 5. Cuts and concatenates kept intervals via `atrim+asetpts+concat`.
+ * 6. Exports a 16 kHz mono WAV suitable for Whisper.
  *
- * All tuning parameters are fixed internally:
+ * All tuning parameters are fixed internally (see constants at the top):
  * - Noise floor: -45 dB
- * - Minimum silence duration: 0.3 s
+ * - Silence detection threshold (Ta): `SILENCE_DETECTION_THRESHOLD_S` (seconds)
+ * - Normalized silence duration (Tb): `SILENCE_NORMALIZED_DURATION_S` (seconds)
  * - Output: 16 kHz, 1 channel, WAV
  *
  * @param audioBlob - Vocals audio blob in any format supported by FFmpeg.
@@ -296,8 +424,7 @@ export async function removeSilencesFromVocals(
 
   await ffmpeg.writeFile(inputFile, await fetchFile(audioBlob));
 
-  // Step 1: Detect silences. Capture all log lines so we can also parse the
-  // total Duration header emitted by FFmpeg for the input file.
+  // Step 1: Detect silences.
   const logLines: string[] = [];
   const onLog = ({ message }: { message: string }): void => {
     logLines.push(message);
@@ -310,7 +437,7 @@ export async function removeSilencesFromVocals(
       '-i',
       inputFile,
       '-af',
-      `silencedetect=noise=${SILENCE_NOISE_DB}dB:d=${SILENCE_MIN_DURATION_S}`,
+      `silencedetect=noise=${SILENCE_NOISE_DB}dB:d=${SILENCE_DETECTION_THRESHOLD_S}`,
       '-f',
       'null',
       '-',
@@ -321,10 +448,18 @@ export async function removeSilencesFromVocals(
 
   const totalDuration = parseDurationFromLog(logLines) ?? 0;
   const silences = parseSilenceLog(logLines);
-  const speechSegments = buildSpeechSegments(silences, totalDuration);
-  const cutMapLines = formatCutMap(silences, totalDuration);
 
-  // Step 2: Cut and concatenate speech segments via atrim+concat filter graph.
+  const outputIntervals = buildOutputIntervals(silences, totalDuration);
+  // Merge adjacent intervals of the same type (collapses consecutive
+  // short silences into a single silence, and consecutive speech into one).
+  const mergedIntervals = mergeAdjacentIntervals(outputIntervals);
+  // Keep only intervals that contribute audio to the processed output
+  // (speech intervals and normalized intermediate silences with keptDuration>0).
+  const keptIntervals = mergedIntervals.filter((iv) => iv.keptDuration > 0);
+  const speechSegments = buildSpeechSegments(keptIntervals);
+  const cutMapLines = formatCutMap(mergedIntervals);
+
+  // Step 2: Cut and concatenate kept intervals via atrim+concat filter graph.
   if (speechSegments.length === 0) {
     safeDeleteFile(ffmpeg, inputFile);
     return {
@@ -335,15 +470,20 @@ export async function removeSilencesFromVocals(
   }
 
   try {
-    const segmentFilters = speechSegments
-      .map(
-        (seg, i) =>
-          `[0:a]atrim=start=${seg.originalStart.toFixed(6)}:end=${seg.originalEnd.toFixed(6)},asetpts=PTS-STARTPTS[s${i}]`,
-      )
+    // Build filter graph using the kept intervals. For speech intervals we
+    // extract the original audio fragment. For silence intervals we generate
+    // synthetic silence using `anullsrc` trimmed to the normalized Tb length.
+    const segmentFilters = keptIntervals
+      .map((iv, i) => {
+        if (iv.type === 'speech') {
+          return `[0:a]atrim=start=${iv.originalStart.toFixed(6)}:end=${iv.originalEnd.toFixed(6)},asetpts=PTS-STARTPTS[s${i}]`;
+        }
+        // Silence: synthesize silence of duration = keptDuration (Tb)
+        return `anullsrc=channel_layout=mono:sample_rate=${OUTPUT_SAMPLE_RATE},atrim=duration=${iv.keptDuration.toFixed(6)},asetpts=PTS-STARTPTS[s${i}]`;
+      })
       .join(';');
-
-    const concatInputs = speechSegments.map((_, i) => `[s${i}]`).join('');
-    const filterGraph = `${segmentFilters};${concatInputs}concat=n=${speechSegments.length}:v=0:a=1[aout]`;
+    const concatInputs = keptIntervals.map((_, i) => `[s${i}]`).join('');
+    const filterGraph = `${segmentFilters};${concatInputs}concat=n=${keptIntervals.length}:v=0:a=1[aout]`;
 
     await ffmpeg.exec([
       '-hide_banner',

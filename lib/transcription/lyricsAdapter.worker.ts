@@ -100,6 +100,35 @@ function retryInstruction(retryCount: number): string {
   return `\nIMPORTANT: This is retry attempt ${retryCount}. Widen your search as broadly as possible — accept any plausible lyric correspondence even if similarity is low.`;
 }
 
+/**
+ * Builds a prompt for bounded retries — explicitly tells the model that the
+ * lyric excerpt was narrowed using already-resolved surrounding segments.
+ */
+function buildBoundedPrompt(
+  verse: string,
+  lyrics: string,
+  retryCount = 0,
+): string {
+  const base =
+    `You are retrying this segment with a deliberately reduced lyric context, bounded by nearby segments that were already resolved. The target transcription is very likely contained within the lyric excerpt below. Restrict your reasoning to this excerpt and return the best matching lyric span from within it.
+You receive:
+- LYRIC EXCERPT: a deliberately narrowed portion of the song's lyrics, bounded by previously resolved segments.
+- CAPTURED VERSE (may contain recognition errors).
+Task (minimal intervention):
+1) Find 1 or more CONSECUTIVE LINES from the LYRIC EXCERPT that best match the CAPTURED VERSE.
+2) Return ONLY the corrected text:
+   - preserve all accents and punctuation from LYRIC EXCERPT;
+   - you may merge consecutive lines using a comma or period;
+   - normalise capitalisation after commas (use lower case unless proper nouns/acronyms).
+3) Do not include labels, explanations, or extra text. Reply ONLY with the final text.
+LYRIC EXCERPT:
+${lyrics}
+CAPTURED VERSE:
+${verse}`.trim();
+
+  return retryCount > 0 ? base + retryInstruction(retryCount) : base;
+}
+
 function buildPrompt(verse: string, lyrics: string, retryCount = 0): string {
   const base = `You receive:
 - ORIGINAL LYRICS in the song's language (one line per verse).
@@ -157,8 +186,15 @@ async function adaptChunk(
   skipLLM: boolean,
   jobId: number,
   retryCount: number,
+  isBoundedRetry: boolean,
   onModelProgress: (progress: number, status: string) => void,
-): Promise<{ adaptedText: string; status: AdaptationStatus; score: number }> {
+): Promise<{
+  adaptedText: string;
+  status: AdaptationStatus;
+  score: number;
+  lyricIdxStart?: number;
+  lyricIdxEnd?: number;
+}> {
   const spanMax = effectiveSpanMax(retryCount);
   const { correct: correctThreshold, possible: possibleThreshold } =
     effectiveThresholds(retryCount);
@@ -174,6 +210,8 @@ async function adaptChunk(
       adaptedText: joinSpanWithPunctuation(best.lines),
       status: 'matched',
       score: best.score,
+      lyricIdxStart: best.idxStart,
+      lyricIdxEnd: best.idxEnd,
     };
   }
 
@@ -188,13 +226,22 @@ async function adaptChunk(
         console.debug(
           `[lyricsAdapter.worker] adaptChunk jobId=${jobId} — cancelled while loading model`,
         );
+        const resolved = best.score >= possibleThreshold;
         return {
           adaptedText: joinSpanWithPunctuation(best.lines),
-          status: best.score >= possibleThreshold ? 'corrected' : 'unmatched',
+          status: resolved ? 'corrected' : 'unmatched',
           score: best.score,
+          lyricIdxStart: resolved ? best.idxStart : undefined,
+          lyricIdxEnd: resolved ? best.idxEnd : undefined,
         };
       }
-      const prompt = buildPrompt(verse, lyricsText, retryCount);
+      const prompt = isBoundedRetry
+        ? buildBoundedPrompt(verse, lyricsText, retryCount)
+        : buildPrompt(verse, lyricsText, retryCount);
+      console.debug(
+        `[lyricsAdapter.worker] adaptChunk jobId=${jobId} retryCount=${retryCount} ` +
+          `isBoundedRetry=${isBoundedRetry} — LLM prompt:\n${prompt}`,
+      );
       const output = await pipe(prompt, {
         temperature: 0.1,
         max_new_tokens: 96,
@@ -228,6 +275,8 @@ async function adaptChunk(
             adaptedText: joinSpanWithPunctuation(llmBest.lines),
             status: 'corrected',
             score: llmBest.score,
+            lyricIdxStart: llmBest.idxStart,
+            lyricIdxEnd: llmBest.idxEnd,
           };
         }
       }
@@ -249,6 +298,8 @@ async function adaptChunk(
       adaptedText: joinSpanWithPunctuation(best.lines),
       status: 'corrected',
       score: best.score,
+      lyricIdxStart: best.idxStart,
+      lyricIdxEnd: best.idxEnd,
     };
   }
 
@@ -269,13 +320,8 @@ async function adaptChunk(
 
 let activeJobId = -1;
 
-/**
- * Maximum number of automatic retries performed for unmatched chunks during a
- * batch `adapt` run. Mirrors the manual retry button so that `retryCount` on
- * the returned chunk accurately reflects all prior attempts, and the user's
- * first manual retry continues from where the automatic ones left off.
- */
-const MAX_AUTO_RETRIES = 3;
+// Automatic retries removed: manual retry via UI and automatic bounded retry
+// (triggered by useLyricsAdaptation) remain available via `retry-chunk`.
 
 // ---------------------------------------------------------------------------
 // Message handler
@@ -301,34 +347,45 @@ async function handleMessage(request: LyricsAdapterRequest): Promise<void> {
 
   // ── retry-chunk ──────────────────────────────────────────────────────────
   if (request.type === 'retry-chunk') {
-    const { jobId, index, rawText, timestamp, lyrics, retryCount } = request;
+    const {
+      jobId,
+      index,
+      rawText,
+      timestamp,
+      lyrics,
+      retryCount,
+      isBoundedRetry = false,
+      lyricsLineOffset = 0,
+    } = request;
     activeJobId = jobId;
 
     console.debug(
       `[lyricsAdapter.worker] retry-chunk start — jobId=${jobId} index=${index} ` +
-        `retryCount=${retryCount} rawText="${rawText}"`,
+        `retryCount=${retryCount} isBoundedRetry=${isBoundedRetry} rawText="${rawText}"`,
     );
 
     const lyricsLines = parseLyricsLines(lyrics);
 
     try {
-      const { adaptedText, status, score } = await adaptChunk(
-        rawText,
-        lyricsLines,
-        lyrics,
-        false, // never skip LLM on explicit retry
-        jobId,
-        retryCount,
-        (progress, s) => {
-          if (activeJobId !== jobId) return;
-          self.postMessage({
-            type: 'model-progress',
-            jobId,
-            progress,
-            status: s,
-          } satisfies LyricsAdapterResponse);
-        },
-      );
+      const { adaptedText, status, score, lyricIdxStart, lyricIdxEnd } =
+        await adaptChunk(
+          rawText,
+          lyricsLines,
+          lyrics,
+          false, // never skip LLM on explicit retry
+          jobId,
+          retryCount,
+          isBoundedRetry,
+          (progress, s) => {
+            if (activeJobId !== jobId) return;
+            self.postMessage({
+              type: 'model-progress',
+              jobId,
+              progress,
+              status: s,
+            } satisfies LyricsAdapterResponse);
+          },
+        );
 
       if (activeJobId !== jobId) {
         console.debug(
@@ -345,6 +402,14 @@ async function handleMessage(request: LyricsAdapterRequest): Promise<void> {
         status,
         score,
         retryCount,
+        lyricIdxStart:
+          lyricIdxStart !== undefined
+            ? lyricIdxStart + lyricsLineOffset
+            : undefined,
+        lyricIdxEnd:
+          lyricIdxEnd !== undefined
+            ? lyricIdxEnd + lyricsLineOffset
+            : undefined,
       };
 
       console.debug(
@@ -428,42 +493,20 @@ async function handleMessage(request: LyricsAdapterRequest): Promise<void> {
       };
 
       // Initial adaptation pass.
-      let adapted = await adaptChunk(
+      const adapted = await adaptChunk(
         verse,
         lyricsLines,
         lyrics,
         skipLLM,
         jobId,
         0, // initial adaptation always starts at retryCount=0
+        false, // never a bounded retry on the initial pass
         onProgress,
       );
 
-      // Automatically retry unmatched chunks up to MAX_AUTO_RETRIES times,
-      // escalating the prompt breadth on each attempt. This mirrors the manual
-      // retry button so that retryCount reflects all attempts — if the user
-      // triggers an additional manual retry afterwards, the count continues
-      // from here rather than restarting from 1.
-      let autoRetryCount = 0;
-      while (
-        adapted.status === 'unmatched' &&
-        autoRetryCount < MAX_AUTO_RETRIES &&
-        activeJobId === jobId
-      ) {
-        autoRetryCount += 1;
-        console.debug(
-          `[lyricsAdapter.worker] auto-retry ${autoRetryCount}/${MAX_AUTO_RETRIES} — ` +
-            `jobId=${jobId} index=${i}`,
-        );
-        adapted = await adaptChunk(
-          verse,
-          lyricsLines,
-          lyrics,
-          false, // always use LLM on auto-retry
-          jobId,
-          autoRetryCount,
-          onProgress,
-        );
-      }
+      // Note: automatic bounded retries are coordinated by useLyricsAdaptation
+      // after the initial pass completes. Manual retry is also available via
+      // the UI (`retry-chunk` message with isBoundedRetry=false).
 
       if (activeJobId !== jobId) break;
 
@@ -475,7 +518,9 @@ async function handleMessage(request: LyricsAdapterRequest): Promise<void> {
         timestamp: chunk.timestamp,
         status: adapted.status,
         score: adapted.score,
-        retryCount: autoRetryCount,
+        retryCount: 0,
+        lyricIdxStart: adapted.lyricIdxStart,
+        lyricIdxEnd: adapted.lyricIdxEnd,
       };
       results.push(result);
       self.postMessage({

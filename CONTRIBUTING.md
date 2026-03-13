@@ -16,9 +16,12 @@ Thank you for your interest in contributing.
 2. Create a feature branch following the naming conventions below.
 3. Make your changes.
 4. Run tests (`npm test`).
-5. Run the linter (`npm run lint`).
-6. Format code (`npm run format`).
-7. Run the type check (`npm run type-check`).
+6. Run the linter (`npm run lint`).
+7. Format code (`npm run format`).
+8. Run the type check (`npm run type-check`).
+9. If you added or changed user-visible strings, add translation keys to
+	both `messages/en-US.json` and `messages/pt-BR.json` and include them in
+	your PR.
 8. Commit your changes using conventional commits.
 9. Push to the branch.
 10. Open a Pull Request against `develop`.

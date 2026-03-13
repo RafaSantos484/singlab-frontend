@@ -9,6 +9,16 @@ export interface TranscriptionProgressItem {
 
 export interface TranscriptChunk {
   text: string;
+  /**
+   * Timestamp range relative to the processed (silence-removed) audio.
+   * This value is always provided by the transcription worker as it
+   * produces streaming updates.
+   */
+  processedTimestamp: [number, number | null];
+  /**
+   * Timestamp range remapped to the original vocals timeline. When a
+   * remapping is not available yet this will equal `processedTimestamp`.
+   */
   timestamp: [number, number | null];
 }
 
@@ -22,7 +32,6 @@ export interface TranscriptionSettings {
   model: string;
   multilingual: boolean;
   quantized: boolean;
-  subtask: 'transcribe' | 'translate';
   language: string;
 }
 
@@ -31,8 +40,9 @@ export interface WorkerTranscriptionRequest {
   model: string;
   multilingual: boolean;
   quantized: boolean;
-  subtask: 'transcribe' | 'translate' | null;
   language: string | null;
+  /** Index of the speech segment when transcribing per-segment. */
+  segmentIndex: number;
 }
 
 export interface WorkerStopRequest {
@@ -50,9 +60,12 @@ export interface WorkerTranscriptionUpdateMessage {
 export interface WorkerTranscriptionCompleteMessage {
   status: 'complete';
   task: 'automatic-speech-recognition';
+  // For the current per-segment-only flow `data` contains text and the
+  // `segmentIndex` identifying which speech segment this transcript refers
+  // to. Legacy chunked results are no longer emitted.
   data: {
     text: string;
-    chunks: TranscriptChunk[];
+    segmentIndex: number;
   };
 }
 
