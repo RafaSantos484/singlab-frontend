@@ -25,6 +25,7 @@ Key points for maintainers
   - The hook and UI now cache a processed audio `Blob` per Transcription
     dialog session to avoid re-running FFmpeg repeatedly; callers should
     be aware of in-memory blob lifetimes when profiling memory usage.
+  - Inline editing: the Transcription UI (`TranscriptionDialog`) now exposes an inline edit workflow for adapted lyric chunks. The `useLyricsAdaptation` hook provides an `editChunk(index, newText)` method that lets the UI persist manual corrections; corrected chunks are marked with a `corrected` status. When changing UI behavior or the adaptation state shape, update this README and the `useLyricsAdaptation` types.
 - New helper: `lib/audio/sliceWav.ts` — creates a valid WAV `Blob` for a
   requested time slice (reads headers and copies PCM frames). Useful for
   creating per-segment object URLs used by the UI players.
