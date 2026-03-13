@@ -1,10 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type {
-  AdaptedChunk,
-  LyricsAdapterRequest,
-  LyricsAdapterResponse,
+import {
+  buildBoundedLyricScope,
+  findNextResolved,
+  findPrevResolved,
+  isResolvedChunk,
+  parseLyricsLines,
+  type AdaptedChunk,
+  type LyricsAdapterRequest,
+  type LyricsAdapterResponse,
 } from '@/lib/transcription/lyricsAdapter';
 import type { TranscriptChunk } from '@/lib/transcription/types';
 import { startPendingActivity } from '@/lib/async/pendingActivity';
@@ -20,8 +25,13 @@ interface UseLyricsAdaptationReturn {
   lyrics: string;
   setLyrics: (text: string) => void;
   state: LyricsAdaptationState;
-  /** Index of the chunk currently being retried, or null. */
+  /** Index of the chunk currently being retried (manual or auto), or null. */
   retryingIndex: number | null;
+  /**
+   * True while the automatic post-pass retry loop is running over unmatched
+   * segments. Cleared when the loop converges or exhausts all segments.
+   */
+  isAutoRetrying: boolean;
   /**
    * Error from the most recent retry attempt, if any.
    * Unlike `state.phase === 'error'`, this does NOT replace the results list —
@@ -58,35 +68,75 @@ function createWorker(): Worker {
  * ensures stale messages from cancelled or superseded jobs are silently
  * discarded before they can mutate state.
  *
- * `retryChunk` posts a `retry-chunk` message to the worker, uses
- * `startPendingActivity` to block page navigation for the duration, and patches
- * the specific result in the `done` state when the worker responds with
- * `retry-chunk-done`.
+ * After the initial adaptation pass completes, an automatic iterative retry
+ * loop runs over any segments still marked `unmatched`. Each segment is
+ * retried with a narrowed lyric scope derived from the nearest resolved
+ * neighbours (matched/corrected/user-edited). The loop repeats until no
+ * unmatched segment is newly resolved in a round, or all segments are resolved.
+ *
+ * `retryChunk` posts a `retry-chunk` message to the worker for a single manual
+ * retry, uses `startPendingActivity` to block page navigation, and patches the
+ * specific result in the `done` state on `retry-chunk-done`.
  */
 export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
   const [lyrics, setLyrics] = useState('');
   const [state, setState] = useState<LyricsAdaptationState>({ phase: 'idle' });
   /**
-   * Index of the chunk currently being retried.
-   * `null` when no retry is in progress.
+   * Index of the chunk currently being retried (manual or auto), or null.
    */
   const [retryingIndex, setRetryingIndex] = useState<number | null>(null);
   /**
-   * Non-null when a single-chunk retry produced an error.
-   * Unlike a batch adaptation error, this does not overwrite the results list.
+   * True while the automatic post-pass retry loop is running.
+   */
+  const [isAutoRetrying, setIsAutoRetrying] = useState(false);
+  /**
+   * Non-null when a retry attempt produced an error.
+   * Does not replace the results list; shown alongside it.
    */
   const [retryError, setRetryError] = useState<string | null>(null);
+
+  /**
+   * Captures the lyrics string at the moment `adapt` is called so that the
+   * auto-retry coordinator always uses the same lyrics as the initial pass,
+   * even if the user edits the textarea afterwards.
+   * Updated inside `adapt` (not during render).
+   */
+  const adaptedLyricsRef = useRef('');
+  /**
+   * Mirror of the most-recent `done` results array.
+   * Updated whenever results change (complete, retry-chunk-done, editChunk)
+   * so that `retryChunk` can compute bounded lyric scope without reading stale
+   * React state inside a callback closure.
+   */
+  const latestResultsRef = useRef<AdaptedChunk[]>([]);
 
   const workerRef = useRef<Worker | null>(null);
   /** Incremented on every new job and every cancel/reset to filter stale messages. */
   const jobIdRef = useRef(0);
-  /** Finish function returned by startPendingActivity during a retry. */
+  /** Finish function returned by startPendingActivity during a manual retry. */
   const retryPendingFinishRef = useRef<(() => void) | null>(null);
   /**
-   * Ref-based mirror of `retryingIndex !== null`, used inside the `onmessage`
-   * closure where React state is stale due to closure capture.
+   * Ref mirror of `retryingIndex !== null` / `isAutoRetrying`, used inside
+   * the `onmessage` closure to suppress `loading-model` state transitions while
+   * any retry (manual or automatic) is in progress.
    */
   const isRetryingRef = useRef(false);
+
+  // ── Auto-retry coordinator refs ──────────────────────────────────────────
+  /** True while the automatic retry loop is running. */
+  const isAutoRetryingRef = useRef(false);
+  /** Remaining segments to dispatch in the current auto-retry round. */
+  const autoRetryQueueRef = useRef<AdaptedChunk[]>([]);
+  /** Number of newly resolved segments in the current round. */
+  const autoRetryRoundResolvedRef = useRef(0);
+  /**
+   * Snapshot of all results, kept in sync as auto-retry patches individual
+   * chunks. Used for boundary computation in the next dispatch.
+   */
+  const autoRetryAllResultsRef = useRef<AdaptedChunk[]>([]);
+  /** Finish function for the single `startPendingActivity` span covering the
+   *  entire auto-retry session. */
+  const autoRetryPendingFinishRef = useRef<(() => void) | null>(null);
 
   /** Lazily creates the worker and wires the message handler exactly once. */
   const getWorker = useCallback((): Worker => {
@@ -94,10 +144,135 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
       const w = createWorker();
       workerRef.current = w;
 
+      // ── Internal auto-retry helpers (close over refs only — stable) ──────
+
+      /**
+       * Ends the auto-retry session and cleans up all coordinator state.
+       */
+      function endAutoRetry(): void {
+        console.debug('[useLyricsAdaptation] auto-retry complete — ending session');
+        isAutoRetryingRef.current = false;
+        isRetryingRef.current = false;
+        autoRetryPendingFinishRef.current?.();
+        autoRetryPendingFinishRef.current = null;
+        autoRetryQueueRef.current = [];
+        autoRetryRoundResolvedRef.current = 0;
+        autoRetryAllResultsRef.current = [];
+        setIsAutoRetrying(false);
+        setRetryingIndex(null);
+      }
+
+      /**
+       * Called when a round drains. Starts another round if any segments were
+       * resolved; otherwise ends the auto-retry session.
+       */
+      function finishAutoRetryRound(): void {
+        const resolved = autoRetryRoundResolvedRef.current;
+        const remaining = autoRetryAllResultsRef.current.filter(
+          (r) => !isResolvedChunk(r) && r.rawText.trim().length > 0,
+        );
+
+        console.debug(
+          `[useLyricsAdaptation] auto-retry round finished — resolved=${resolved} remaining=${remaining.length}`,
+        );
+
+        if (resolved > 0 && remaining.length > 0) {
+          autoRetryRoundResolvedRef.current = 0;
+          autoRetryQueueRef.current = [...remaining];
+          dispatchNextAutoRetry(); // start next round
+          return;
+        }
+        endAutoRetry();
+      }
+
+      /**
+       * Iterates over the auto-retry queue, skipping segments whose lyric
+       * window cannot be bounded, and dispatches the first dispatchable chunk
+       * to the worker. Calls `finishAutoRetryRound` when the queue is empty.
+       */
+      function dispatchNextAutoRetry(): void {
+        const allLines = parseLyricsLines(adaptedLyricsRef.current);
+        const allResults = autoRetryAllResultsRef.current;
+
+        while (autoRetryQueueRef.current.length > 0) {
+          // Peek at the head of the queue.
+          const chunk = autoRetryQueueRef.current[0];
+          autoRetryQueueRef.current = autoRetryQueueRef.current.slice(1);
+
+          const prev = findPrevResolved(allResults, chunk.index);
+          const next = findNextResolved(allResults, chunk.index);
+          const bounded = buildBoundedLyricScope(allLines, prev, next);
+
+          if (!bounded) {
+            // No usable boundary — skip this segment in this round.
+            console.debug(
+              `[useLyricsAdaptation] auto-retry: skipping index=${chunk.index} (no boundary)`,
+            );
+            continue;
+          }
+
+          // Dispatch.
+          const jobId = jobIdRef.current + 1;
+          jobIdRef.current = jobId;
+          setRetryingIndex(chunk.index);
+
+          console.debug(
+            `[useLyricsAdaptation] auto-retry: dispatching index=${chunk.index} ` +
+              `retryCount=${chunk.retryCount + 1} boundedLines=${bounded.startLine}+${
+                bounded.lyrics.split('\n').length
+              }`,
+          );
+
+          w.postMessage({
+            type: 'retry-chunk',
+            jobId,
+            index: chunk.index,
+            rawText: chunk.rawText,
+            timestamp: chunk.timestamp,
+            lyrics: bounded.lyrics,
+            retryCount: chunk.retryCount + 1,
+            isBoundedRetry: true,
+            lyricsLineOffset: bounded.startLine,
+          } satisfies LyricsAdapterRequest);
+          return; // wait for reply before dispatching next
+        }
+
+        // Queue is empty.
+        finishAutoRetryRound();
+      }
+
+      /**
+       * Starts the first auto-retry round for the given results.
+       * No-op if there are no unmatched segments.
+       */
+      function startAutoRetry(results: AdaptedChunk[]): void {
+        const unmatched = results.filter(
+          (r) => !isResolvedChunk(r) && r.rawText.trim().length > 0,
+        );
+        if (unmatched.length === 0) return;
+
+        console.debug(
+          `[useLyricsAdaptation] starting auto-retry — ${unmatched.length} unmatched segments`,
+        );
+
+        autoRetryAllResultsRef.current = [...results];
+        autoRetryQueueRef.current = [...unmatched];
+        autoRetryRoundResolvedRef.current = 0;
+        isAutoRetryingRef.current = true;
+        isRetryingRef.current = true;
+        autoRetryPendingFinishRef.current?.();
+        autoRetryPendingFinishRef.current = startPendingActivity();
+        setIsAutoRetrying(true);
+
+        dispatchNextAutoRetry();
+      }
+
+      // ── Worker message handler ────────────────────────────────────────────
+
       w.onmessage = (event: MessageEvent<LyricsAdapterResponse>): void => {
         const msg = event.data;
 
-        // 'cancelled' has no jobId — state was already set by cancel/reset.
+        // 'cancelled' has no jobId — state was already reset by cancel/reset.
         if (msg.type === 'cancelled') return;
 
         // Discard stale messages from previous jobs.
@@ -105,8 +280,8 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
 
         switch (msg.type) {
           case 'model-progress':
-            // While a single-chunk retry is loading the model, suppress the
-            // 'loading-model' state transition to preserve the visible results list.
+            // While any retry is loading the model, suppress the
+            // 'loading-model' state transition to preserve the results list.
             if (!isRetryingRef.current) {
               setState({
                 phase: 'loading-model',
@@ -121,35 +296,82 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
             break;
 
           case 'retry-chunk-done': {
+            const newResult = msg.result;
             console.debug(
-              `[useLyricsAdaptation] retry-chunk-done received — index=${msg.result.index} ` +
-                `status=${msg.result.status} score=${msg.result.score.toFixed(3)}`,
+              `[useLyricsAdaptation] retry-chunk-done — index=${newResult.index} ` +
+                `status=${newResult.status} score=${newResult.score.toFixed(3)} ` +
+                `autoRetry=${isAutoRetryingRef.current}`,
             );
-            // Finish pending activity guard.
-            retryPendingFinishRef.current?.();
-            retryPendingFinishRef.current = null;
-            isRetryingRef.current = false;
-            setRetryingIndex(null);
-            // Patch the specific result inside the done state.
-            setState((prev) => {
-              if (prev.phase !== 'done') return prev;
-              const next = prev.results.map((r) =>
-                r.index === msg.result.index ? msg.result : r,
+
+            if (isAutoRetryingRef.current) {
+              // ── Auto-retry path ──────────────────────────────────────────
+              // Update the working snapshot used for boundary computation.
+              autoRetryAllResultsRef.current = autoRetryAllResultsRef.current.map(
+                (r) => (r.index === newResult.index ? newResult : r),
               );
-              return { phase: 'done', results: next };
-            });
+              if (isResolvedChunk(newResult)) {
+                autoRetryRoundResolvedRef.current += 1;
+              }
+              // Patch the visible results list and keep latestResultsRef in sync.
+              setState((prev) => {
+                if (prev.phase !== 'done') return prev;
+                const next = prev.results.map((r) =>
+                  r.index === newResult.index ? newResult : r,
+                );
+                latestResultsRef.current = next;
+                return { phase: 'done', results: next };
+              });
+              // Continue driving the queue.
+              if (autoRetryQueueRef.current.length > 0) {
+                dispatchNextAutoRetry();
+              } else {
+                finishAutoRetryRound();
+              }
+            } else {
+              // ── Manual retry path (existing behaviour) ───────────────────
+              retryPendingFinishRef.current?.();
+              retryPendingFinishRef.current = null;
+              isRetryingRef.current = false;
+              setRetryingIndex(null);
+              setState((prev) => {
+                if (prev.phase !== 'done') return prev;
+                const next = prev.results.map((r) =>
+                  r.index === newResult.index ? newResult : r,
+                );
+                latestResultsRef.current = next;
+                return { phase: 'done', results: next };
+              });
+            }
             break;
           }
 
           case 'complete':
+            latestResultsRef.current = msg.results;
             setState({ phase: 'done', results: msg.results });
+            // Immediately begin the auto-retry pass for any unmatched segments.
+            startAutoRetry(msg.results);
             break;
 
           case 'error':
             retryPendingFinishRef.current?.();
             retryPendingFinishRef.current = null;
-            if (isRetryingRef.current) {
-              // Retry-specific error: preserve the existing results list.
+            if (isAutoRetryingRef.current) {
+              // Error during auto-retry — abort the session but preserve results.
+              console.warn(
+                '[useLyricsAdaptation] error during auto-retry, aborting session:',
+                msg.message,
+              );
+              autoRetryPendingFinishRef.current?.();
+              autoRetryPendingFinishRef.current = null;
+              isAutoRetryingRef.current = false;
+              isRetryingRef.current = false;
+              autoRetryQueueRef.current = [];
+              autoRetryRoundResolvedRef.current = 0;
+              setIsAutoRetrying(false);
+              setRetryingIndex(null);
+              setRetryError(msg.message);
+            } else if (isRetryingRef.current) {
+              // Manual retry error — preserve results.
               isRetryingRef.current = false;
               setRetryingIndex(null);
               setRetryError(msg.message);
@@ -163,8 +385,17 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
       w.onerror = (err: ErrorEvent): void => {
         retryPendingFinishRef.current?.();
         retryPendingFinishRef.current = null;
-        if (isRetryingRef.current) {
-          // Worker crashed during a retry: preserve the existing results list.
+        if (isAutoRetryingRef.current) {
+          autoRetryPendingFinishRef.current?.();
+          autoRetryPendingFinishRef.current = null;
+          isAutoRetryingRef.current = false;
+          isRetryingRef.current = false;
+          autoRetryQueueRef.current = [];
+          autoRetryRoundResolvedRef.current = 0;
+          setIsAutoRetrying(false);
+          setRetryingIndex(null);
+          setRetryError(err.message ?? 'Worker error');
+        } else if (isRetryingRef.current) {
           isRetryingRef.current = false;
           setRetryingIndex(null);
           setRetryError(err.message ?? 'Worker error');
@@ -180,7 +411,9 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
   useEffect(() => {
     return (): void => {
       retryPendingFinishRef.current?.();
+      autoRetryPendingFinishRef.current?.();
       isRetryingRef.current = false;
+      isAutoRetryingRef.current = false;
       workerRef.current?.terminate();
     };
   }, []);
@@ -192,7 +425,14 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
     worker.postMessage({ type: 'cancel' } satisfies LyricsAdapterRequest);
     retryPendingFinishRef.current?.();
     retryPendingFinishRef.current = null;
+    autoRetryPendingFinishRef.current?.();
+    autoRetryPendingFinishRef.current = null;
     isRetryingRef.current = false;
+    isAutoRetryingRef.current = false;
+    autoRetryQueueRef.current = [];
+    autoRetryRoundResolvedRef.current = 0;
+    autoRetryAllResultsRef.current = [];
+    setIsAutoRetrying(false);
     setRetryingIndex(null);
     setState({ phase: 'idle' });
   }, []);
@@ -205,7 +445,14 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
     }
     retryPendingFinishRef.current?.();
     retryPendingFinishRef.current = null;
+    autoRetryPendingFinishRef.current?.();
+    autoRetryPendingFinishRef.current = null;
     isRetryingRef.current = false;
+    isAutoRetryingRef.current = false;
+    autoRetryQueueRef.current = [];
+    autoRetryRoundResolvedRef.current = 0;
+    autoRetryAllResultsRef.current = [];
+    setIsAutoRetrying(false);
     setRetryingIndex(null);
     setRetryError(null);
     setState({ phase: 'idle' });
@@ -216,6 +463,9 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
       const worker = getWorker();
       const jobId = jobIdRef.current + 1;
       jobIdRef.current = jobId;
+
+      // Capture lyrics for auto-retry (must use the same lyrics as this pass).
+      adaptedLyricsRef.current = lyrics;
 
       setRetryError(null);
       const total = chunks.filter((c) => c.text.trim().length > 0).length;
@@ -234,9 +484,22 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
 
   const retryChunk = useCallback(
     (chunk: AdaptedChunk): void => {
+      const allResults = latestResultsRef.current;
+      const allLines = parseLyricsLines(
+        adaptedLyricsRef.current || lyrics,
+      );
+      const prev = findPrevResolved(allResults, chunk.index);
+      const next = findNextResolved(allResults, chunk.index);
+      const bounded = buildBoundedLyricScope(allLines, prev, next);
+
+      const lyricsToSend = bounded ? bounded.lyrics : lyrics;
+      const isBoundedRetry = !!bounded;
+      const lyricsLineOffset = bounded ? bounded.startLine : 0;
+
       console.debug(
-        `[useLyricsAdaptation] retryChunk — index=${chunk.index} ` +
-          `currentRetryCount=${chunk.retryCount} rawText="${chunk.rawText}"`,
+        `[useLyricsAdaptation] retryChunk (manual) — index=${chunk.index} ` +
+          `currentRetryCount=${chunk.retryCount} isBoundedRetry=${isBoundedRetry} ` +
+          `lyricsLineOffset=${lyricsLineOffset} rawText="${chunk.rawText}"`,
       );
 
       const worker = getWorker();
@@ -257,8 +520,10 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
         index: chunk.index,
         rawText: chunk.rawText,
         timestamp: chunk.timestamp,
-        lyrics,
+        lyrics: lyricsToSend,
         retryCount: chunk.retryCount + 1,
+        isBoundedRetry,
+        lyricsLineOffset,
       } satisfies LyricsAdapterRequest);
     },
     [getWorker, lyrics],
@@ -273,6 +538,7 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
             ? { ...r, adaptedText: newText, status: 'corrected' as const }
             : r,
         );
+        latestResultsRef.current = next;
         return { phase: 'done', results: next };
       });
     },
@@ -284,6 +550,7 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
     setLyrics,
     state,
     retryingIndex,
+    isAutoRetrying,
     retryError,
     adapt,
     retryChunk,
