@@ -150,7 +150,9 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
        * Ends the auto-retry session and cleans up all coordinator state.
        */
       function endAutoRetry(): void {
-        console.debug('[useLyricsAdaptation] auto-retry complete — ending session');
+        console.debug(
+          '[useLyricsAdaptation] auto-retry complete — ending session',
+        );
         isAutoRetryingRef.current = false;
         isRetryingRef.current = false;
         autoRetryPendingFinishRef.current?.();
@@ -306,9 +308,10 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
             if (isAutoRetryingRef.current) {
               // ── Auto-retry path ──────────────────────────────────────────
               // Update the working snapshot used for boundary computation.
-              autoRetryAllResultsRef.current = autoRetryAllResultsRef.current.map(
-                (r) => (r.index === newResult.index ? newResult : r),
-              );
+              autoRetryAllResultsRef.current =
+                autoRetryAllResultsRef.current.map((r) =>
+                  r.index === newResult.index ? newResult : r,
+                );
               if (isResolvedChunk(newResult)) {
                 autoRetryRoundResolvedRef.current += 1;
               }
@@ -485,9 +488,7 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
   const retryChunk = useCallback(
     (chunk: AdaptedChunk): void => {
       const allResults = latestResultsRef.current;
-      const allLines = parseLyricsLines(
-        adaptedLyricsRef.current || lyrics,
-      );
+      const allLines = parseLyricsLines(adaptedLyricsRef.current || lyrics);
       const prev = findPrevResolved(allResults, chunk.index);
       const next = findNextResolved(allResults, chunk.index);
       const bounded = buildBoundedLyricScope(allLines, prev, next);
@@ -529,21 +530,18 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
     [getWorker, lyrics],
   );
 
-  const editChunk = useCallback(
-    (index: number, newText: string): void => {
-      setState((prev) => {
-        if (prev.phase !== 'done') return prev;
-        const next = prev.results.map((r) =>
-          r.index === index
-            ? { ...r, adaptedText: newText, status: 'corrected' as const }
-            : r,
-        );
-        latestResultsRef.current = next;
-        return { phase: 'done', results: next };
-      });
-    },
-    [],
-  );
+  const editChunk = useCallback((index: number, newText: string): void => {
+    setState((prev) => {
+      if (prev.phase !== 'done') return prev;
+      const next = prev.results.map((r) =>
+        r.index === index
+          ? { ...r, adaptedText: newText, status: 'corrected' as const }
+          : r,
+      );
+      latestResultsRef.current = next;
+      return { phase: 'done', results: next };
+    });
+  }, []);
 
   return {
     lyrics,

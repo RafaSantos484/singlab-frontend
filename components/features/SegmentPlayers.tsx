@@ -12,7 +12,13 @@ interface Props {
   t: (key: string, params?: Record<string, unknown>) => string;
 }
 
-export function SegmentPlayers({ speechSegments, segmentUrls, processedAudioUrl, show, t }: Props): React.ReactElement {
+export function SegmentPlayers({
+  speechSegments,
+  segmentUrls,
+  processedAudioUrl,
+  show,
+  t,
+}: Props): React.ReactElement {
   return (
     <>
       <Collapse in={show}>
@@ -20,17 +26,30 @@ export function SegmentPlayers({ speechSegments, segmentUrls, processedAudioUrl,
           {speechSegments.length > 0 ? (
             speechSegments.map((seg, i) => {
               const src = segmentUrls[i] ?? processedAudioUrl ?? undefined;
-              const duration = seg.processedEnd !== null && seg.processedStart !== null
-                ? (seg.processedEnd - seg.processedStart)
-                : null;
+              const duration =
+                seg.processedEnd !== null && seg.processedStart !== null
+                  ? seg.processedEnd - seg.processedStart
+                  : null;
               return (
                 <Box key={`seg-player-${i}`} sx={{ mb: 1 }}>
-                  <Typography variant="caption" sx={{ fontFamily: 'monospace', display: 'block' }}>
-                    {t('segmentLabel', { index: i + 1 })} — {t('timestampProcessedLabel')}: {formatTimestamp(seg.processedStart)} — {formatTimestamp(seg.processedEnd)}
+                  <Typography
+                    variant="caption"
+                    sx={{ fontFamily: 'monospace', display: 'block' }}
+                  >
+                    {t('segmentLabel', { index: i + 1 })} —{' '}
+                    {t('timestampProcessedLabel')}:{' '}
+                    {formatTimestamp(seg.processedStart)} —{' '}
+                    {formatTimestamp(seg.processedEnd)}
                   </Typography>
                   {duration !== null && (
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                      {t('segmentDurationLabel', { duration: duration.toFixed(2) })}
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: 'block' }}
+                    >
+                      {t('segmentDurationLabel', {
+                        duration: duration.toFixed(2),
+                      })}
                     </Typography>
                   )}
                   <Box
@@ -44,7 +63,12 @@ export function SegmentPlayers({ speechSegments, segmentUrls, processedAudioUrl,
               );
             })
           ) : (
-            <Box component="audio" controls src={processedAudioUrl ?? undefined} sx={{ width: '100%', display: 'block' }} />
+            <Box
+              component="audio"
+              controls
+              src={processedAudioUrl ?? undefined}
+              sx={{ width: '100%', display: 'block' }}
+            />
           )}
         </Box>
       </Collapse>

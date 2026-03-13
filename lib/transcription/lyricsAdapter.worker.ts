@@ -104,8 +104,13 @@ function retryInstruction(retryCount: number): string {
  * Builds a prompt for bounded retries — explicitly tells the model that the
  * lyric excerpt was narrowed using already-resolved surrounding segments.
  */
-function buildBoundedPrompt(verse: string, lyrics: string, retryCount = 0): string {
-  const base = `You are retrying this segment with a deliberately reduced lyric context, bounded by nearby segments that were already resolved. The target transcription is very likely contained within the lyric excerpt below. Restrict your reasoning to this excerpt and return the best matching lyric span from within it.
+function buildBoundedPrompt(
+  verse: string,
+  lyrics: string,
+  retryCount = 0,
+): string {
+  const base =
+    `You are retrying this segment with a deliberately reduced lyric context, bounded by nearby segments that were already resolved. The target transcription is very likely contained within the lyric excerpt below. Restrict your reasoning to this excerpt and return the best matching lyric span from within it.
 You receive:
 - LYRIC EXCERPT: a deliberately narrowed portion of the song's lyrics, bounded by previously resolved segments.
 - CAPTURED VERSE (may contain recognition errors).

@@ -82,7 +82,10 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
   const safeT = useCallback(
     (key: string, params?: Record<string, unknown>): string => {
       try {
-        const translated = t(key as unknown as Parameters<typeof t>[0], params as unknown as Parameters<typeof t>[1]);
+        const translated = t(
+          key as unknown as Parameters<typeof t>[0],
+          params as unknown as Parameters<typeof t>[1],
+        );
         if (typeof translated === 'string' && translated !== key) {
           return translated;
         }
@@ -93,7 +96,9 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
       // Fallback to English messages bundle
       try {
         const parts = key.split('.');
-        let cur: unknown = (enUSMessages as unknown as Record<string, unknown>)['Transcription'];
+        let cur: unknown = (enUSMessages as unknown as Record<string, unknown>)[
+          'Transcription'
+        ];
         for (const p of parts) {
           if (!cur || typeof cur !== 'object') break;
           cur = (cur as Record<string, unknown>)[p];
@@ -112,7 +117,8 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
       }
 
       // Final generic fallback
-      const suggestion = params && (params as Record<string, unknown>)['suggestion'];
+      const suggestion =
+        params && (params as Record<string, unknown>)['suggestion'];
       if (suggestion) {
         return `The model failed to run due to insufficient memory. Try a lighter model (e.g., ${String(suggestion)}) or enable quantized mode.`;
       }
@@ -123,7 +129,9 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
   const workerRef = useRef<Worker | null>(null);
   const speechSegmentsRef = useRef<SpeechSegment[]>([]);
   // Pending resolvers for per-segment transcription results.
-  const pendingSegmentResolversRef = useRef<Map<number, (text: string) => void>>(new Map());
+  const pendingSegmentResolversRef = useRef<
+    Map<number, (text: string) => void>
+  >(new Map());
 
   const [output, setOutput] = useState<TranscriptionOutput | undefined>(
     undefined,
@@ -252,7 +260,9 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
               lower.includes('ortrun')
             ) {
               // Suggest a lighter model to the user via safe translation.
-              setError(safeT('errors.modelOOM', { suggestion: 'Xenova/whisper-base' }));
+              setError(
+                safeT('errors.modelOOM', { suggestion: 'Xenova/whisper-base' }),
+              );
             } else {
               // Use safe translate for generic transcription errors when
               // possible; otherwise fall back to the raw message.
@@ -407,7 +417,10 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
           const seg = speechOnly[i];
           // Convert processedStart/end (seconds) to sample indices.
           const startSample = Math.max(0, Math.floor(seg.processedStart * sr));
-          const endSample = Math.max(startSample, Math.floor(seg.processedEnd * sr));
+          const endSample = Math.max(
+            startSample,
+            Math.floor(seg.processedEnd * sr),
+          );
           const segmentAudio = processedAudio.slice(startSample, endSample);
 
           // Prepare a promise that resolves when the worker returns the
@@ -419,33 +432,50 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
           // Post transcription request for this segment.
           // Transfer the underlying ArrayBuffer to the worker to avoid
           // copying large Float32Array buffers on each segment.
-          worker.postMessage({
-            audio: segmentAudio,
-            model: settings.model,
-            multilingual: settings.multilingual,
-            quantized: settings.quantized,
-            language:
-              settings.multilingual && settings.language !== 'auto'
-                ? settings.language
-                : null,
-            segmentIndex: i,
-          } satisfies WorkerRequest, [segmentAudio.buffer]);
+          worker.postMessage(
+            {
+              audio: segmentAudio,
+              model: settings.model,
+              multilingual: settings.multilingual,
+              quantized: settings.quantized,
+              language:
+                settings.multilingual && settings.language !== 'auto'
+                  ? settings.language
+                  : null,
+              segmentIndex: i,
+            } satisfies WorkerRequest,
+            [segmentAudio.buffer],
+          );
 
           // Await result and build a chunk using the silence map timings.
           const text = await textPromise;
           const chunk = {
             text,
-            processedTimestamp: [seg.processedStart, seg.processedEnd] as [number, number | null],
-            timestamp: [seg.originalStart, seg.originalEnd] as [number, number | null],
+            processedTimestamp: [seg.processedStart, seg.processedEnd] as [
+              number,
+              number | null,
+            ],
+            timestamp: [seg.originalStart, seg.originalEnd] as [
+              number,
+              number | null,
+            ],
           };
           chunks.push(chunk);
 
           // Update intermediate UI progressively so users see partial results.
-          setOutput({ isBusy: true, text: chunks.map((c) => c.text).join(''), chunks });
+          setOutput({
+            isBusy: true,
+            text: chunks.map((c) => c.text).join(''),
+            chunks,
+          });
         }
 
         // Finalize
-        setOutput({ isBusy: false, text: chunks.map((c) => c.text).join(''), chunks });
+        setOutput({
+          isBusy: false,
+          text: chunks.map((c) => c.text).join(''),
+          chunks,
+        });
         setIsBusy(false);
         endPendingActivity();
       })();

@@ -35,7 +35,10 @@ import EditIcon from '@mui/icons-material/Edit';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
 import { useLocale, useTranslations } from 'next-intl';
-import { removeSilencesFromVocals, type SpeechSegment } from '@/lib/audio/ffmpegVocals';
+import {
+  removeSilencesFromVocals,
+  type SpeechSegment,
+} from '@/lib/audio/ffmpegVocals';
 import sliceWavBlob from '@/lib/audio/sliceWav';
 import { SegmentPlayers } from '@/components/features/SegmentPlayers';
 import { useLyricsAdaptation } from '@/lib/hooks/useLyricsAdaptation';
@@ -196,7 +199,9 @@ export function TranscriptionDialog({
       setProcessedAudioUrl(null);
       processedBlobRef.current = null;
       // Revoke any per-segment URLs
-      Object.values(segmentUrlsRef.current).forEach((u) => URL.revokeObjectURL(u));
+      Object.values(segmentUrlsRef.current).forEach((u) =>
+        URL.revokeObjectURL(u),
+      );
       segmentUrlsRef.current = {};
       setSegmentUrls({});
       // clear any internal references
@@ -313,13 +318,19 @@ export function TranscriptionDialog({
         // rendered player has its own bounded audio file representing the
         // exact segment duration.
         // Revoke any existing segment URLs first.
-        Object.values(segmentUrlsRef.current).forEach((u) => URL.revokeObjectURL(u));
+        Object.values(segmentUrlsRef.current).forEach((u) =>
+          URL.revokeObjectURL(u),
+        );
         segmentUrlsRef.current = {};
         const urls: Record<number, string> = {};
         await Promise.all(
           speechOnly.map(async (seg, idx) => {
             try {
-              const blob = await sliceWavBlob(newProcessedBlob, seg.processedStart, seg.processedEnd);
+              const blob = await sliceWavBlob(
+                newProcessedBlob,
+                seg.processedStart,
+                seg.processedEnd,
+              );
               const url = URL.createObjectURL(blob);
               urls[idx] = url;
               segmentUrlsRef.current[idx] = url;
@@ -540,7 +551,12 @@ export function TranscriptionDialog({
                   segmentUrls={segmentUrls}
                   processedAudioUrl={processedAudioUrl}
                   show={showSegmentPlayers}
-                  t={t as unknown as (key: string, params?: Record<string, unknown>) => string}
+                  t={
+                    t as unknown as (
+                      key: string,
+                      params?: Record<string, unknown>,
+                    ) => string
+                  }
                 />
               </Stack>
             </Box>
@@ -661,7 +677,9 @@ export function TranscriptionDialog({
                                 display: 'block',
                               }}
                             >
-                              {t('timestampProcessedLabel')}: {formatTimestamp(chunk.processedTimestamp[0])} — {formatTimestamp(chunk.processedTimestamp[1])}
+                              {t('timestampProcessedLabel')}:{' '}
+                              {formatTimestamp(chunk.processedTimestamp[0])} —{' '}
+                              {formatTimestamp(chunk.processedTimestamp[1])}
                             </Typography>
                             <Typography
                               component="span"
@@ -672,7 +690,9 @@ export function TranscriptionDialog({
                                 color: 'text.secondary',
                               }}
                             >
-                              {t('timestampOriginalLabel')}: {formatTimestamp(chunk.timestamp[0])} — {formatTimestamp(chunk.timestamp[1])}
+                              {t('timestampOriginalLabel')}:{' '}
+                              {formatTimestamp(chunk.timestamp[0])} —{' '}
+                              {formatTimestamp(chunk.timestamp[1])}
                             </Typography>
                           </>
                         }
@@ -1020,9 +1040,7 @@ export function TranscriptionDialog({
                                               color="inherit"
                                             />
                                           ) : (
-                                            <ReplayIcon
-                                              sx={{ fontSize: 16 }}
-                                            />
+                                            <ReplayIcon sx={{ fontSize: 16 }} />
                                           )}
                                         </IconButton>
                                       </span>

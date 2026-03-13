@@ -125,13 +125,17 @@ export function remapWordTimestamps(
     // If there's no cut map, normalize shape: ensure processedTimestamp exists
     return words.map((word) => ({
       text: word.text,
-      processedTimestamp: 'processedTimestamp' in word ? word.processedTimestamp! : word.timestamp,
+      processedTimestamp:
+        'processedTimestamp' in word
+          ? word.processedTimestamp!
+          : word.timestamp,
       timestamp: 'processedTimestamp' in word ? word.timestamp : word.timestamp,
     }));
   }
 
   return words.map((word) => {
-    const processed = 'processedTimestamp' in word ? word.processedTimestamp! : word.timestamp;
+    const processed =
+      'processedTimestamp' in word ? word.processedTimestamp! : word.timestamp;
     const [start, end] = processed;
     // Map start timestamps to the next segment boundary when they fall on a
     // shared processed boundary — this ensures chunk starts do not collapse

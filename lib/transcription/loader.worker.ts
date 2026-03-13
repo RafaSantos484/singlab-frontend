@@ -47,7 +47,6 @@ interface DecodeChunk {
   is_last?: boolean;
 }
 
-
 type DecodeResult = [
   string,
   {
@@ -227,7 +226,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerRequest>) => {
     return;
   }
 
-    self.postMessage({
+  self.postMessage({
     status: 'complete',
     task: 'automatic-speech-recognition',
     // Per-segment completion: always return `{ text, segmentIndex }` so
@@ -235,7 +234,7 @@ self.addEventListener('message', async (event: MessageEvent<WorkerRequest>) => {
     // speech interval from the silence map.
     data: {
       text: transcript.text,
-        segmentIndex: (event.data as WorkerTranscriptionRequest).segmentIndex,
+      segmentIndex: (event.data as WorkerTranscriptionRequest).segmentIndex,
     },
   } satisfies WorkerMessage);
 });

@@ -39,7 +39,12 @@ export async function sliceWavBlob(
 
   // Walk chunks to find 'fmt ' and 'data'
   let offset = 12;
-  let fmt: { audioFormat: number; numChannels: number; sampleRate: number; bitsPerSample: number } | null = null;
+  let fmt: {
+    audioFormat: number;
+    numChannels: number;
+    sampleRate: number;
+    bitsPerSample: number;
+  } | null = null;
   let dataOffset = -1;
   let dataSize = 0;
 
@@ -81,7 +86,10 @@ export async function sliceWavBlob(
   );
 
   const startByteInData = dataOffset + startFrame * bytesPerFrame;
-  const endByteInData = Math.min(dataOffset + dataSize, dataOffset + endFrame * bytesPerFrame);
+  const endByteInData = Math.min(
+    dataOffset + dataSize,
+    dataOffset + endFrame * bytesPerFrame,
+  );
   const newDataSize = Math.max(0, endByteInData - startByteInData);
 
   const out = new Uint8Array(44 + newDataSize);
