@@ -35,6 +35,8 @@ interface UseLyricsAdaptationReturn {
    * Increments `retryCount` on the existing result.
    */
   retryChunk: (chunk: AdaptedChunk) => void;
+  /** Directly overwrite the adaptedText of a result in the done state. */
+  editChunk: (index: number, newText: string) => void;
   /** Cancel an in-progress adaptation and return to idle. */
   cancel: () => void;
   /** Clear adaptation results and return to idle. */
@@ -262,6 +264,21 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
     [getWorker, lyrics],
   );
 
+  const editChunk = useCallback(
+    (index: number, newText: string): void => {
+      setState((prev) => {
+        if (prev.phase !== 'done') return prev;
+        const next = prev.results.map((r) =>
+          r.index === index
+            ? { ...r, adaptedText: newText, status: 'corrected' as const }
+            : r,
+        );
+        return { phase: 'done', results: next };
+      });
+    },
+    [],
+  );
+
   return {
     lyrics,
     setLyrics,
@@ -270,6 +287,7 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
     retryError,
     adapt,
     retryChunk,
+    editChunk,
     cancel,
     reset,
   };

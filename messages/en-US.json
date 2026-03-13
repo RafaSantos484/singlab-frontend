@@ -442,6 +442,12 @@
       "retryChunkTooltip": "Retry LLM review for this segment",
       "retryChunkAriaLabel": "Retry LLM review",
       "retryCountLabel": "{count, plural, =1 {1 retry} other {# retries}}",
+      "editChunkTooltip": "Edit this adapted text",
+      "editChunkAriaLabel": "Edit adapted text",
+      "editConfirmTooltip": "Confirm edit",
+      "editConfirmAriaLabel": "Confirm edit",
+      "editCancelTooltip": "Cancel edit",
+      "editCancelAriaLabel": "Cancel edit",
       "status": {
         "matched": "Matched",
         "corrected": "Corrected",

@@ -31,6 +31,9 @@ import {
 } from '@mui/material';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import ReplayIcon from '@mui/icons-material/Replay';
+import EditIcon from '@mui/icons-material/Edit';
+import CheckIcon from '@mui/icons-material/Check';
+import CloseIcon from '@mui/icons-material/Close';
 import { useLocale, useTranslations } from 'next-intl';
 import { removeSilencesFromVocals, type SpeechSegment } from '@/lib/audio/ffmpegVocals';
 import sliceWavBlob from '@/lib/audio/sliceWav';
@@ -369,14 +372,34 @@ export function TranscriptionDialog({
 
   const canClose = !canStop && !isPreparingAudio && !isRetrying;
 
+  // ---- Inline chunk edit state ----
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editingDraft, setEditingDraft] = useState('');
+  const isEditing = editingIndex !== null;
+
+  const handleEditConfirm = useCallback((): void => {
+    if (editingIndex === null) return;
+    const trimmed = editingDraft.trim();
+    if (!trimmed) return;
+    lyricsAdaptation.editChunk(editingIndex, trimmed);
+    setEditingIndex(null);
+    setEditingDraft('');
+  }, [editingIndex, editingDraft, lyricsAdaptation]);
+
+  const handleEditCancel = useCallback((): void => {
+    setEditingIndex(null);
+    setEditingDraft('');
+  }, []);
+
   /**
    * All interactive controls in the adaptation panel are disabled when:
    * - an adaptation batch is running, OR
    * - a retry is in progress, OR
-   * - a transcription is running.
+   * - a transcription is running, OR
+   * - a chunk edit is in progress.
    */
   const adaptationControlsDisabled =
-    isAdaptationBusy || isRetrying || transcriber.isBusy;
+    isAdaptationBusy || isRetrying || transcriber.isBusy || isEditing;
 
   const canAdapt =
     hasTranscriptChunks &&
@@ -784,7 +807,7 @@ export function TranscriptionDialog({
                     size="small"
                     variant="text"
                     onClick={lyricsAdaptation.reset}
-                    disabled={isRetrying}
+                    disabled={isRetrying || isEditing}
                   >
                     {t('lyricsAdaptation.resetButton')}
                   </Button>
@@ -855,6 +878,7 @@ export function TranscriptionDialog({
                       {lyricsAdaptation.state.results.map((item) => {
                         const isThisRetrying =
                           lyricsAdaptation.retryingIndex === item.index;
+                        const isThisEditing = editingIndex === item.index;
                         return (
                           <ListItem
                             key={item.index}
@@ -866,54 +890,173 @@ export function TranscriptionDialog({
                                 spacing={0.5}
                                 alignItems="center"
                               >
-                                {/* Status chip */}
-                                <Chip
-                                  size="small"
-                                  label={t(
-                                    `lyricsAdaptation.status.${item.status}` as Parameters<
-                                      typeof t
-                                    >[0],
-                                  )}
-                                  color={adaptationStatusColor(item.status)}
-                                  sx={{ fontSize: '0.65rem', height: 20 }}
-                                />
-                                {/* Retry button */}
-                                <Tooltip
-                                  title={t(
-                                    'lyricsAdaptation.retryChunkTooltip',
-                                  )}
-                                >
-                                  <span>
-                                    <IconButton
-                                      size="small"
-                                      aria-label={t(
-                                        'lyricsAdaptation.retryChunkAriaLabel',
+                                {isThisEditing ? (
+                                  <>
+                                    {/* Confirm edit */}
+                                    <Tooltip
+                                      title={t(
+                                        'lyricsAdaptation.editConfirmTooltip',
                                       )}
-                                      disabled={adaptationControlsDisabled}
-                                      onClick={() =>
-                                        lyricsAdaptation.retryChunk(item)
-                                      }
-                                      sx={{
-                                        color: 'text.secondary',
-                                        '&:hover': { color: 'primary.main' },
-                                      }}
                                     >
-                                      {isThisRetrying ? (
-                                        <CircularProgress
-                                          size={14}
-                                          color="inherit"
-                                        />
-                                      ) : (
-                                        <ReplayIcon sx={{ fontSize: 16 }} />
+                                      <span>
+                                        <IconButton
+                                          size="small"
+                                          aria-label={t(
+                                            'lyricsAdaptation.editConfirmAriaLabel',
+                                          )}
+                                          disabled={!editingDraft.trim()}
+                                          onClick={handleEditConfirm}
+                                          sx={{
+                                            color: 'success.main',
+                                            '&:hover': {
+                                              color: 'success.dark',
+                                            },
+                                          }}
+                                        >
+                                          <CheckIcon sx={{ fontSize: 16 }} />
+                                        </IconButton>
+                                      </span>
+                                    </Tooltip>
+                                    {/* Cancel edit */}
+                                    <Tooltip
+                                      title={t(
+                                        'lyricsAdaptation.editCancelTooltip',
                                       )}
-                                    </IconButton>
-                                  </span>
-                                </Tooltip>
+                                    >
+                                      <span>
+                                        <IconButton
+                                          size="small"
+                                          aria-label={t(
+                                            'lyricsAdaptation.editCancelAriaLabel',
+                                          )}
+                                          onClick={handleEditCancel}
+                                          sx={{
+                                            color: 'text.secondary',
+                                            '&:hover': { color: 'error.main' },
+                                          }}
+                                        >
+                                          <CloseIcon sx={{ fontSize: 16 }} />
+                                        </IconButton>
+                                      </span>
+                                    </Tooltip>
+                                  </>
+                                ) : (
+                                  <>
+                                    {/* Status chip */}
+                                    <Chip
+                                      size="small"
+                                      label={t(
+                                        `lyricsAdaptation.status.${item.status}` as Parameters<
+                                          typeof t
+                                        >[0],
+                                      )}
+                                      color={adaptationStatusColor(item.status)}
+                                      sx={{ fontSize: '0.65rem', height: 20 }}
+                                    />
+                                    {/* Edit button */}
+                                    <Tooltip
+                                      title={t(
+                                        'lyricsAdaptation.editChunkTooltip',
+                                      )}
+                                    >
+                                      <span>
+                                        <IconButton
+                                          size="small"
+                                          aria-label={t(
+                                            'lyricsAdaptation.editChunkAriaLabel',
+                                          )}
+                                          disabled={adaptationControlsDisabled}
+                                          onClick={() => {
+                                            setEditingIndex(item.index);
+                                            setEditingDraft(
+                                              item.adaptedText || item.rawText,
+                                            );
+                                          }}
+                                          sx={{
+                                            color: 'text.secondary',
+                                            '&:hover': {
+                                              color: 'primary.main',
+                                            },
+                                          }}
+                                        >
+                                          <EditIcon sx={{ fontSize: 16 }} />
+                                        </IconButton>
+                                      </span>
+                                    </Tooltip>
+                                    {/* Retry button */}
+                                    <Tooltip
+                                      title={t(
+                                        'lyricsAdaptation.retryChunkTooltip',
+                                      )}
+                                    >
+                                      <span>
+                                        <IconButton
+                                          size="small"
+                                          aria-label={t(
+                                            'lyricsAdaptation.retryChunkAriaLabel',
+                                          )}
+                                          disabled={adaptationControlsDisabled}
+                                          onClick={() =>
+                                            lyricsAdaptation.retryChunk(item)
+                                          }
+                                          sx={{
+                                            color: 'text.secondary',
+                                            '&:hover': {
+                                              color: 'primary.main',
+                                            },
+                                          }}
+                                        >
+                                          {isThisRetrying ? (
+                                            <CircularProgress
+                                              size={14}
+                                              color="inherit"
+                                            />
+                                          ) : (
+                                            <ReplayIcon
+                                              sx={{ fontSize: 16 }}
+                                            />
+                                          )}
+                                        </IconButton>
+                                      </span>
+                                    </Tooltip>
+                                  </>
+                                )}
                               </Stack>
                             }
                           >
                             <ListItemText
-                              primary={item.adaptedText || item.rawText}
+                              primary={
+                                isThisEditing ? (
+                                  <TextField
+                                    size="small"
+                                    fullWidth
+                                    value={editingDraft}
+                                    onChange={(e) =>
+                                      setEditingDraft(e.target.value)
+                                    }
+                                    onKeyDown={(e) => {
+                                      if (
+                                        e.key === 'Enter' &&
+                                        editingDraft.trim()
+                                      ) {
+                                        handleEditConfirm();
+                                      }
+                                      if (e.key === 'Escape') {
+                                        handleEditCancel();
+                                      }
+                                    }}
+                                    autoFocus
+                                    inputProps={{
+                                      'aria-label': t(
+                                        'lyricsAdaptation.editChunkAriaLabel',
+                                      ),
+                                    }}
+                                    sx={{ pr: 9 }}
+                                  />
+                                ) : (
+                                  item.adaptedText || item.rawText
+                                )
+                              }
                               secondary={
                                 <>
                                   <Typography
@@ -958,7 +1101,10 @@ export function TranscriptionDialog({
                                   )}
                                 </>
                               }
-                              primaryTypographyProps={{ variant: 'body2' }}
+                              primaryTypographyProps={{
+                                variant: 'body2',
+                                component: 'div' as React.ElementType,
+                              }}
                             />
                           </ListItem>
                         );
