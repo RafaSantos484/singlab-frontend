@@ -1,131 +1,26 @@
 /**
- * Pure types and text-processing utilities for lyrics adaptation.
+ * Pure deterministic utilities for adapting transcript chunks to lyrics.
  *
- * Contains no side effects, no LLM, and no async I/O — safe to import
- * anywhere, including SSR. The heavy work (LLM inference) lives entirely
- * in lyricsAdapter.worker.ts.
+ * No side effects, no worker messaging, and no model inference.
  */
 import type { TranscriptChunk } from './types';
-
-// ---------------------------------------------------------------------------
-// Public types
-// ---------------------------------------------------------------------------
 
 export type AdaptationStatus = 'matched' | 'corrected' | 'unmatched';
 
 export interface AdaptedChunk {
-  /** Chunk index in the original transcript output. */
   index: number;
-  /** Raw text as recognised by Whisper. */
   rawText: string;
-  /** Best text after lyrics alignment (may equal rawText when unmatched). */
   adaptedText: string;
-  /** Timestamp pair from the original chunk. */
   timestamp: [number, number | null];
-  /** How the adaptation ended. */
   status: AdaptationStatus;
-  /** Similarity score in [0, 1] against the chosen lyric span. */
   score: number;
-  /**
-   * How many times this chunk has been retried.
-   * 0 = never retried (first adaptation run).
-   */
-  retryCount: number;
-  /**
-   * 0-based index of the first matched line in the full parsed lyrics array.
-   * Undefined for unmatched segments or when the lyric position is unknown.
-   */
   lyricIdxStart?: number;
-  /**
-   * 0-based index of the last matched line in the full parsed lyrics array.
-   * Undefined for unmatched segments or when the lyric position is unknown.
-   */
   lyricIdxEnd?: number;
 }
-
-// ---------------------------------------------------------------------------
-// Worker message protocol
-// ---------------------------------------------------------------------------
-
-export type LyricsAdapterRequest =
-  | {
-      type: 'adapt';
-      jobId: number;
-      chunks: TranscriptChunk[];
-      lyrics: string;
-      skipLLM: boolean;
-    }
-  | {
-      /** Retry a single chunk with an escalated prompt. */
-      type: 'retry-chunk';
-      jobId: number;
-      /** Original chunk index in the transcript. */
-      index: number;
-      /** Raw Whisper text for this chunk. */
-      rawText: string;
-      /** Original chunk timestamp. */
-      timestamp: [number, number | null];
-      /**
-       * Lyrics text used to build the prompt.
-       * When `isBoundedRetry` is true this is a narrowed excerpt; otherwise
-       * it is the full lyrics string.
-       */
-      lyrics: string;
-      /**
-       * Number of retries already attempted for this chunk.
-       * The worker uses this to escalate prompt breadth.
-       * 0 = first retry (prompt is already wider than the initial pass).
-       */
-      retryCount: number;
-      /**
-       * When true, `lyrics` is a deliberately narrowed scope derived from the
-       * nearest resolved neighbours. The worker uses a different prompt that
-       * instructs the model to stay within this bounded excerpt.
-       */
-      isBoundedRetry?: boolean;
-      /**
-       * When `isBoundedRetry` is true, the 0-based index of the first line of
-       * `lyrics` within the full parsed lyrics array. Applied as an offset to
-       * the returned `lyricIdxStart` / `lyricIdxEnd` so that subsequently
-       * resolved chunks keep accurate full-lyrics positions.
-       */
-      lyricsLineOffset?: number;
-    }
-  | { type: 'cancel' };
-
-export type LyricsAdapterResponse =
-  | {
-      type: 'model-progress';
-      jobId: number;
-      /** Overall download progress 0–100, averaged across all model files. */
-      progress: number;
-      status: string;
-    }
-  | {
-      type: 'chunk-done';
-      jobId: number;
-      done: number;
-      total: number;
-      result: AdaptedChunk;
-    }
-  | {
-      /** Emitted after a retry-chunk completes (success or fallback). */
-      type: 'retry-chunk-done';
-      jobId: number;
-      result: AdaptedChunk;
-    }
-  | { type: 'complete'; jobId: number; results: AdaptedChunk[] }
-  | { type: 'error'; jobId: number; message: string }
-  | { type: 'cancelled' };
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
 
 export const CORRECT_THRESHOLD = 0.88;
 export const POSSIBLE_THRESHOLD = 0.72;
 export const SPAN_MAX = 3;
-export const LLM_MODEL_ID = 'Xenova/flan-t5-base';
 
 // ---------------------------------------------------------------------------
 // String normalisation & similarity
@@ -291,100 +186,107 @@ export function parseLyricsLines(lyrics: string): string[] {
     .filter((l) => l.length > 0 && !/^\[.*\]$/.test(l));
 }
 
-// ---------------------------------------------------------------------------
-// Auto-retry boundary helpers (pure, SSR-safe)
-// ---------------------------------------------------------------------------
-
-/**
- * Returns true when a chunk is considered resolved for boundary purposes:
- * status is 'matched' or 'corrected'. User edits produce 'corrected'.
- */
-export function isResolvedChunk(chunk: AdaptedChunk): boolean {
-  return chunk.status === 'matched' || chunk.status === 'corrected';
+interface CorrelationResult {
+  adaptedText: string;
+  status: AdaptationStatus;
+  score: number;
+  lyricIdxStart?: number;
+  lyricIdxEnd?: number;
 }
 
 /**
- * Finds the nearest resolved chunk strictly before `chunkIndex`.
- * Returns null when none exists.
+ * Correlates one transcript verse with the most similar lyric span.
+ *
+ * `startLineHint` keeps matching mostly forward through the song while still
+ * allowing a short lookback window to handle repeated sections.
  */
-export function findPrevResolved(
-  results: AdaptedChunk[],
-  chunkIndex: number,
-): AdaptedChunk | null {
-  let nearest: AdaptedChunk | null = null;
-  for (const r of results) {
-    if (r.index < chunkIndex && isResolvedChunk(r)) {
-      if (nearest === null || r.index > nearest.index) {
-        nearest = r;
-      }
-    }
+export function correlateVerseToLyrics(
+  verse: string,
+  lyricsLines: string[],
+  startLineHint = 0,
+): CorrelationResult {
+  const windowStart = Math.max(0, Math.min(startLineHint, lyricsLines.length));
+  const lookbackStart = Math.max(0, windowStart - 2);
+  const scopedLines = lyricsLines.slice(lookbackStart);
+  const best = pickBestSpan(verse, scopedLines, SPAN_MAX);
+
+  if (best.idxStart < 0 || best.lines.length === 0) {
+    return {
+      adaptedText: verse.trim(),
+      status: 'unmatched',
+      score: 0,
+    };
   }
-  return nearest;
+
+  const lyricIdxStart = lookbackStart + best.idxStart;
+  const lyricIdxEnd = lookbackStart + best.idxEnd;
+  const adaptedText = joinSpanWithPunctuation(best.lines);
+
+  if (best.score >= CORRECT_THRESHOLD) {
+    return {
+      adaptedText,
+      status: 'matched',
+      score: best.score,
+      lyricIdxStart,
+      lyricIdxEnd,
+    };
+  }
+
+  if (best.score >= POSSIBLE_THRESHOLD) {
+    return {
+      adaptedText,
+      status: 'corrected',
+      score: best.score,
+      lyricIdxStart,
+      lyricIdxEnd,
+    };
+  }
+
+  return {
+    adaptedText: verse.trim(),
+    status: 'unmatched',
+    score: best.score,
+  };
 }
 
 /**
- * Finds the nearest resolved chunk strictly after `chunkIndex`.
- * Returns null when none exists.
+ * Runs deterministic correlation for every transcript chunk.
  */
-export function findNextResolved(
-  results: AdaptedChunk[],
-  chunkIndex: number,
-): AdaptedChunk | null {
-  let nearest: AdaptedChunk | null = null;
-  for (const r of results) {
-    if (r.index > chunkIndex && isResolvedChunk(r)) {
-      if (nearest === null || r.index < nearest.index) {
-        nearest = r;
-      }
+export function adaptTranscriptChunks(
+  chunks: TranscriptChunk[],
+  lyrics: string,
+): AdaptedChunk[] {
+  const lyricsLines = parseLyricsLines(lyrics);
+  let startLineHint = 0;
+
+  return chunks.map((chunk, index) => {
+    const verse = chunk.text.trim();
+    if (!verse) {
+      return {
+        index,
+        rawText: '',
+        adaptedText: '',
+        timestamp: chunk.timestamp,
+        status: 'unmatched',
+        score: 0,
+      } satisfies AdaptedChunk;
     }
-  }
-  return nearest;
-}
 
-/**
- * Builds a reduced lyric scope for retrying a segment in sequential mode.
- *
- * When a previous resolved chunk exists, the returned excerpt starts from that
- * chunk (inclusive) and goes to the end of the lyrics. This keeps anchor lines
- * in prompt context and avoids cutting out the segment that defines the
- * boundary.
- *
- * When there is no previous resolved chunk, the full lyrics are returned.
- *
- * Returns `{ lyrics, startLine }` where `lyrics` is the excerpt
- * (newline-separated) and `startLine` is its 0-based starting index in
- * `allLyricsLines`.
- */
-export function buildBoundedLyricScope(
-  allLyricsLines: string[],
-  prev: AdaptedChunk | null,
-): { lyrics: string; startLine: number } | null {
-  if (allLyricsLines.length === 0) {
-    return null;
-  }
+    const correlation = correlateVerseToLyrics(verse, lyricsLines, startLineHint);
 
-  if (!prev) {
-    return { lyrics: allLyricsLines.join('\n'), startLine: 0 };
-  }
-
-  let startLine = 0;
-  if (prev.lyricIdxStart !== undefined) {
-    startLine = prev.lyricIdxStart;
-  } else if (prev.lyricIdxEnd !== undefined) {
-    startLine = prev.lyricIdxEnd;
-  } else {
-    // Fallback: estimate the boundary by finding the best span for the
-    // adapted text in the full lyrics and include that span start.
-    const span = pickBestSpan(prev.adaptedText, allLyricsLines);
-    if (span.idxStart >= 0) {
-      startLine = span.idxStart;
-    } else if (span.idxEnd >= 0) {
-      startLine = span.idxEnd;
+    if (correlation.lyricIdxEnd !== undefined) {
+      startLineHint = Math.max(startLineHint, correlation.lyricIdxEnd);
     }
-  }
 
-  startLine = Math.max(0, Math.min(startLine, allLyricsLines.length - 1));
-  const selected = allLyricsLines.slice(startLine);
-  if (selected.length === 0) return null;
-  return { lyrics: selected.join('\n'), startLine };
+    return {
+      index,
+      rawText: verse,
+      adaptedText: correlation.adaptedText,
+      timestamp: chunk.timestamp,
+      status: correlation.status,
+      score: correlation.score,
+      lyricIdxStart: correlation.lyricIdxStart,
+      lyricIdxEnd: correlation.lyricIdxEnd,
+    } satisfies AdaptedChunk;
+  });
 }
