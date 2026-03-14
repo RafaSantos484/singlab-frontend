@@ -206,8 +206,11 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
           const prev = findPrevResolved(allResults, chunk.index);
           const bounded = buildBoundedLyricScope(allLines, prev);
           const isBoundedRetry = prev !== null && bounded !== null;
-          const lyricsToSend = bounded ? bounded.lyrics : adaptedLyricsRef.current;
-          const lyricsLineOffset = isBoundedRetry && bounded ? bounded.startLine : 0;
+          const lyricsToSend = bounded
+            ? bounded.lyrics
+            : adaptedLyricsRef.current;
+          const lyricsLineOffset =
+            isBoundedRetry && bounded ? bounded.startLine : 0;
 
           if (!bounded) {
             // No usable boundary — skip this segment in this round.
@@ -498,7 +501,8 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
 
       const lyricsToSend = bounded ? bounded.lyrics : lyrics;
       const isBoundedRetry = prev !== null && bounded !== null;
-      const lyricsLineOffset = isBoundedRetry && bounded ? bounded.startLine : 0;
+      const lyricsLineOffset =
+        isBoundedRetry && bounded ? bounded.startLine : 0;
 
       console.debug(
         `[useLyricsAdaptation] retryChunk (manual) — index=${chunk.index} ` +
