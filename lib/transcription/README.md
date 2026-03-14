@@ -26,24 +26,11 @@ Key points for maintainers
     dialog session to avoid re-running FFmpeg repeatedly; callers should
     be aware of in-memory blob lifetimes when profiling memory usage.
   - Inline editing: the Transcription UI (`TranscriptionDialog`) now exposes an inline edit workflow for adapted lyric chunks. The `useLyricsAdaptation` hook provides an `editChunk(index, newText)` method that lets the UI persist manual corrections; corrected chunks are marked with a `corrected` status. When changing UI behavior or the adaptation state shape, update this README and the `useLyricsAdaptation` types.
-    - Adapted chunk deletion: the same panel now exposes a per-item delete action. The `useLyricsAdaptation` hook provides `deleteChunk(index)` so the UI can remove unwanted adapted items while keeping the remaining retry/edit flows intact.
-    - Automatic bounded retries: after the initial per-chunk adaptation pass completes,
-      `useLyricsAdaptation` can automatically run iterative bounded retry rounds
-      over any `unmatched` segments. Each bounded retry narrows the lyric prompt
-      to an excerpt built from the nearest resolved neighbours and re-dispatches a
-      `retry-chunk` request to the worker. The loop repeats until a round makes
-      no new resolutions or all segments are resolved. Manual `retry` is still
-      available and behaves the same as a single explicit retry request.
-      When updating the worker message protocol or the retry coordination logic,
-      update `lib/transcription/lyricsAdapter.ts` types (`AdaptedChunk`,
-      `LyricsAdapterRequest`) and the README accordingly.
-    - New lyrics adapter helpers: `lib/transcription/lyricsAdapter.ts` gained
-      pure helpers used by the auto-retry coordinator (`isResolvedChunk`,
-      `findPrevResolved`, `findNextResolved`, `buildBoundedLyricScope`) and the
-      `AdaptedChunk` type now includes optional `lyricIdxStart`/`lyricIdxEnd` so
-      that bounded excerpt retries and returned results can be aligned with the
-      full parsed lyrics array. These helpers are SSR-safe and intended to be
-      imported both from the hook and from the worker.
+    - Adapted chunk deletion: the same panel now exposes a per-item delete action. The `useLyricsAdaptation` hook provides `deleteChunk(index)` so the UI can remove unwanted adapted items while keeping the remaining edit flow intact.
+    - Lyrics adaptation is deterministic only: `useLyricsAdaptation` runs local
+      correlation based on text similarity against parsed lyric lines from
+      `lib/transcription/lyricsAdapter.ts`. There is no model loading, worker
+      messaging, retries, or prompt-based correction in this flow.
 - New helper: `lib/audio/sliceWav.ts` — creates a valid WAV `Blob` for a
   requested time slice (reads headers and copies PCM frames). Useful for
   creating per-segment object URLs used by the UI players.
