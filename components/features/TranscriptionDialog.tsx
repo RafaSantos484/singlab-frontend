@@ -32,6 +32,7 @@ import {
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import ReplayIcon from '@mui/icons-material/Replay';
 import EditIcon from '@mui/icons-material/Edit';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
 import { useLocale, useTranslations } from 'next-intl';
@@ -401,6 +402,17 @@ export function TranscriptionDialog({
     setEditingIndex(null);
     setEditingDraft('');
   }, []);
+
+  const handleDeleteChunk = useCallback(
+    (index: number): void => {
+      if (editingIndex === index) {
+        setEditingIndex(null);
+        setEditingDraft('');
+      }
+      lyricsAdaptation.deleteChunk(index);
+    },
+    [editingIndex, lyricsAdaptation],
+  );
 
   /**
    * All interactive controls in the adaptation panel are disabled when:
@@ -1008,6 +1020,35 @@ export function TranscriptionDialog({
                                           }}
                                         >
                                           <EditIcon sx={{ fontSize: 16 }} />
+                                        </IconButton>
+                                      </span>
+                                    </Tooltip>
+                                    {/* Delete button */}
+                                    <Tooltip
+                                      title={t(
+                                        'lyricsAdaptation.deleteChunkTooltip',
+                                      )}
+                                    >
+                                      <span>
+                                        <IconButton
+                                          size="small"
+                                          aria-label={t(
+                                            'lyricsAdaptation.deleteChunkAriaLabel',
+                                          )}
+                                          disabled={adaptationControlsDisabled}
+                                          onClick={() =>
+                                            handleDeleteChunk(item.index)
+                                          }
+                                          sx={{
+                                            color: 'text.secondary',
+                                            '&:hover': {
+                                              color: 'error.main',
+                                            },
+                                          }}
+                                        >
+                                          <DeleteOutlineIcon
+                                            sx={{ fontSize: 16 }}
+                                          />
                                         </IconButton>
                                       </span>
                                     </Tooltip>

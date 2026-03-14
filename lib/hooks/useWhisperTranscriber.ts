@@ -9,6 +9,10 @@ import { TRANSCRIPTION_SAMPLE_RATE } from '@/lib/transcription/constants';
 import { startPendingActivity } from '@/lib/async/pendingActivity';
 import type { SpeechSegment } from '@/lib/audio/ffmpegVocals';
 import { remapWordTimestamps } from '@/lib/audio/timestampRemap';
+import {
+  filterNoisyTranscriptChunks,
+  isNoisyTranscriptSegment,
+} from '@/lib/transcription/transcriptNoiseFilter';
 import type {
   TranscriptChunk,
   TranscriptionOutput,
@@ -199,11 +203,12 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
               processedTimestamp: pc.timestamp,
               timestamp: remapped[i].timestamp,
             }));
+            const filteredChunks = filterNoisyTranscriptChunks(enriched);
 
             setOutput({
               isBusy: true,
-              text: message.data[0],
-              chunks: enriched,
+              text: filteredChunks.map((chunk) => chunk.text).join(''),
+              chunks: filteredChunks,
             });
           }
           break;
@@ -449,6 +454,9 @@ export function useWhisperTranscriber(): UseWhisperTranscriberResult {
 
           // Await result and build a chunk using the silence map timings.
           const text = await textPromise;
+          if (isNoisyTranscriptSegment(text)) {
+            continue;
+          }
           const chunk = {
             text,
             processedTimestamp: [seg.processedStart, seg.processedEnd] as [
