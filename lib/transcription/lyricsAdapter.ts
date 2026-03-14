@@ -342,66 +342,50 @@ export function findNextResolved(
 }
 
 /**
- * Builds a reduced lyric scope for retrying an unmatched segment, bounded by
- * the line ranges of the nearest resolved neighbours.
+ * Builds a reduced lyric scope for retrying a segment in sequential mode.
  *
- * Returns `{ lyrics, startLine }` where `lyrics` is the bounded excerpt
- * (newline-separated) and `startLine` is the 0-based index of its first line
- * in `allLyricsLines` — needed to restore absolute lyric positions.
+ * When a previous resolved chunk exists, the returned excerpt starts from that
+ * chunk (inclusive) and goes to the end of the lyrics. This keeps anchor lines
+ * in prompt context and avoids cutting out the segment that defines the
+ * boundary.
  *
- * Returns null when no usable boundary can be established (both neighbours
- * are null) or when the derived window is empty.
+ * When there is no previous resolved chunk, the full lyrics are returned.
+ *
+ * Returns `{ lyrics, startLine }` where `lyrics` is the excerpt
+ * (newline-separated) and `startLine` is its 0-based starting index in
+ * `allLyricsLines`.
  */
 export function buildBoundedLyricScope(
   allLyricsLines: string[],
   prev: AdaptedChunk | null,
-  next: AdaptedChunk | null,
+  _next: AdaptedChunk | null,
 ): { lyrics: string; startLine: number } | null {
-  if (!prev && !next) return null;
+  if (allLyricsLines.length === 0) {
+    return null;
+  }
+
+  if (!prev) {
+    return { lyrics: allLyricsLines.join('\n'), startLine: 0 };
+  }
 
   let startLine = 0;
-  let endLine = allLyricsLines.length - 1;
-
-  if (prev) {
-    if (prev.lyricIdxEnd !== undefined) {
-      startLine = prev.lyricIdxEnd + 1;
-    } else {
-      // Fallback: estimate the boundary by finding the best span for
-      // the adapted text in the full lyrics.
-      const span = pickBestSpan(prev.adaptedText, allLyricsLines);
-      if (span.idxEnd >= 0) startLine = span.idxEnd + 1;
+  if (prev.lyricIdxStart !== undefined) {
+    startLine = prev.lyricIdxStart;
+  } else if (prev.lyricIdxEnd !== undefined) {
+    startLine = prev.lyricIdxEnd;
+  } else {
+    // Fallback: estimate the boundary by finding the best span for the
+    // adapted text in the full lyrics and include that span start.
+    const span = pickBestSpan(prev.adaptedText, allLyricsLines);
+    if (span.idxStart >= 0) {
+      startLine = span.idxStart;
+    } else if (span.idxEnd >= 0) {
+      startLine = span.idxEnd;
     }
   }
 
-  if (next) {
-    if (next.lyricIdxStart !== undefined) {
-      endLine = next.lyricIdxStart - 1;
-    } else {
-      const span = pickBestSpan(next.adaptedText, allLyricsLines);
-      if (span.idxStart >= 0) endLine = span.idxStart - 1;
-    }
-  }
-
-  startLine = Math.max(0, startLine);
-  endLine = Math.min(allLyricsLines.length - 1, endLine);
-
-  if (startLine > endLine) {
-    // Boundaries are adjacent or crossed — widen to include the boundary
-    // lines themselves so the segment still has a minimal plausible window.
-    if (prev) {
-      const fall = prev.lyricIdxEnd ?? prev.lyricIdxStart;
-      if (fall !== undefined && fall >= 0) startLine = fall;
-    }
-    if (next) {
-      const fall = next.lyricIdxStart ?? next.lyricIdxEnd;
-      if (fall !== undefined && fall < allLyricsLines.length) endLine = fall;
-    }
-    startLine = Math.max(0, startLine);
-    endLine = Math.min(allLyricsLines.length - 1, endLine);
-    if (startLine > endLine) return null;
-  }
-
-  const selected = allLyricsLines.slice(startLine, endLine + 1);
+  startLine = Math.max(0, Math.min(startLine, allLyricsLines.length - 1));
+  const selected = allLyricsLines.slice(startLine);
   if (selected.length === 0) return null;
   return { lyrics: selected.join('\n'), startLine };
 }

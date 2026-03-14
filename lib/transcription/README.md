@@ -26,6 +26,7 @@ Key points for maintainers
     dialog session to avoid re-running FFmpeg repeatedly; callers should
     be aware of in-memory blob lifetimes when profiling memory usage.
   - Inline editing: the Transcription UI (`TranscriptionDialog`) now exposes an inline edit workflow for adapted lyric chunks. The `useLyricsAdaptation` hook provides an `editChunk(index, newText)` method that lets the UI persist manual corrections; corrected chunks are marked with a `corrected` status. When changing UI behavior or the adaptation state shape, update this README and the `useLyricsAdaptation` types.
+    - Adapted chunk deletion: the same panel now exposes a per-item delete action. The `useLyricsAdaptation` hook provides `deleteChunk(index)` so the UI can remove unwanted adapted items while keeping the remaining retry/edit flows intact.
     - Automatic bounded retries: after the initial per-chunk adaptation pass completes,
       `useLyricsAdaptation` can automatically run iterative bounded retry rounds
       over any `unmatched` segments. Each bounded retry narrows the lyric prompt
@@ -53,6 +54,11 @@ Key points for maintainers
 - UI: `components/features/SegmentPlayers.tsx` was added to render
   per-segment audio players using either per-segment object URLs or the
   full processed audio as fallback.
+- Transcript noise filtering: `lib/transcription/transcriptNoiseFilter.ts`
+  applies deterministic heuristics to remove clearly non-lyrical segments
+  (musical symbols, bracketed placeholders, and long repetitive humming-like
+  content). Filtering is executed in `useWhisperTranscriber` before chunks are
+  exposed to the UI and before lyrics adaptation consumes them.
 
 If you change the worker API or per-segment contract, update this README
 and the types in `lib/transcription/types.ts` accordingly.
