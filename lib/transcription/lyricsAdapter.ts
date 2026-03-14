@@ -358,7 +358,6 @@ export function findNextResolved(
 export function buildBoundedLyricScope(
   allLyricsLines: string[],
   prev: AdaptedChunk | null,
-  _next: AdaptedChunk | null,
 ): { lyrics: string; startLine: number } | null {
   if (allLyricsLines.length === 0) {
     return null;

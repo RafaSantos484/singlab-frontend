@@ -496,7 +496,7 @@ async function handleMessage(request: LyricsAdapterRequest): Promise<void> {
       };
 
       const prevResolved = findPrevResolved(results, i);
-      const bounded = buildBoundedLyricScope(lyricsLines, prevResolved, null);
+      const bounded = buildBoundedLyricScope(lyricsLines, prevResolved);
       const isBoundedContext = prevResolved !== null && bounded !== null;
       const lyricsForChunk = bounded ? bounded.lyrics : lyrics;
       const lyricsLineOffset = isBoundedContext ? bounded.startLine : 0;

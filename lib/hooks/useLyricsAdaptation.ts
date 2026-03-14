@@ -204,7 +204,7 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
           autoRetryQueueRef.current = autoRetryQueueRef.current.slice(1);
 
           const prev = findPrevResolved(allResults, chunk.index);
-          const bounded = buildBoundedLyricScope(allLines, prev, null);
+          const bounded = buildBoundedLyricScope(allLines, prev);
           const isBoundedRetry = prev !== null && bounded !== null;
           const lyricsToSend = bounded ? bounded.lyrics : adaptedLyricsRef.current;
           const lyricsLineOffset = isBoundedRetry && bounded ? bounded.startLine : 0;
@@ -494,7 +494,7 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
       const allResults = latestResultsRef.current;
       const allLines = parseLyricsLines(adaptedLyricsRef.current || lyrics);
       const prev = findPrevResolved(allResults, chunk.index);
-      const bounded = buildBoundedLyricScope(allLines, prev, null);
+      const bounded = buildBoundedLyricScope(allLines, prev);
 
       const lyricsToSend = bounded ? bounded.lyrics : lyrics;
       const isBoundedRetry = prev !== null && bounded !== null;
