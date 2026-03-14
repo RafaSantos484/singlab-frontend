@@ -442,6 +442,8 @@
       "retryCountLabel": "{count, plural, =1 {1 tentativa} other {# tentativas}}",
       "editChunkTooltip": "Editar este texto adaptado",
       "editChunkAriaLabel": "Editar texto adaptado",
+      "deleteChunkTooltip": "Remover este segmento adaptado",
+      "deleteChunkAriaLabel": "Remover segmento adaptado",
       "editConfirmTooltip": "Confirmar edição",
       "editConfirmAriaLabel": "Confirmar edição",
       "editCancelTooltip": "Cancelar edição",

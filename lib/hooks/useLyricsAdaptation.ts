@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   buildBoundedLyricScope,
-  findNextResolved,
   findPrevResolved,
   isResolvedChunk,
   parseLyricsLines,
@@ -47,6 +46,8 @@ interface UseLyricsAdaptationReturn {
   retryChunk: (chunk: AdaptedChunk) => void;
   /** Directly overwrite the adaptedText of a result in the done state. */
   editChunk: (index: number, newText: string) => void;
+  /** Remove a single adapted chunk from the done-state results list. */
+  deleteChunk: (index: number) => void;
   /** Cancel an in-progress adaptation and return to idle. */
   cancel: () => void;
   /** Clear adaptation results and return to idle. */
@@ -70,9 +71,10 @@ function createWorker(): Worker {
  *
  * After the initial adaptation pass completes, an automatic iterative retry
  * loop runs over any segments still marked `unmatched`. Each segment is
- * retried with a narrowed lyric scope derived from the nearest resolved
- * neighbours (matched/corrected/user-edited). The loop repeats until no
- * unmatched segment is newly resolved in a round, or all segments are resolved.
+ * retried with a narrowed lyric scope derived from the latest resolved
+ * previous segment (matched/corrected/user-edited), keeping that anchor
+ * segment included in the prompt. The loop repeats until no unmatched segment
+ * is newly resolved in a round, or all segments are resolved.
  *
  * `retryChunk` posts a `retry-chunk` message to the worker for a single manual
  * retry, uses `startPendingActivity` to block page navigation, and patches the
@@ -202,8 +204,13 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
           autoRetryQueueRef.current = autoRetryQueueRef.current.slice(1);
 
           const prev = findPrevResolved(allResults, chunk.index);
-          const next = findNextResolved(allResults, chunk.index);
-          const bounded = buildBoundedLyricScope(allLines, prev, next);
+          const bounded = buildBoundedLyricScope(allLines, prev);
+          const isBoundedRetry = prev !== null && bounded !== null;
+          const lyricsToSend = bounded
+            ? bounded.lyrics
+            : adaptedLyricsRef.current;
+          const lyricsLineOffset =
+            isBoundedRetry && bounded ? bounded.startLine : 0;
 
           if (!bounded) {
             // No usable boundary — skip this segment in this round.
@@ -231,10 +238,10 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
             index: chunk.index,
             rawText: chunk.rawText,
             timestamp: chunk.timestamp,
-            lyrics: bounded.lyrics,
+            lyrics: lyricsToSend,
             retryCount: chunk.retryCount + 1,
-            isBoundedRetry: true,
-            lyricsLineOffset: bounded.startLine,
+            isBoundedRetry,
+            lyricsLineOffset,
           } satisfies LyricsAdapterRequest);
           return; // wait for reply before dispatching next
         }
@@ -490,12 +497,12 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
       const allResults = latestResultsRef.current;
       const allLines = parseLyricsLines(adaptedLyricsRef.current || lyrics);
       const prev = findPrevResolved(allResults, chunk.index);
-      const next = findNextResolved(allResults, chunk.index);
-      const bounded = buildBoundedLyricScope(allLines, prev, next);
+      const bounded = buildBoundedLyricScope(allLines, prev);
 
       const lyricsToSend = bounded ? bounded.lyrics : lyrics;
-      const isBoundedRetry = !!bounded;
-      const lyricsLineOffset = bounded ? bounded.startLine : 0;
+      const isBoundedRetry = prev !== null && bounded !== null;
+      const lyricsLineOffset =
+        isBoundedRetry && bounded ? bounded.startLine : 0;
 
       console.debug(
         `[useLyricsAdaptation] retryChunk (manual) — index=${chunk.index} ` +
@@ -543,6 +550,25 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
     });
   }, []);
 
+  const deleteChunk = useCallback((index: number): void => {
+    setState((prev) => {
+      if (prev.phase !== 'done') {
+        return prev;
+      }
+      const next = prev.results.filter((result) => result.index !== index);
+      latestResultsRef.current = next;
+      autoRetryAllResultsRef.current = autoRetryAllResultsRef.current.filter(
+        (result) => result.index !== index,
+      );
+      autoRetryQueueRef.current = autoRetryQueueRef.current.filter(
+        (result) => result.index !== index,
+      );
+      return { phase: 'done', results: next };
+    });
+
+    setRetryingIndex((previous) => (previous === index ? null : previous));
+  }, []);
+
   return {
     lyrics,
     setLyrics,
@@ -553,6 +579,7 @@ export function useLyricsAdaptation(): UseLyricsAdaptationReturn {
     adapt,
     retryChunk,
     editChunk,
+    deleteChunk,
     cancel,
     reset,
   };

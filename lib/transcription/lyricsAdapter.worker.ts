@@ -13,7 +13,9 @@
  */
 import { env, pipeline } from '@xenova/transformers';
 import {
+  buildBoundedLyricScope,
   CORRECT_THRESHOLD,
+  findPrevResolved,
   LLM_MODEL_ID,
   POSSIBLE_THRESHOLD,
   SPAN_MAX,
@@ -102,7 +104,8 @@ function retryInstruction(retryCount: number): string {
 
 /**
  * Builds a prompt for bounded retries — explicitly tells the model that the
- * lyric excerpt was narrowed using already-resolved surrounding segments.
+ * lyric excerpt starts from the latest resolved previous segment and keeps
+ * that anchor segment included in context.
  */
 function buildBoundedPrompt(
   verse: string,
@@ -110,9 +113,9 @@ function buildBoundedPrompt(
   retryCount = 0,
 ): string {
   const base =
-    `You are retrying this segment with a deliberately reduced lyric context, bounded by nearby segments that were already resolved. The target transcription is very likely contained within the lyric excerpt below. Restrict your reasoning to this excerpt and return the best matching lyric span from within it.
+    `You are retrying this segment with a deliberately reduced lyric context that starts from the latest previously resolved segment and continues forward. The target transcription is very likely contained within the lyric excerpt below. Restrict your reasoning to this excerpt and return the best matching lyric span from within it.
 You receive:
-- LYRIC EXCERPT: a deliberately narrowed portion of the song's lyrics, bounded by previously resolved segments.
+- LYRIC EXCERPT: a deliberately narrowed portion of the song's lyrics that keeps the previous resolved anchor segment included.
 - CAPTURED VERSE (may contain recognition errors).
 Task (minimal intervention):
 1) Find 1 or more CONSECUTIVE LINES from the LYRIC EXCERPT that best match the CAPTURED VERSE.
@@ -492,15 +495,24 @@ async function handleMessage(request: LyricsAdapterRequest): Promise<void> {
         } satisfies LyricsAdapterResponse);
       };
 
+      const prevResolved = findPrevResolved(results, i);
+      const bounded = buildBoundedLyricScope(lyricsLines, prevResolved);
+      const isBoundedContext = prevResolved !== null && bounded !== null;
+      const lyricsForChunk = bounded ? bounded.lyrics : lyrics;
+      const lyricsLineOffset = isBoundedContext ? bounded.startLine : 0;
+      const lyricsLinesForChunk = bounded
+        ? parseLyricsLines(bounded.lyrics)
+        : lyricsLines;
+
       // Initial adaptation pass.
       const adapted = await adaptChunk(
         verse,
-        lyricsLines,
-        lyrics,
+        lyricsLinesForChunk,
+        lyricsForChunk,
         skipLLM,
         jobId,
         0, // initial adaptation always starts at retryCount=0
-        false, // never a bounded retry on the initial pass
+        isBoundedContext,
         onProgress,
       );
 
@@ -519,8 +531,14 @@ async function handleMessage(request: LyricsAdapterRequest): Promise<void> {
         status: adapted.status,
         score: adapted.score,
         retryCount: 0,
-        lyricIdxStart: adapted.lyricIdxStart,
-        lyricIdxEnd: adapted.lyricIdxEnd,
+        lyricIdxStart:
+          adapted.lyricIdxStart !== undefined
+            ? adapted.lyricIdxStart + lyricsLineOffset
+            : undefined,
+        lyricIdxEnd:
+          adapted.lyricIdxEnd !== undefined
+            ? adapted.lyricIdxEnd + lyricsLineOffset
+            : undefined,
       };
       results.push(result);
       self.postMessage({
