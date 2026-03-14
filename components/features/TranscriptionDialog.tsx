@@ -30,7 +30,6 @@ import {
   Typography,
 } from '@mui/material';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
-import ReplayIcon from '@mui/icons-material/Replay';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import CheckIcon from '@mui/icons-material/Check';
@@ -44,7 +43,6 @@ import sliceWavBlob from '@/lib/audio/sliceWav';
 import { SegmentPlayers } from '@/components/features/SegmentPlayers';
 import { useLyricsAdaptation } from '@/lib/hooks/useLyricsAdaptation';
 import { useWhisperTranscriber } from '@/lib/hooks/useWhisperTranscriber';
-import { LLM_MODEL_ID } from '@/lib/transcription/lyricsAdapter';
 import type { AdaptedChunk } from '@/lib/transcription/lyricsAdapter';
 import { requestGlobalPlayerPause } from '@/lib/player/practiceSync';
 import {
@@ -128,7 +126,7 @@ function adaptationStatusColor(
  * - Real-time transcript streaming during inference
  * - Collapsible silence cut map for debugging/inspection
  * - Inline audio players for original and silence-removed vocals
- * - Lyrics Adaptation panel: per-chunk LLM alignment with per-chunk retry
+ * - Lyrics Adaptation panel: deterministic lyric correlation per chunk
  *
  * @param open — Dialog visibility
  * @param onClose — Called when user closes dialog (must not be busy)
@@ -375,14 +373,9 @@ export function TranscriptionDialog({
 
   const hasTranscriptChunks = (transcriber.output?.chunks.length ?? 0) > 0;
 
-  const isAdaptationBusy =
-    lyricsAdaptation.state.phase === 'adapting' ||
-    lyricsAdaptation.state.phase === 'loading-model';
+  const isAdaptationBusy = lyricsAdaptation.state.phase === 'adapting';
 
-  /** A retry is in progress when retryingIndex is non-null. */
-  const isRetrying = lyricsAdaptation.retryingIndex !== null;
-
-  const canClose = !canStop && !isPreparingAudio && !isRetrying;
+  const canClose = !canStop && !isPreparingAudio;
 
   // ---- Inline chunk edit state ----
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -422,7 +415,7 @@ export function TranscriptionDialog({
    * - a chunk edit is in progress.
    */
   const adaptationControlsDisabled =
-    isAdaptationBusy || isRetrying || transcriber.isBusy || isEditing;
+    isAdaptationBusy || transcriber.isBusy || isEditing;
 
   const canAdapt =
     hasTranscriptChunks &&
@@ -777,14 +770,7 @@ export function TranscriptionDialog({
                 fullWidth
                 value={lyricsAdaptation.lyrics}
                 onChange={(e) => lyricsAdaptation.setLyrics(e.target.value)}
-                // Keep the lyrics input enabled during async events; only
-                // disable it when the adaptation model is loading or an
-                // adaptation batch is actively running or when retrying.
-                disabled={
-                  lyricsAdaptation.state.phase === 'loading-model' ||
-                  lyricsAdaptation.state.phase === 'adapting' ||
-                  lyricsAdaptation.retryingIndex !== null
-                }
+                disabled={lyricsAdaptation.state.phase === 'adapting'}
                 inputProps={{
                   'aria-label': t('lyricsAdaptation.lyricsInputLabel'),
                 }}
@@ -839,22 +825,12 @@ export function TranscriptionDialog({
                     size="small"
                     variant="text"
                     onClick={lyricsAdaptation.reset}
-                    disabled={isRetrying || isEditing}
+                    disabled={isEditing}
                   >
                     {t('lyricsAdaptation.resetButton')}
                   </Button>
                 )}
               </Stack>
-
-              {/* Model loading progress */}
-              {lyricsAdaptation.state.phase === 'loading-model' && (
-                <Alert severity="info" icon={<CircularProgress size={16} />}>
-                  {t('lyricsAdaptation.loadingModel', {
-                    model: LLM_MODEL_ID,
-                    progress: lyricsAdaptation.state.progress,
-                  })}
-                </Alert>
-              )}
 
               {/* Adaptation progress */}
               {lyricsAdaptation.state.phase === 'adapting' && (
@@ -888,21 +864,6 @@ export function TranscriptionDialog({
               {/* Results */}
               {lyricsAdaptation.state.phase === 'done' && (
                 <>
-                  {lyricsAdaptation.isAutoRetrying && (
-                    <Alert
-                      severity="info"
-                      icon={<CircularProgress size={16} />}
-                    >
-                      {t('lyricsAdaptation.autoRetrying')}
-                    </Alert>
-                  )}
-                  {lyricsAdaptation.retryError && (
-                    <Alert severity="error">
-                      {t('lyricsAdaptation.adaptError', {
-                        message: lyricsAdaptation.retryError,
-                      })}
-                    </Alert>
-                  )}
                   <Box
                     sx={{
                       border: '1px solid',
@@ -916,8 +877,6 @@ export function TranscriptionDialog({
                   >
                     <List dense disablePadding>
                       {lyricsAdaptation.state.results.map((item) => {
-                        const isThisRetrying =
-                          lyricsAdaptation.retryingIndex === item.index;
                         const isThisEditing = editingIndex === item.index;
                         return (
                           <ListItem
@@ -1052,40 +1011,6 @@ export function TranscriptionDialog({
                                         </IconButton>
                                       </span>
                                     </Tooltip>
-                                    {/* Retry button */}
-                                    <Tooltip
-                                      title={t(
-                                        'lyricsAdaptation.retryChunkTooltip',
-                                      )}
-                                    >
-                                      <span>
-                                        <IconButton
-                                          size="small"
-                                          aria-label={t(
-                                            'lyricsAdaptation.retryChunkAriaLabel',
-                                          )}
-                                          disabled={adaptationControlsDisabled}
-                                          onClick={() =>
-                                            lyricsAdaptation.retryChunk(item)
-                                          }
-                                          sx={{
-                                            color: 'text.secondary',
-                                            '&:hover': {
-                                              color: 'primary.main',
-                                            },
-                                          }}
-                                        >
-                                          {isThisRetrying ? (
-                                            <CircularProgress
-                                              size={14}
-                                              color="inherit"
-                                            />
-                                          ) : (
-                                            <ReplayIcon sx={{ fontSize: 16 }} />
-                                          )}
-                                        </IconButton>
-                                      </span>
-                                    </Tooltip>
                                   </>
                                 )}
                               </Stack>
@@ -1152,20 +1077,6 @@ export function TranscriptionDialog({
                                         {item.rawText}
                                       </Typography>
                                     )}
-                                  {item.retryCount > 0 && (
-                                    <Typography
-                                      component="span"
-                                      variant="caption"
-                                      sx={{
-                                        color: 'text.disabled',
-                                        display: 'block',
-                                      }}
-                                    >
-                                      {t('lyricsAdaptation.retryCountLabel', {
-                                        count: item.retryCount,
-                                      })}
-                                    </Typography>
-                                  )}
                                 </>
                               }
                               primaryTypographyProps={{
